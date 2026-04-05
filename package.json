@@ -1,0 +1,18 @@
+{
+  "name": "svitodiy",
+  "private": true,
+  "workspaces": [
+    "telegram-bot",
+    "server"
+  ],
+  "scripts": {
+    "server": "npm run start -w server",
+    "bot": "npm run start -w telegram-bot",
+    "dev:server": "npm run dev -w server",
+    "dev:bot": "npm run dev -w telegram-bot",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f telegram-bot server",
+    "docker:redis": "docker compose up -d redis"
+  }
+}

@@ -5,6 +5,7 @@ import { Telegraf } from "telegraf";
 import { syncBotCommands } from "./botCommands.js";
 import { registerCommandHandlers } from "./handlers/commands.js";
 import { startDumosvitScheduler } from "./dumosvit/scheduler.js";
+import { startLitopysScheduler } from "./litopys/scheduler.js";
 import { connectRedis, disconnectRedis } from "./redisClient.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +26,7 @@ async function main() {
   registerCommandHandlers(bot);
 
   const stopDumosvit = startDumosvitScheduler(bot, 45_000);
+  const stopLitopys = startLitopysScheduler(bot, 30_000);
 
   await syncBotCommands(bot);
 
@@ -33,6 +35,7 @@ async function main() {
 
   const shutdown = async (signal) => {
     stopDumosvit();
+    stopLitopys();
     await bot.stop(signal);
     await disconnectRedis();
     process.exit(0);

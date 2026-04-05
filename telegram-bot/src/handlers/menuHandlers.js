@@ -17,6 +17,14 @@ import { CATCHES, getFishMeta } from "../data/fishTypes.js";
 import { getResourceMeta } from "../data/resources.js";
 import { formatBalanceHtml } from "../economy.js";
 import { MAIN_MENU_IMAGE_PATH } from "../fishing.js";
+import {
+  clearAwaitingTaskText,
+  deleteTask,
+  getTasks,
+  isAwaitingTaskText,
+  markTaskDone,
+  setAwaitingTaskText,
+} from "../litopys/store.js";
 import { formatInventoryCaption } from "../inventoryCaption.js";
 import {
   CB_ALCH_BACK_CHAS,
@@ -29,7 +37,12 @@ import {
   CB_INV_BACK_CHAS,
   CB_MENU_CHASODIY,
   CB_MENU_DUMOSVIT,
+  CB_MENU_LITOPYS,
   CB_MENU_MAIN,
+  CB_LIT_ADD,
+  CB_LIT_CANCEL,
+  CB_LIT_HOME,
+  CB_LIT_LIST,
 } from "../menuConstants.js";
 import {
   addRelicToInventory,
@@ -57,6 +70,7 @@ function mainMenuKeyboard() {
     inline_keyboard: [
       [{ text: "⚔️ Часодій · РПГ", callback_data: CB_MENU_CHASODIY }],
       [{ text: "📚 Думосвіт · іспанська", callback_data: CB_MENU_DUMOSVIT }],
+      [{ text: "📜 Літописець · планер", callback_data: CB_MENU_LITOPYS }],
     ],
   };
 }
@@ -120,7 +134,8 @@ function buildMainMenuCaption(balanceHtml, withIntro) {
     `🏠 <b>Головне меню</b>\n` +
     `На рахунку: ${balanceHtml}\n\n` +
     `⚔️ <b>Часодій</b> — невелика РПГ: рибалка, інвентар, ресурси.\n` +
-    `📚 <b>Думосвіт</b> — іспанські слова: навчання й запам’ятовування.\n\n` +
+    `📚 <b>Думосвіт</b> — іспанські слова: навчання й запам’ятовування.\n` +
+    `📜 <b>Літописець</b> — завдання та нагадування за датою.\n\n` +
     `Обери розділ 👇\n\n` +
     `<i>/menu</i> · <i>/fish</i> · <i>/inv</i>`
   );
@@ -234,6 +249,139 @@ async function tryEditDumosvitMenu(ctx) {
   }
 }
 
+const LITOPYS_MENU_TEXT =
+  "📜 <b>Літописець</b>\n\n" +
+  "Твій міні-планер: додавай завдання й <b>нагадування за датою</b>.\n\n" +
+  "Після «Нове завдання» напиши в чат одним повідомленням:\n" +
+  "• лише текст — без нагадування;\n" +
+  "• або <code>текст | 15.04.2026 18:30</code> — з нагадуванням " +
+  "(день.місяць.рік, за бажанням година).\n\n";
+
+function escapeHtmlLit(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function truncLit(s, n) {
+  const t = String(s);
+  return t.length <= n ? t : `${t.slice(0, n - 1)}…`;
+}
+
+function formatLitDate(ms) {
+  try {
+    return new Date(ms).toLocaleString("uk-UA", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return new Date(ms).toISOString();
+  }
+}
+
+async function litopysMenuKeyboard(userId) {
+  const rows = [];
+  if (userId != null && (await isAwaitingTaskText(userId))) {
+    rows.push([{ text: "❌ Скасувати введення", callback_data: CB_LIT_CANCEL }]);
+  }
+  rows.push([{ text: "➕ Нове завдання", callback_data: CB_LIT_ADD }]);
+  rows.push([{ text: "📋 Мої завдання", callback_data: CB_LIT_LIST }]);
+  rows.push([{ text: "⬅ У головне меню", callback_data: CB_MENU_MAIN }]);
+  return { inline_keyboard: rows };
+}
+
+function buildLitopysCaption(balanceHtml) {
+  return `${LITOPYS_MENU_TEXT}\n\nНа рахунку: ${balanceHtml}`;
+}
+
+async function tryEditLitopysMenu(ctx) {
+  const uid = ctx.from?.id;
+  const bal = uid != null ? await getBalance(uid) : 0;
+  const cap = buildLitopysCaption(formatBalanceHtml(bal));
+  const kb = await litopysMenuKeyboard(uid ?? 0);
+  try {
+    await editMenuBody(ctx, cap, kb);
+  } catch {
+    await ctx.reply(cap, { parse_mode: "HTML", reply_markup: kb });
+  }
+}
+
+async function buildLitopysListContent(userId) {
+  let tasks = await getTasks(userId);
+  tasks = [...tasks].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const ta = a.remindAt ?? a.createdAt;
+    const tb = b.remindAt ?? b.createdAt;
+    return ta - tb;
+  });
+  const maxShow = 8;
+  const slice = tasks.slice(0, maxShow);
+  let cap = `📋 <b>Мої завдання</b>\n\n`;
+  if (tasks.length === 0) {
+    cap += `<i>Поки порожньо — натисни «Нове завдання».</i>`;
+  } else {
+    for (const t of slice) {
+      const titleEsc = escapeHtmlLit(truncLit(t.title, 140));
+      const line = t.done ? `☑️ <s>${titleEsc}</s>` : `□ ${titleEsc}`;
+      const time =
+        t.remindAt && !t.done
+          ? `\n   <i>🔔 ${escapeHtmlLit(formatLitDate(t.remindAt))}</i>`
+          : "";
+      cap += `${line}${time}\n\n`;
+    }
+    if (tasks.length > maxShow) {
+      cap += `<i>… і ще ${tasks.length - maxShow}</i>\n\n`;
+    }
+  }
+  cap += `<i>✅ — виконано · 🗑 — видалити</i>`;
+
+  const rows = [];
+  for (const t of slice) {
+    if (t.done) {
+      rows.push([
+        { text: `🗑 ${truncLit(t.title, 28)}`, callback_data: `lx_${t.id}` },
+      ]);
+    } else {
+      rows.push([
+        { text: `✅ ${truncLit(t.title, 24)}`, callback_data: `ld_${t.id}` },
+        { text: "🗑", callback_data: `lx_${t.id}` },
+      ]);
+    }
+  }
+  rows.push([{ text: "⬅ Літописець", callback_data: CB_LIT_HOME }]);
+  return { cap, kb: { inline_keyboard: rows } };
+}
+
+async function showLitopysTaskList(ctx) {
+  const uid = ctx.from?.id;
+  if (uid == null) return;
+  const { cap, kb } = await buildLitopysListContent(uid);
+  const msg = ctx.callbackQuery?.message;
+  try {
+    if (msg && "photo" in msg) {
+      await ctx.editMessageCaption(cap, { parse_mode: "HTML", reply_markup: kb });
+    } else if (msg && "text" in msg) {
+      await ctx.editMessageText(cap, { parse_mode: "HTML", reply_markup: kb });
+    } else {
+      await ctx.reply(cap, { parse_mode: "HTML", reply_markup: kb });
+    }
+  } catch {
+    await ctx.reply(cap, { parse_mode: "HTML", reply_markup: kb });
+  }
+}
+
+async function replyLitopysMenuStandalone(ctx) {
+  const uid = ctx.from?.id;
+  const bal = uid != null ? await getBalance(uid) : 0;
+  const cap = buildLitopysCaption(formatBalanceHtml(bal));
+  const kb = await litopysMenuKeyboard(uid ?? 0);
+  await ctx.reply(cap, { parse_mode: "HTML", reply_markup: kb });
+}
+
 function inventoryKeyboard(inv) {
   const rows = [];
   for (const fish of CATCHES) {
@@ -285,6 +433,8 @@ async function sendInventoryStandalone(ctx) {
 const SELL_ONE_RE = /^s1_([a-z_]+)$/;
 const COOK_ONE_RE = /^ck_([a-z_]+)$/;
 const ALCHEMY_CRAFT_RE = /^alc_([a-z_]+)$/;
+const LIT_DONE_RE = /^ld_([a-z0-9]+)$/;
+const LIT_DEL_RE = /^lx_([a-z0-9]+)$/;
 
 /**
  * @param {import("telegraf").Telegraf} bot
@@ -292,6 +442,10 @@ const ALCHEMY_CRAFT_RE = /^alc_([a-z_]+)$/;
 export function registerMenuHandlers(bot) {
   bot.command("menu", async (ctx) => {
     await replyMainMenu(ctx);
+  });
+
+  bot.command("litopys", async (ctx) => {
+    await replyLitopysMenuStandalone(ctx);
   });
 
   bot.command("inv", sendInventoryStandalone);
@@ -385,6 +539,70 @@ export function registerMenuHandlers(bot) {
   bot.action(CB_MENU_DUMOSVIT, async (ctx) => {
     await ctx.answerCbQuery();
     await tryEditDumosvitMenu(ctx);
+  });
+
+  bot.action(CB_MENU_LITOPYS, async (ctx) => {
+    await ctx.answerCbQuery();
+    await tryEditLitopysMenu(ctx);
+  });
+
+  bot.action(CB_LIT_HOME, async (ctx) => {
+    await ctx.answerCbQuery();
+    await tryEditLitopysMenu(ctx);
+  });
+
+  bot.action(CB_LIT_ADD, async (ctx) => {
+    const uid = ctx.from?.id;
+    if (uid == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+    await setAwaitingTaskText(uid);
+    await ctx.answerCbQuery({ text: "Напиши завдання в чат…" });
+    await ctx.reply(
+      "📝 <b>Нове завдання</b>\n\n" +
+        "Напиши <b>одним повідомленням</b> у відповідь:\n" +
+        "• лише текст — без нагадування;\n" +
+        "• або <code>текст | 15.04.2026 18:30</code> — з нагадуванням.\n\n" +
+        "Формат дати: <code>DD.MM.YYYY</code> або з годиною <code>DD.MM.YYYY HH:mm</code>.",
+      { parse_mode: "HTML" }
+    );
+  });
+
+  bot.action(CB_LIT_LIST, async (ctx) => {
+    await ctx.answerCbQuery();
+    await showLitopysTaskList(ctx);
+  });
+
+  bot.action(CB_LIT_CANCEL, async (ctx) => {
+    const uid = ctx.from?.id;
+    if (uid != null) await clearAwaitingTaskText(uid);
+    await ctx.answerCbQuery({ text: "Скасовано" });
+    await tryEditLitopysMenu(ctx);
+  });
+
+  bot.action(LIT_DONE_RE, async (ctx) => {
+    const taskId = ctx.match[1];
+    const uid = ctx.from?.id;
+    if (uid == null) {
+      await ctx.answerCbQuery({ text: "Помилка.", show_alert: true });
+      return;
+    }
+    const ok = await markTaskDone(uid, taskId);
+    await ctx.answerCbQuery({ text: ok ? "Виконано ✓" : "Не знайдено" });
+    if (ok) await showLitopysTaskList(ctx);
+  });
+
+  bot.action(LIT_DEL_RE, async (ctx) => {
+    const taskId = ctx.match[1];
+    const uid = ctx.from?.id;
+    if (uid == null) {
+      await ctx.answerCbQuery({ text: "Помилка.", show_alert: true });
+      return;
+    }
+    const ok = await deleteTask(uid, taskId);
+    await ctx.answerCbQuery({ text: ok ? "Видалено" : "Не знайдено" });
+    if (ok) await showLitopysTaskList(ctx);
   });
 
   bot.action(CB_DUMOSVIT_ENABLE, async (ctx) => {

@@ -1,3 +1,4 @@
+import { getFishSellPrice } from "./data/fishTypes.js";
 import { getRedis } from "./redisClient.js";
 
 const PREFIX = "svitodiy";
@@ -9,6 +10,102 @@ function userKey(telegramUserId) {
 
 function panelKey(chatId, messageId) {
   return `${PREFIX}:panel:${chatId}:${messageId}`;
+}
+
+function inventoryKey(telegramUserId) {
+  return `${PREFIX}:inv:${telegramUserId}`;
+}
+
+/**
+ * Додає рибу в інвентар. Повертає нову кількість цієї позиції.
+ * @param {string} fishId — id з fishing.js (trout, carp, …)
+ */
+export async function addFishToInventory(telegramUserId, fishId, amount = 1) {
+  return getRedis().hIncrBy(inventoryKey(telegramUserId), fishId, amount);
+}
+
+/** Ресурси (гілка, камінь, мушля…) — той самий hash інвентаря. */
+export async function addResourceToInventory(telegramUserId, resourceId, amount = 1) {
+  return getRedis().hIncrBy(inventoryKey(telegramUserId), resourceId, amount);
+}
+
+/** Реліквія — ключ у hash = id реліквії (наприклад relic_ring_wanderer). */
+export async function addRelicToInventory(telegramUserId, relicId, amount = 1) {
+  return getRedis().hIncrBy(inventoryKey(telegramUserId), relicId, amount);
+}
+
+/**
+ * Списати ресурси (алхімія). Повертає false, якщо чогось не вистачає.
+ * @param {Record<string, number>} costs
+ */
+export async function consumeResources(telegramUserId, costs) {
+  const invKey = inventoryKey(telegramUserId);
+  const inv = await getInventory(telegramUserId);
+  for (const [id, need] of Object.entries(costs)) {
+    if ((inv[id] ?? 0) < need) return false;
+  }
+  const r = getRedis();
+  for (const [id, need] of Object.entries(costs)) {
+    const left = await r.hIncrBy(invKey, id, -need);
+    if (left <= 0) await r.hDel(invKey, id);
+  }
+  return true;
+}
+
+/**
+ * Забрати рибу з інвентаря (наприклад після «Приготувати»).
+ * @returns {Promise<boolean>}
+ */
+export async function removeFishFromInventory(telegramUserId, fishId, count = 1) {
+  if (count < 1) return false;
+  const invKey = inventoryKey(telegramUserId);
+  const r = getRedis();
+  const have = Number((await r.hGet(invKey, fishId)) ?? 0);
+  if (have < count) return false;
+  const left = await r.hIncrBy(invKey, fishId, -count);
+  if (left <= 0) await r.hDel(invKey, fishId);
+  return true;
+}
+
+/** @returns {Promise<Record<string, number>>} */
+export async function getInventory(telegramUserId) {
+  const h = await getRedis().hGetAll(inventoryKey(telegramUserId));
+  const out = {};
+  for (const [k, v] of Object.entries(h)) {
+    out[k] = Number(v);
+  }
+  return out;
+}
+
+export async function getBalance(telegramUserId) {
+  const raw = await getRedis().hGet(userKey(telegramUserId), "balance");
+  return Math.max(0, Number(raw ?? 0));
+}
+
+export async function addBalance(telegramUserId, delta) {
+  const n = await getRedis().hIncrBy(userKey(telegramUserId), "balance", delta);
+  return Math.max(0, n);
+}
+
+/**
+ * Продати рибу (кількість штук). Повертає баланс після угоди або null, якщо не вдалося.
+ */
+export async function sellFishUnits(telegramUserId, fishId, count) {
+  if (count < 1) return null;
+  const invKey = inventoryKey(telegramUserId);
+  const r = getRedis();
+  const have = Number((await r.hGet(invKey, fishId)) ?? 0);
+  if (have < count) return null;
+
+  const unit = getFishSellPrice(fishId);
+  const earned = unit * count;
+
+  const left = await r.hIncrBy(invKey, fishId, -count);
+  if (left <= 0) {
+    await r.hDel(invKey, fishId);
+  }
+  await addBalance(telegramUserId, earned);
+  return { earned, balance: await getBalance(telegramUserId), sold: count };
 }
 
 /**
@@ -30,14 +127,17 @@ export async function getPanelOwner(chatId, messageId) {
 }
 
 /**
- * Після закиду оновлюємо лічильники лише для цього telegram user id.
+ * Після закиду: kind = fish | resource | miss
  */
-export async function recordFishingCast(telegramUserId, caught) {
+export async function recordFishingCast(telegramUserId, kind) {
   const key = userKey(telegramUserId);
   const r = getRedis();
   const p = r.multi();
   p.hIncrBy(key, "casts", 1);
-  p.hIncrBy(key, caught ? "catches" : "misses", 1);
+  if (kind === "fish") p.hIncrBy(key, "catches", 1);
+  else if (kind === "miss") p.hIncrBy(key, "misses", 1);
+  else if (kind === "resource") p.hIncrBy(key, "resourceFinds", 1);
+  else if (kind === "relic") p.hIncrBy(key, "relicFinds", 1);
   p.hSet(key, "updatedAt", new Date().toISOString());
   await p.exec();
 }
@@ -59,9 +159,13 @@ export async function getUserStats(telegramUserId) {
     casts: Number(h.casts ?? 0),
     catches: Number(h.catches ?? 0),
     misses: Number(h.misses ?? 0),
+    resourceFinds: Number(h.resourceFinds ?? 0),
+    relicFinds: Number(h.relicFinds ?? 0),
   };
 }
 
 export function formatStatsLine(stats) {
-  return `📊 Твоя статистика: закидів ${stats.casts} · уловів ${stats.catches} · порожніх ${stats.misses}`;
+  return (
+    `📊 Закидів: ${stats.casts} · 🐟 риба: ${stats.catches} · 📦 ресурси: ${stats.resourceFinds} · 🏺 реліквії: ${stats.relicFinds} · порожньо: ${stats.misses}`
+  );
 }

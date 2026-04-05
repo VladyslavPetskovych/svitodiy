@@ -1,50 +1,38 @@
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  CATCHES,
+  getFishMeta,
+  getFishSellPrice,
+} from "./data/fishTypes.js";
+import { FISHING_CHANCES } from "./data/fishingChances.js";
+import { pickRandomFishingResource } from "./data/resources.js";
+import { pickRandomFishingRelic } from "./data/relics.js";
+import {
+  CB_FISH_PANEL_BACK,
+  CB_FISH_PANEL_INV,
+} from "./menuConstants.js";
+
+export { CATCHES, getFishMeta, getFishSellPrice };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Локальні зображення в `telegram-bot/assets/` */
 export const FISHING_SCENE_PATH = path.join(__dirname, "../assets/fishing-scene.png");
 export const FISH_CATCH_PATH = path.join(__dirname, "../assets/fish-catch.png");
+export const MAIN_MENU_IMAGE_PATH = path.join(__dirname, "../assets/menu-main.png");
 
 export const FISHING_PANEL_CAPTION =
-  "🎣 Тиха вода… Натисни кнопку, щоб закинути вудку — без команди /fish.";
+  "🎣 <b>Риболовля</b>\n\n" +
+  "🌊 Закинь вудку: можлива <b>риба</b>, <b>ресурси</b> з води (гілка, камінь, мушля), рідко — <b>🏺 реліквія</b>.\n\n" +
+  "⬅️ <b>Назад</b> — у головне меню.\n" +
+  "🎒 <b>Інвентар</b> — риба, ресурси, реліквії.";
 
-const CATCH_CHANCE = 0.52;
-
-const CATCHES = [
-  {
-    emoji: "🐟",
-    name: "Форель струмкова",
-    size: "32 см",
-    flavor: "Сріблястий блиск — наче монета з води.",
-  },
-  {
-    emoji: "🐠",
-    name: "Короп-втікач",
-    size: "48 см",
-    flavor: "Тягнув як підводний трактор.",
-  },
-  {
-    emoji: "🐡",
-    name: "Окунь з характером",
-    size: "24 см",
-    flavor: "Майже зірвав вудку — поважай його.",
-  },
-  {
-    emoji: "🦈",
-    name: "Щука «Суддя»",
-    size: "61 см",
-    flavor: "Зуби як у юриста — відпустив би, але вже пізно.",
-  },
-  {
-    emoji: "✨",
-    name: "Золотий карась (легендарний)",
-    size: "29 см",
-    flavor: "Рідкість! Сьогодні фортуна на твоєму боці.",
-    weight: 3,
-  },
-];
+export function resolveCatchImagePath(fishId) {
+  const specific = path.join(__dirname, `../assets/fish-${fishId}.png`);
+  if (fs.existsSync(specific)) return specific;
+  return FISH_CATCH_PATH;
+}
 
 const MISS_LINES = [
   "🌊 Тільки водорості й тиша. Риба сьогодні на нараді.",
@@ -74,32 +62,69 @@ export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Пауза перед результатом закиду (напруга). */
 export function tensionDelayMs() {
   return 900 + Math.floor(Math.random() * 1400);
 }
 
 export const FISH_CAST_CALLBACK = "fish_cast";
 
-export function fishCastKeyboard() {
+export function fishPanelKeyboard() {
   return {
     inline_keyboard: [
       [{ text: "🎣 Закинути вудку", callback_data: FISH_CAST_CALLBACK }],
+      [
+        { text: "⬅️ Назад у меню", callback_data: CB_FISH_PANEL_BACK },
+        { text: "🎒 Інвентар", callback_data: CB_FISH_PANEL_INV },
+      ],
     ],
   };
 }
 
+export function fishResultDoneKeyboard(panelChatId, panelMessageId) {
+  const data = `fok_${panelChatId}_${panelMessageId}`;
+  if (Buffer.byteLength(data, "utf8") > 64) {
+    throw new Error("fish_ok: callback_data перевищує ліміт Telegram (64 байт)");
+  }
+  return {
+    inline_keyboard: [[{ text: "✓ Окей", callback_data: data }]],
+  };
+}
+
+export const FISH_RESULT_OK_RE = /^fok_(-?\d+)_(\d+)$/;
+
 /**
- * Один «закид»: шанс клювання + вибір риби або текст промаху.
- * @returns {{ caught: true, fish: object } | { caught: false, missLine: string }}
+ * @returns {{ kind: "relic", relic: object } | { kind: "resource", resource: object } | { kind: "fish", fish: object } | { kind: "miss", missLine: string }}
  */
 export function rollCastOutcome() {
-  if (Math.random() < CATCH_CHANCE) {
-    return { caught: true, fish: pickCatch() };
+  const { relic, resource, fish, miss } = FISHING_CHANCES;
+  const r = Math.random();
+  if (r < relic) {
+    return { kind: "relic", relic: pickRandomFishingRelic() };
   }
-  return { caught: false, missLine: pickMiss() };
+  if (r < relic + resource) {
+    return { kind: "resource", resource: pickRandomFishingResource() };
+  }
+  if (r < relic + resource + fish) {
+    return { kind: "fish", fish: pickCatch() };
+  }
+  if (Math.abs(relic + resource + fish + miss - 1) > 0.001) {
+    console.warn(
+      "[fishing] FISHING_CHANCES у data/fishingChances.js мають давати суму 1.0, зараз:",
+      relic + resource + fish + miss
+    );
+  }
+  return { kind: "miss", missLine: pickMiss() };
 }
 
 export function formatCatchCaption(fish) {
   return `${fish.emoji} <b>Улов!</b>\n\n${fish.name}\n📏 ~${fish.size}\n<i>${fish.flavor}</i>`;
+}
+
+export function formatRelicCatchCaption(relic, total) {
+  return (
+    `🏺 <b>Реліквія!</b>\n\n` +
+    `${relic.emoji} <b>${relic.name}</b>\n` +
+    `<i>Рідкісна знахідка з глибин.</i>\n\n` +
+    `🎒 У колекції ця реліквія: <b>×${total}</b>`
+  );
 }

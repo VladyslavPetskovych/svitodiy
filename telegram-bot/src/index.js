@@ -2,7 +2,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { Telegraf } from "telegraf";
+import { syncBotCommands } from "./botCommands.js";
 import { registerCommandHandlers } from "./handlers/commands.js";
+import { startDumosvitScheduler } from "./dumosvit/scheduler.js";
 import { connectRedis, disconnectRedis } from "./redisClient.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -10,10 +12,6 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 dotenv.config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const serverUrl = (process.env.SERVER_URL || "http://localhost:3000").replace(
-  /\/$/,
-  ""
-);
 
 if (!token) {
   console.error("Missing TELEGRAM_BOT_TOKEN in .env");
@@ -24,12 +22,17 @@ async function main() {
   await connectRedis();
 
   const bot = new Telegraf(token);
-  registerCommandHandlers(bot, { serverUrl });
+  registerCommandHandlers(bot);
+
+  const stopDumosvit = startDumosvitScheduler(bot, 45_000);
+
+  await syncBotCommands(bot);
 
   await bot.launch();
   console.log("[telegram-bot] polling…");
 
   const shutdown = async (signal) => {
+    stopDumosvit();
     await bot.stop(signal);
     await disconnectRedis();
     process.exit(0);

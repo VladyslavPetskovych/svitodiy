@@ -13,6 +13,7 @@ export const RESOURCE_TYPES = [
   { id: "glass_shard", emoji: "🔷", name: "Уламок скла" },
   { id: "metal_scrap", emoji: "⚙️", name: "Металевий брухт" },
   { id: "fish_bone", emoji: "🦴", name: "Риб'яча кістка" },
+  { id: "silver_piece", emoji: "🤍", name: "Кусочок срібла" },
 ];
 
 /** Що може «висмоктати» вудка замість риби (простий дроп) */

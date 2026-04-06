@@ -48,6 +48,34 @@ export const CATCHES = [
     sellPrice: 8,
     weight: 3,
   },
+  {
+    id: "river_bream",
+    emoji: "🐟",
+    name: "Лящ сріблястий",
+    size: "38 см",
+    flavor: "Класика річки — плоский, ситний, незворушний.",
+    sellPrice: 2,
+    weight: 1,
+  },
+  {
+    id: "whisker_cat",
+    emoji: "🐡",
+    name: "Сомик-вусань",
+    size: "44 см",
+    flavor: "Тихий плавець з довгими вусами — витягнув із тіні корчів.",
+    sellPrice: 4,
+    weight: 0.75,
+  },
+  {
+    id: "moon_carp",
+    emoji: "🌙",
+    name: "Місячний короп",
+    size: "71 см",
+    flavor:
+      "Легенда води: світиться м’яким сяйвом — такого бачать раз на життя.",
+    sellPrice: 45,
+    weight: 0.035,
+  },
 ];
 
 const FISH_BY_ID = new Map(CATCHES.map((f) => [f.id, f]));

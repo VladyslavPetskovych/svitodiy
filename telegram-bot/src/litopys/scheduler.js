@@ -1,4 +1,5 @@
 import {
+  bumpReminderScore,
   dueReminderMembers,
   getTask,
   popReminderMember,
@@ -17,15 +18,17 @@ function formatReminderCaption(task) {
   return (
     `🔔 <b>Літописець</b> — нагадування\n\n` +
     `${escapeHtml(task.title)}\n\n` +
-    `<i>Можеш позначити виконаним у розділі «Мої завдання».</i>`
+    `<i>Відкрий «Мої завдання», щоб позначити виконаним.</i>`
   );
 }
+
+const RETRY_MS = 90_000;
 
 /**
  * @param {import("telegraf").Telegraf} bot
  * @param {number} intervalMs
  */
-export function startLitopysScheduler(bot, intervalMs = 30_000) {
+export function startLitopysScheduler(bot, intervalMs = 15_000) {
   let busy = false;
 
   const tick = async () => {
@@ -47,9 +50,12 @@ export function startLitopysScheduler(bot, intervalMs = 30_000) {
           sent = true;
         } catch (err) {
           console.warn("[litopys] remind failed", userId, err.message);
+          await bumpReminderScore(userId, taskId, Date.now() + RETRY_MS);
         }
-        await popReminderMember(userId, taskId);
-        if (sent) await stripRemindAt(userId, taskId);
+        if (sent) {
+          await popReminderMember(userId, taskId);
+          await stripRemindAt(userId, taskId);
+        }
       }
     } catch (e) {
       console.error("[litopys tick]", e);

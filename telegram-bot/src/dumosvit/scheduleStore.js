@@ -1,16 +1,14 @@
 import { getRedis } from "../redisClient.js";
+import {
+  getDumosvitIntensity,
+  randomDumosvitDelayMs,
+} from "./intensity.js";
 
 const ZKEY = "svitodiy:dumosvit:schedule";
 
-/** 30 хв … 2 год (мс), випадково між нагадуваннями */
-export function randomDumosvitDelayMs() {
-  const min = 30 * 60 * 1000;
-  const max = 2 * 60 * 60 * 1000;
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
-
 export async function dumosvitScheduleNext(chatId) {
-  const at = Date.now() + randomDumosvitDelayMs();
+  const level = await getDumosvitIntensity(chatId);
+  const at = Date.now() + randomDumosvitDelayMs(level);
   await getRedis().zAdd(ZKEY, { score: at, value: String(chatId) });
 }
 

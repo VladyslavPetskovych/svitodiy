@@ -150,6 +150,44 @@ export async function touchUser(telegramUserId) {
   await getRedis().hSetNX(key, "firstSeenAt", new Date().toISOString());
 }
 
+const FIELD_EQUIPPED_HOOK = "equippedHook";
+const FIELD_EQUIPPED_TALISMAN = "equippedTalisman";
+
+/** Активний гачок для рибалки: id реліквії або null. */
+export async function getEquippedHook(telegramUserId) {
+  const v = await getRedis().hGet(userKey(telegramUserId), FIELD_EQUIPPED_HOOK);
+  if (v == null || v === "") return null;
+  return String(v);
+}
+
+/** @param {string | null} relicId — relic_hook_silver / relic_hook_gold або null (зняти) */
+export async function setEquippedHook(telegramUserId, relicId) {
+  const key = userKey(telegramUserId);
+  if (relicId == null || relicId === "") {
+    await getRedis().hDel(key, FIELD_EQUIPPED_HOOK);
+  } else {
+    await getRedis().hSet(key, FIELD_EQUIPPED_HOOK, relicId);
+  }
+}
+
+/** Талісман (перламутр / амулет) — окремо від гачка. */
+export async function getEquippedTalisman(telegramUserId) {
+  const v = await getRedis().hGet(userKey(telegramUserId), FIELD_EQUIPPED_TALISMAN);
+  if (v == null || v === "") return null;
+  return String(v);
+}
+
+/** @param {string | null} relicId — relic_pearl_talisman / relic_angler_charm або null */
+export async function setEquippedTalisman(telegramUserId, relicId) {
+  const key = userKey(telegramUserId);
+  if (relicId == null || relicId === "") {
+    await getRedis().hDel(key, FIELD_EQUIPPED_TALISMAN);
+  } else {
+    await getRedis().hSet(key, FIELD_EQUIPPED_TALISMAN, relicId);
+  }
+}
+
+
 /**
  * @returns {Promise<{ casts: number, catches: number, misses: number }>}
  */

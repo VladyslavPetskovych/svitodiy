@@ -1,11 +1,19 @@
 import { Input } from "telegraf";
 import {
+  CB_DV_INT_1,
+  CB_DV_INT_2,
+  CB_DV_INT_3,
   CB_DUMOSVIT_DISABLE,
   CB_DUMOSVIT_ENABLE,
   CB_DUMOSVIT_NOW,
   CB_DUMOSVIT_OK,
 } from "../dumosvit/constants.js";
-import { formatDumosvitCaption, pickDumosvitWord } from "../dumosvit/pickWord.js";
+import {
+  getDumosvitIntensity,
+  intensityLabel,
+  setDumosvitIntensity,
+} from "../dumosvit/intensity.js";
+import { deliverDumosvitToChat } from "../dumosvit/scheduler.js";
 import {
   dumosvitIsScheduled,
   dumosvitScheduleNext,
@@ -14,6 +22,7 @@ import {
 import { ALCHEMY_RECIPES, canCraft, getAlchemyRecipe } from "../data/alchemy.js";
 import { rollCookDrops } from "../data/cookDrops.js";
 import { CATCHES, getFishMeta } from "../data/fishTypes.js";
+import { getRelicMeta } from "../data/relics.js";
 import { getResourceMeta } from "../data/resources.js";
 import { formatBalanceHtml } from "../economy.js";
 import { MAIN_MENU_IMAGE_PATH } from "../fishing.js";
@@ -61,9 +70,9 @@ const MAIN_MENU_INTRO =
 
 const DUMOSVIT_MENU_TEXT =
   "📖 <b>Думосвіт</b>\n\n" +
-  "Іспанська: <b>слова</b>, <b>сталі фрази й речення</b>, іноді — короткі <b>факти й граматика</b>. " +
-  "Увімкни нагадування — картка приходитиме кожні <b>30 хв — 2 год</b> (випадково). " +
-  "Після перегляду натискай <b>Окей</b>, щоб прибрати її з чату.";
+  "Іспанська: <b>слова</b>, <b>фрази</b>, <b>тести</b> (обери переклад), іноді — <b>факти й граматика</b>. " +
+  "Нагадування: обери інтенсивність нижче, потім увімкни таймер. " +
+  "Після картки з відповіддю натисни <b>Окей</b>, щоб прибрати її з чату.";
 
 function mainMenuKeyboard() {
   return {
@@ -103,7 +112,22 @@ function alchemyMenuKeyboard(inv) {
 
 async function dumosvitMenuKeyboard(chatId) {
   const on = await dumosvitIsScheduled(chatId);
+  const int = await getDumosvitIntensity(chatId);
   const rows = [];
+  rows.push([
+    {
+      text: int === 1 ? "✅ 🐢 Рідко" : "🐢 Рідко",
+      callback_data: CB_DV_INT_1,
+    },
+    {
+      text: int === 2 ? "✅ 🐇 Норма" : "🐇 Норма",
+      callback_data: CB_DV_INT_2,
+    },
+    {
+      text: int === 3 ? "✅ ⚡ Часто" : "⚡ Часто",
+      callback_data: CB_DV_INT_3,
+    },
+  ]);
   if (on) {
     rows.push([
       { text: "⏹ Вимкнути нагадування", callback_data: CB_DUMOSVIT_DISABLE },
@@ -111,20 +135,14 @@ async function dumosvitMenuKeyboard(chatId) {
   } else {
     rows.push([
       {
-        text: "▶ Увімкнути (30 хв — 2 год)",
+        text: "▶ Увімкнути нагадування",
         callback_data: CB_DUMOSVIT_ENABLE,
       },
     ]);
   }
-  rows.push([{ text: "📩 Слово зараз", callback_data: CB_DUMOSVIT_NOW }]);
+  rows.push([{ text: "📩 Картка зараз", callback_data: CB_DUMOSVIT_NOW }]);
   rows.push([{ text: "⬅ У головне меню", callback_data: CB_MENU_MAIN }]);
   return { inline_keyboard: rows };
-}
-
-function okKeyboard() {
-  return {
-    inline_keyboard: [[{ text: "✓ Окей", callback_data: CB_DUMOSVIT_OK }]],
-  };
 }
 
 function buildMainMenuCaption(balanceHtml, withIntro) {
@@ -199,7 +217,7 @@ async function tryEditChasodiyMenu(ctx) {
     `На рахунку: ${formatBalanceHtml(bal)}\n\n` +
     `🎣 <b>Риболовля</b> — риба, ресурси, рідкі реліквії.\n` +
     `🎒 <b>Інвентар</b> — продаж риби, готування → ресурси.\n` +
-    `🔮 <b>Алхімія</b> — з ресурсів створюєш реліквії.`;
+    `🔮 <b>Алхімія</b> — з ресурсів створюєш реліквії, ресурси й гачки для рибалки.`;
   try {
     await editMenuBody(ctx, cap, chasodiyMenuKeyboard());
   } catch {
@@ -214,9 +232,20 @@ async function tryEditAlchemyMenu(ctx) {
   const uid = ctx.from?.id;
   if (uid == null) return;
   const inv = await getInventory(uid);
-  let cap = `🔮 <b>Алхімія</b>\n\nВитрачаєш ресурси з розділу <b>📦 Ресурси</b> і отримуєш <b>🏺 реліквії</b>.\n\n`;
+  let cap =
+    `🔮 <b>Алхімія</b>\n\n` +
+    `Витрачаєш ресурси з <b>📦 Ресурси</b> і отримуєш <b>🏺 реліквії</b> або <b>📦 нові ресурси</b> ` +
+    `(наприклад кусочок срібла для гачків).\n\n`;
   for (const rec of ALCHEMY_RECIPES) {
-    cap += `${rec.emoji} <b>${rec.name}</b>\n`;
+    let out = "";
+    if (rec.relicId) {
+      const rm = getRelicMeta(rec.relicId);
+      out = rm ? ` → 🏺 ${rm.emoji} ${rm.name}` : " → 🏺 реліквія";
+    } else if (rec.resourceId) {
+      const rm = getResourceMeta(rec.resourceId);
+      out = rm ? ` → 📦 ${rm.emoji} ${rm.name}` : " → 📦 ресурс";
+    }
+    cap += `${rec.emoji} <b>${rec.name}</b>${out}\n`;
     for (const [rid, need] of Object.entries(rec.consumes)) {
       const m = getResourceMeta(rid);
       const label = m ? `${m.emoji} ${m.name}` : rid;
@@ -240,7 +269,11 @@ async function tryEditDumosvitMenu(ctx) {
   if (chatId == null) return;
   const uid = ctx.from?.id;
   const bal = uid != null ? await getBalance(uid) : 0;
-  const text = `${DUMOSVIT_MENU_TEXT}\n\nНа рахунку: ${formatBalanceHtml(bal)}`;
+  const int = await getDumosvitIntensity(chatId);
+  const text =
+    `${DUMOSVIT_MENU_TEXT}\n\n` +
+    `<b>Частота нагадувань:</b> ${intensityLabel(int)}\n\n` +
+    `На рахунку: ${formatBalanceHtml(bal)}`;
   const kb = await dumosvitMenuKeyboard(chatId);
   try {
     await editMenuBody(ctx, text, kb);
@@ -605,6 +638,39 @@ export function registerMenuHandlers(bot) {
     if (ok) await showLitopysTaskList(ctx);
   });
 
+  bot.action(CB_DV_INT_1, async (ctx) => {
+    const chatId = ctx.chat?.id;
+    if (chatId == null) {
+      await ctx.answerCbQuery({ text: "Немає чату.", show_alert: true });
+      return;
+    }
+    await setDumosvitIntensity(chatId, 1);
+    await ctx.answerCbQuery({ text: "🐢 Рідко" });
+    await tryEditDumosvitMenu(ctx);
+  });
+
+  bot.action(CB_DV_INT_2, async (ctx) => {
+    const chatId = ctx.chat?.id;
+    if (chatId == null) {
+      await ctx.answerCbQuery({ text: "Немає чату.", show_alert: true });
+      return;
+    }
+    await setDumosvitIntensity(chatId, 2);
+    await ctx.answerCbQuery({ text: "🐇 Норма" });
+    await tryEditDumosvitMenu(ctx);
+  });
+
+  bot.action(CB_DV_INT_3, async (ctx) => {
+    const chatId = ctx.chat?.id;
+    if (chatId == null) {
+      await ctx.answerCbQuery({ text: "Немає чату.", show_alert: true });
+      return;
+    }
+    await setDumosvitIntensity(chatId, 3);
+    await ctx.answerCbQuery({ text: "⚡ Часто" });
+    await tryEditDumosvitMenu(ctx);
+  });
+
   bot.action(CB_DUMOSVIT_ENABLE, async (ctx) => {
     const chatId = ctx.chat?.id;
     if (chatId == null) {
@@ -635,11 +701,7 @@ export function registerMenuHandlers(bot) {
       return;
     }
     await ctx.answerCbQuery({ text: "Надсилаю…" });
-    const word = await pickDumosvitWord(userId);
-    await ctx.reply(formatDumosvitCaption(word), {
-      parse_mode: "HTML",
-      reply_markup: okKeyboard(),
-    });
+    await deliverDumosvitToChat(ctx.telegram, chatId);
   });
 
   bot.action(CB_DUMOSVIT_OK, async (ctx) => {
@@ -723,8 +785,20 @@ export function registerMenuHandlers(bot) {
       await ctx.answerCbQuery({ text: "Не вистачає ресурсів.", show_alert: true });
       return;
     }
-    await addRelicToInventory(userId, recipe.relicId, 1);
-    await ctx.answerCbQuery({ text: `🏺 ${recipe.name} готово!` });
+    if (recipe.relicId && recipe.resourceId) {
+      await ctx.answerCbQuery({ text: "Помилка рецепта.", show_alert: true });
+      return;
+    }
+    if (recipe.relicId) {
+      await addRelicToInventory(userId, recipe.relicId, 1);
+      await ctx.answerCbQuery({ text: `🏺 ${recipe.name} готово!` });
+    } else if (recipe.resourceId) {
+      await addResourceToInventory(userId, recipe.resourceId, 1);
+      await ctx.answerCbQuery({ text: `📦 ${recipe.name} готово!` });
+    } else {
+      await ctx.answerCbQuery({ text: "Невідомий вихід рецепта.", show_alert: true });
+      return;
+    }
     try {
       await tryEditAlchemyMenu(ctx);
     } catch {

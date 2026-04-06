@@ -26,7 +26,7 @@ async function main() {
   registerCommandHandlers(bot);
 
   const stopDumosvit = startDumosvitScheduler(bot, 45_000);
-  const stopLitopys = startLitopysScheduler(bot, 30_000);
+  const stopLitopys = startLitopysScheduler(bot, 15_000);
 
   await syncBotCommands(bot);
 

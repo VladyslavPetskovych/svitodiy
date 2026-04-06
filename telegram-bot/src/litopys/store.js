@@ -129,6 +129,14 @@ export async function popReminderMember(userId, taskId) {
   await getRedis().zRem(Z_REMIND, memberId(userId, taskId));
 }
 
+/** Перенести нагадування (наприклад після невдалої відправки). */
+export async function bumpReminderScore(userId, taskId, atMs) {
+  await getRedis().zAdd(Z_REMIND, {
+    score: atMs,
+    value: memberId(userId, taskId),
+  });
+}
+
 /** Після відправленого нагадування прибираємо дату з картки завдання. */
 export async function stripRemindAt(userId, taskId) {
   const tasks = await getTasks(userId);

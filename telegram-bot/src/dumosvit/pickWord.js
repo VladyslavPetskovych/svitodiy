@@ -1,4 +1,5 @@
 import { getRedis } from "../redisClient.js";
+import { buildQuiz, DUMOSVIT_QUIZ_CHANCE } from "./quiz.js";
 import { DUMOSVIT_TIPS } from "./tips.js";
 import { DUMOSVIT_VOCAB } from "./words.js";
 
@@ -48,6 +49,19 @@ export async function pickDumosvitWord(telegramUserId) {
 
   await redis.setEx(LAST_KEY(telegramUserId), 86400 * 30, String(idx));
   return DUMOSVIT_ENTRIES[idx];
+}
+
+/**
+ * Картка (слово/фраза/підказка) або тест з варіантами перекладу.
+ * @param {number} telegramUserId
+ */
+export async function pickDumosvitDelivery(telegramUserId) {
+  if (Math.random() < DUMOSVIT_QUIZ_CHANCE) {
+    const q = await buildQuiz(telegramUserId);
+    if (q) return { kind: "quiz", ...q };
+  }
+  const entry = await pickDumosvitWord(telegramUserId);
+  return { kind: "card", entry };
 }
 
 export function formatDumosvitCaption(entry) {

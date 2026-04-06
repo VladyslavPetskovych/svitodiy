@@ -1,11 +1,17 @@
 import { Input } from "telegraf";
 import {
+  buildFishPanelKeyboard,
   FISH_CAST_CALLBACK,
-  FISHING_PANEL_CAPTION,
   FISHING_SCENE_PATH,
-  FISH_RESULT_OK_RE,
-  fishPanelKeyboard,
+  FH_EQUIP_GOLD,
+  FH_EQUIP_NONE,
+  FH_EQUIP_SILVER,
+  FT_EQUIP_ANGLER,
+  FT_EQUIP_PEARL,
+  FT_TAL_NONE,
   fishResultDoneKeyboard,
+  FISH_RESULT_OK_RE,
+  formatFishingPanelCaption,
   formatCatchCaption,
   formatRelicCatchCaption,
   resolveCatchImagePath,
@@ -19,9 +25,14 @@ import {
   addRelicToInventory,
   addResourceToInventory,
   formatStatsLine,
+  getEquippedHook,
+  getEquippedTalisman,
+  getInventory,
   getPanelOwner,
   getUserStats,
   recordFishingCast,
+  setEquippedHook,
+  setEquippedTalisman,
   setPanelOwner,
 } from "../userStore.js";
 
@@ -41,10 +52,16 @@ export async function sendFishingPanel(ctx) {
     return;
   }
 
+  const cap = formatFishingPanelCaption(
+    await getEquippedHook(userId),
+    await getEquippedTalisman(userId)
+  );
+  const kb = await buildFishPanelKeyboard(userId);
+
   const sent = await ctx.replyWithPhoto(Input.fromLocalFile(FISHING_SCENE_PATH), {
-    caption: FISHING_PANEL_CAPTION,
+    caption: cap,
     parse_mode: "HTML",
-    reply_markup: fishPanelKeyboard(),
+    reply_markup: kb,
   });
 
   if (sent && "message_id" in sent && "chat" in sent) {
@@ -62,7 +79,7 @@ async function runCastAndFollowUp(ctx, telegramUserId, panel) {
 
   await sleep(tensionDelayMs());
 
-  const outcome = rollCastOutcome();
+  const outcome = await rollCastOutcome(telegramUserId);
   await recordFishingCast(telegramUserId, outcome.kind);
   const stats = await getUserStats(telegramUserId);
   const statsLine = formatStatsLine(stats);
@@ -112,6 +129,112 @@ async function runCastAndFollowUp(ctx, telegramUserId, panel) {
 }
 
 /**
+ * @param {import("telegraf").Context} ctx
+ * @param {string | null} relicId
+ */
+async function handleHookEquip(ctx, relicId) {
+  const userId = requireFromUser(ctx);
+  if (userId == null) {
+    await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+    return false;
+  }
+
+  const msg = ctx.callbackQuery?.message;
+  if (!msg || !("photo" in msg)) {
+    await ctx.answerCbQuery({ text: "Некоректне повідомлення.", show_alert: true });
+    return false;
+  }
+
+  const owner = await getPanelOwner(msg.chat.id, msg.message_id);
+  if (owner != null && owner !== userId) {
+    await ctx.answerCbQuery({
+      text: "Це панель іншого користувача.",
+      show_alert: true,
+    });
+    return false;
+  }
+
+  if (relicId != null) {
+    const inv = await getInventory(userId);
+    if ((inv[relicId] ?? 0) < 1) {
+      await ctx.answerCbQuery({ text: "Немає цього гачка в інвентарі.", show_alert: true });
+      return false;
+    }
+  }
+
+  await setEquippedHook(userId, relicId);
+  await ctx.answerCbQuery({
+    text: relicId == null ? "Без гачка" : "Гачок обрано",
+  });
+
+  try {
+    await ctx.editMessageCaption(
+      formatFishingPanelCaption(await getEquippedHook(userId), await getEquippedTalisman(userId)),
+      {
+        parse_mode: "HTML",
+        reply_markup: await buildFishPanelKeyboard(userId),
+      }
+    );
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/**
+ * @param {import("telegraf").Context} ctx
+ * @param {string | null} relicId relic_pearl_talisman | relic_angler_charm | null
+ */
+async function handleTalismanEquip(ctx, relicId) {
+  const userId = requireFromUser(ctx);
+  if (userId == null) {
+    await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+    return false;
+  }
+
+  const msg = ctx.callbackQuery?.message;
+  if (!msg || !("photo" in msg)) {
+    await ctx.answerCbQuery({ text: "Некоректне повідомлення.", show_alert: true });
+    return false;
+  }
+
+  const owner = await getPanelOwner(msg.chat.id, msg.message_id);
+  if (owner != null && owner !== userId) {
+    await ctx.answerCbQuery({
+      text: "Це панель іншого користувача.",
+      show_alert: true,
+    });
+    return false;
+  }
+
+  if (relicId != null) {
+    const inv = await getInventory(userId);
+    if ((inv[relicId] ?? 0) < 1) {
+      await ctx.answerCbQuery({ text: "Немає цього талісмана в інвентарі.", show_alert: true });
+      return false;
+    }
+  }
+
+  await setEquippedTalisman(userId, relicId);
+  await ctx.answerCbQuery({
+    text: relicId == null ? "Без талісмана" : "Талісман обрано",
+  });
+
+  try {
+    await ctx.editMessageCaption(
+      formatFishingPanelCaption(await getEquippedHook(userId), await getEquippedTalisman(userId)),
+      {
+        parse_mode: "HTML",
+        reply_markup: await buildFishPanelKeyboard(userId),
+      }
+    );
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/**
  * @param {import("telegraf").Telegraf} bot
  */
 export function registerFishingHandlers(bot) {
@@ -157,6 +280,30 @@ export function registerFishingHandlers(bot) {
     });
   });
 
+  bot.action(FH_EQUIP_SILVER, async (ctx) => {
+    await handleHookEquip(ctx, "relic_hook_silver");
+  });
+
+  bot.action(FH_EQUIP_GOLD, async (ctx) => {
+    await handleHookEquip(ctx, "relic_hook_gold");
+  });
+
+  bot.action(FH_EQUIP_NONE, async (ctx) => {
+    await handleHookEquip(ctx, null);
+  });
+
+  bot.action(FT_EQUIP_PEARL, async (ctx) => {
+    await handleTalismanEquip(ctx, "relic_pearl_talisman");
+  });
+
+  bot.action(FT_EQUIP_ANGLER, async (ctx) => {
+    await handleTalismanEquip(ctx, "relic_angler_charm");
+  });
+
+  bot.action(FT_TAL_NONE, async (ctx) => {
+    await handleTalismanEquip(ctx, null);
+  });
+
   bot.action(FISH_RESULT_OK_RE, async (ctx) => {
     const userId = requireFromUser(ctx);
     const panelChatId = Number(ctx.match[1]);
@@ -189,11 +336,18 @@ export function registerFishingHandlers(bot) {
     }
 
     try {
-      await ctx.telegram.editMessageReplyMarkup(
+      await ctx.telegram.editMessageCaption(
         panelChatId,
         panelMessageId,
         undefined,
-        fishPanelKeyboard()
+        formatFishingPanelCaption(
+          await getEquippedHook(userId),
+          await getEquippedTalisman(userId)
+        ),
+        {
+          parse_mode: "HTML",
+          reply_markup: await buildFishPanelKeyboard(userId),
+        }
       );
     } catch {
       /* панель видалена */

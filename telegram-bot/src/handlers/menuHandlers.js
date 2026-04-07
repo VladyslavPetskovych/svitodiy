@@ -1,4 +1,7 @@
 import { Input } from "telegraf";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import {
   CB_DV_INT_1,
   CB_DV_INT_2,
@@ -41,9 +44,11 @@ import {
   CB_CHAS_BACK_MAIN,
   CB_CHAS_FISH,
   CB_CHAS_INV,
+  CB_CHAS_MAP,
   CB_FISH_PANEL_BACK,
   CB_FISH_PANEL_INV,
   CB_INV_BACK_CHAS,
+  CB_MAP_BACK_CHAS,
   CB_MENU_CHASODIY,
   CB_MENU_DUMOSVIT,
   CB_MENU_LITOPYS,
@@ -54,16 +59,34 @@ import {
   CB_LIT_LIST,
 } from "../menuConstants.js";
 import {
+  addBalance,
   addRelicToInventory,
   addResourceToInventory,
   consumeResources,
   getBalance,
+  getEquippedHook,
+  getEquippedTalisman,
   getInventory,
   getPanelOwner,
   removeFishFromInventory,
+  setEquippedHook,
+  setEquippedTalisman,
   sellFishUnits,
 } from "../userStore.js";
 import { sendFishingPanel } from "./fishingPanel.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WORLD_MAP_PATH = path.join(__dirname, "../../assets/world-map-islands.png");
+const JUNGLE_ISLAND_PATH = path.join(__dirname, "../../assets/island-jungle.png");
+const JUNGLE_SNAKE_PATH = path.join(__dirname, "../../assets/jungle-snake.png");
+const BLIZZARD_ISLAND_PATH = path.join(__dirname, "../../assets/island-blizzard.png");
+const BLIZZARD_GOLEM_PATH = path.join(__dirname, "../../assets/blizzard-golem.png");
+const JUNGLE_EXPLORE_CB = "jungle_explore";
+const JUNGLE_CHOP_WOOD_CB = "jungle_chop_wood";
+const BLIZZARD_EXPLORE_CB = "blizzard_explore";
+const BLIZZARD_MINE_ICE_CB = "blizzard_mine_ice";
+const jungleWoodInProgress = new Set();
+const blizzardIceInProgress = new Set();
 
 const MAIN_MENU_INTRO =
   "Привіт! Керуй ботом кнопками нижче — на рахунку валюта <b>промінчики</b> ✨.";
@@ -90,9 +113,89 @@ function chasodiyMenuKeyboard() {
       [{ text: "🎣 Риболовля", callback_data: CB_CHAS_FISH }],
       [{ text: "🎒 Інвентар", callback_data: CB_CHAS_INV }],
       [{ text: "🔮 Алхімія", callback_data: CB_CHAS_ALCHEMY }],
+      [{ text: "🗺 Карта плавань", callback_data: CB_CHAS_MAP }],
       [{ text: "⬅ У головне меню", callback_data: CB_CHAS_BACK_MAIN }],
     ],
   };
+}
+
+function mapKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🌴 Острів Джунглі", callback_data: "map_sail_jungle" }],
+      [{ text: "❄️ Острів Хуртовина", callback_data: "map_sail_blizzard" }],
+      [{ text: "🏜 Острів Пустеля", callback_data: "map_sail_desert" }],
+      [{ text: "⬅ Часодій", callback_data: CB_MAP_BACK_CHAS }],
+    ],
+  };
+}
+
+function jungleIslandKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🧭 Розвідка", callback_data: JUNGLE_EXPLORE_CB }],
+      [{ text: "🪵 Добути дерево", callback_data: JUNGLE_CHOP_WOOD_CB }],
+      [{ text: "⬅ До карти", callback_data: CB_CHAS_MAP }],
+    ],
+  };
+}
+
+function blizzardIslandKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🧭 Розвідка", callback_data: BLIZZARD_EXPLORE_CB }],
+      [{ text: "🧊 Добути лід", callback_data: BLIZZARD_MINE_ICE_CB }],
+      [{ text: "⬅ До карти", callback_data: CB_CHAS_MAP }],
+    ],
+  };
+}
+
+function jungleIslandCaption() {
+  return (
+    `🌴 <b>Острів Джунглів</b>\n\n` +
+    `Тут густі хащі й багато деревини.\n` +
+    `Обери дію нижче: розвідка або заготівля дерева.`
+  );
+}
+
+function blizzardIslandCaption() {
+  return (
+    `❄️ <b>Острів Хуртовини</b>\n\n` +
+    `Сніг, лід і крижаний вітер.\n` +
+    `Обери дію: розвідка або добич льоду.`
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildProgressBar(done, total) {
+  const fill = "🟩".repeat(done);
+  const empty = "⬜".repeat(Math.max(0, total - done));
+  return `${fill}${empty}`;
+}
+
+function jungleWoodProgressCaption(doneSteps, totalSteps) {
+  const secondsDone = doneSteps * 5;
+  const pct = Math.floor((secondsDone / 30) * 100);
+  return (
+    `🪓 <b>Добування дерева</b>\n\n` +
+    `${buildProgressBar(doneSteps, totalSteps)} <b>${pct}%</b>\n` +
+    `Минуло: <b>${secondsDone}/30 c</b>\n\n` +
+    `Тримай курс — колода майже готова.`
+  );
+}
+
+function blizzardIceProgressCaption(doneSteps, totalSteps) {
+  const secondsDone = doneSteps * 5;
+  const pct = Math.floor((secondsDone / 30) * 100);
+  return (
+    `⛏ <b>Добування льоду</b>\n\n` +
+    `${buildProgressBar(doneSteps, totalSteps)} <b>${pct}%</b>\n` +
+    `Минуло: <b>${secondsDone}/30 c</b>\n\n` +
+    `Ще трохи — і брила льоду твоя.`
+  );
 }
 
 function alchemyMenuKeyboard(inv) {
@@ -217,7 +320,8 @@ async function tryEditChasodiyMenu(ctx) {
     `На рахунку: ${formatBalanceHtml(bal)}\n\n` +
     `🎣 <b>Риболовля</b> — риба, ресурси, рідкі реліквії.\n` +
     `🎒 <b>Інвентар</b> — продаж риби, готування → ресурси.\n` +
-    `🔮 <b>Алхімія</b> — з ресурсів створюєш реліквії, ресурси й гачки для рибалки.`;
+    `🔮 <b>Алхімія</b> — з ресурсів створюєш реліквії, ресурси й гачки для рибалки.\n` +
+    `🗺 <b>Карта</b> — обери острів для майбутніх пригод.`;
   try {
     await editMenuBody(ctx, cap, chasodiyMenuKeyboard());
   } catch {
@@ -226,6 +330,37 @@ async function tryEditChasodiyMenu(ctx) {
       reply_markup: chasodiyMenuKeyboard(),
     });
   }
+}
+
+async function openWorldMap(ctx) {
+  const cap =
+    `🗺 <b>Карта морів</b>\n\n` +
+    `Три острови поруч: <b>Джунглі</b>, <b>Хуртовина</b>, <b>Пустеля</b>.\n` +
+    `Обери куди плисти — далі додамо події та бої.`;
+  const imagePath = fs.existsSync(WORLD_MAP_PATH) ? WORLD_MAP_PATH : MAIN_MENU_IMAGE_PATH;
+  await ctx.replyWithPhoto(Input.fromLocalFile(imagePath), {
+    caption: cap,
+    parse_mode: "HTML",
+    reply_markup: mapKeyboard(),
+  });
+}
+
+async function openJungleIsland(ctx) {
+  const imagePath = fs.existsSync(JUNGLE_ISLAND_PATH) ? JUNGLE_ISLAND_PATH : WORLD_MAP_PATH;
+  await ctx.replyWithPhoto(Input.fromLocalFile(imagePath), {
+    caption: jungleIslandCaption(),
+    parse_mode: "HTML",
+    reply_markup: jungleIslandKeyboard(),
+  });
+}
+
+async function openBlizzardIsland(ctx) {
+  const imagePath = fs.existsSync(BLIZZARD_ISLAND_PATH) ? BLIZZARD_ISLAND_PATH : WORLD_MAP_PATH;
+  await ctx.replyWithPhoto(Input.fromLocalFile(imagePath), {
+    caption: blizzardIslandCaption(),
+    parse_mode: "HTML",
+    reply_markup: blizzardIslandKeyboard(),
+  });
 }
 
 async function tryEditAlchemyMenu(ctx) {
@@ -426,6 +561,27 @@ function inventoryKeyboard(inv) {
       { text: `🍲 ${fish.emoji} Приготувати`, callback_data: `ck_${fish.id}` },
     ]);
   }
+
+  const hasSilverHook = (inv.relic_hook_silver ?? 0) > 0;
+  const hasGoldHook = (inv.relic_hook_gold ?? 0) > 0;
+  if (hasSilverHook || hasGoldHook) {
+    const hookRow = [];
+    if (hasSilverHook) hookRow.push({ text: "🪝 Вдягнути срібний", callback_data: "ie_hook_silver" });
+    if (hasGoldHook) hookRow.push({ text: "🔱 Вдягнути золотий", callback_data: "ie_hook_gold" });
+    hookRow.push({ text: "⭕ Зняти гачок", callback_data: "ie_hook_none" });
+    rows.push(hookRow);
+  }
+
+  const hasPearl = (inv.relic_pearl_talisman ?? 0) > 0;
+  const hasAngler = (inv.relic_angler_charm ?? 0) > 0;
+  if (hasPearl || hasAngler) {
+    const talRow = [];
+    if (hasPearl) talRow.push({ text: "🦪 Вдягнути перламутр", callback_data: "ie_tal_pearl" });
+    if (hasAngler) talRow.push({ text: "🧿 Вдягнути амулет", callback_data: "ie_tal_angler" });
+    talRow.push({ text: "⭕ Зняти талісман", callback_data: "ie_tal_none" });
+    rows.push(talRow);
+  }
+
   rows.push([
     { text: "⬅ Часодій", callback_data: CB_INV_BACK_CHAS },
     { text: "🏠 Меню", callback_data: CB_MENU_MAIN },
@@ -436,14 +592,20 @@ function inventoryKeyboard(inv) {
 async function showInventoryScreen(ctx, userId) {
   const inv = await getInventory(userId);
   const bal = await getBalance(userId);
-  const cap = formatInventoryCaption(inv, formatBalanceHtml(bal));
+  const cap = formatInventoryCaption(inv, formatBalanceHtml(bal), {
+    equippedHook: await getEquippedHook(userId),
+    equippedTalisman: await getEquippedTalisman(userId),
+  });
   await editMenuBody(ctx, cap, inventoryKeyboard(inv));
 }
 
 async function refreshInventoryScreen(ctx, userId) {
   const inv = await getInventory(userId);
   const bal = await getBalance(userId);
-  const cap = formatInventoryCaption(inv, formatBalanceHtml(bal));
+  const cap = formatInventoryCaption(inv, formatBalanceHtml(bal), {
+    equippedHook: await getEquippedHook(userId),
+    equippedTalisman: await getEquippedTalisman(userId),
+  });
   await editMenuBody(ctx, cap, inventoryKeyboard(inv));
 }
 
@@ -455,7 +617,10 @@ async function sendInventoryStandalone(ctx) {
   }
   const inv = await getInventory(userId);
   const bal = await getBalance(userId);
-  const cap = formatInventoryCaption(inv, formatBalanceHtml(bal));
+  const cap = formatInventoryCaption(inv, formatBalanceHtml(bal), {
+    equippedHook: await getEquippedHook(userId),
+    equippedTalisman: await getEquippedTalisman(userId),
+  });
   await ctx.replyWithPhoto(Input.fromLocalFile(MAIN_MENU_IMAGE_PATH), {
     caption: cap,
     parse_mode: "HTML",
@@ -468,6 +633,8 @@ const COOK_ONE_RE = /^ck_([a-z_]+)$/;
 const ALCHEMY_CRAFT_RE = /^alc_([a-z_]+)$/;
 const LIT_DONE_RE = /^ld_([a-z0-9]+)$/;
 const LIT_DEL_RE = /^lx_([a-z0-9]+)$/;
+const INV_EQUIP_RE = /^ie_(hook|tal)_([a-z_]+)$/;
+const MAP_SAIL_RE = /^map_sail_(jungle|blizzard|desert)$/;
 
 /**
  * @param {import("telegraf").Telegraf} bot
@@ -507,6 +674,21 @@ export function registerMenuHandlers(bot) {
   bot.action(CB_CHAS_ALCHEMY, async (ctx) => {
     await ctx.answerCbQuery();
     await tryEditAlchemyMenu(ctx);
+  });
+
+  bot.action(CB_CHAS_MAP, async (ctx) => {
+    await ctx.answerCbQuery();
+    await openWorldMap(ctx);
+  });
+
+  bot.action(CB_MAP_BACK_CHAS, async (ctx) => {
+    await ctx.answerCbQuery();
+    try {
+      await ctx.deleteMessage();
+    } catch {
+      /* ignore */
+    }
+    await tryEditChasodiyMenu(ctx);
   });
 
   bot.action(CB_ALCH_BACK_CHAS, async (ctx) => {
@@ -567,6 +749,293 @@ export function registerMenuHandlers(bot) {
   bot.action(CB_INV_BACK_CHAS, async (ctx) => {
     await ctx.answerCbQuery();
     await tryEditChasodiyMenu(ctx);
+  });
+
+  bot.action(INV_EQUIP_RE, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (userId == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+    const slot = ctx.match[1];
+    const variant = ctx.match[2];
+    const inv = await getInventory(userId);
+
+    if (slot === "hook") {
+      if (variant === "none") {
+        await setEquippedHook(userId, null);
+        await ctx.answerCbQuery({ text: "Гачок знято" });
+      } else if (variant === "silver") {
+        if ((inv.relic_hook_silver ?? 0) < 1) {
+          await ctx.answerCbQuery({ text: "Немає срібного гачка.", show_alert: true });
+          return;
+        }
+        await setEquippedHook(userId, "relic_hook_silver");
+        await ctx.answerCbQuery({ text: "🪝 Срібний гачок вдягнуто" });
+      } else if (variant === "gold") {
+        if ((inv.relic_hook_gold ?? 0) < 1) {
+          await ctx.answerCbQuery({ text: "Немає золотого гачка.", show_alert: true });
+          return;
+        }
+        await setEquippedHook(userId, "relic_hook_gold");
+        await ctx.answerCbQuery({ text: "🔱 Золотий гачок вдягнуто" });
+      } else {
+        await ctx.answerCbQuery({ text: "Невідомий гачок.", show_alert: true });
+        return;
+      }
+    } else {
+      if (variant === "none") {
+        await setEquippedTalisman(userId, null);
+        await ctx.answerCbQuery({ text: "Талісман знято" });
+      } else if (variant === "pearl") {
+        if ((inv.relic_pearl_talisman ?? 0) < 1) {
+          await ctx.answerCbQuery({ text: "Немає перламутрового талісмана.", show_alert: true });
+          return;
+        }
+        await setEquippedTalisman(userId, "relic_pearl_talisman");
+        await ctx.answerCbQuery({ text: "🦪 Перламутр вдягнуто" });
+      } else if (variant === "angler") {
+        if ((inv.relic_angler_charm ?? 0) < 1) {
+          await ctx.answerCbQuery({ text: "Немає амулета рибалки.", show_alert: true });
+          return;
+        }
+        await setEquippedTalisman(userId, "relic_angler_charm");
+        await ctx.answerCbQuery({ text: "🧿 Амулет вдягнуто" });
+      } else {
+        await ctx.answerCbQuery({ text: "Невідомий талісман.", show_alert: true });
+        return;
+      }
+    }
+
+    try {
+      await refreshInventoryScreen(ctx, userId);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  bot.action(MAP_SAIL_RE, async (ctx) => {
+    const island = ctx.match[1];
+    const labels = {
+      jungle: "🌴 Джунглі",
+      blizzard: "❄️ Хуртовина",
+      desert: "🏜 Пустеля",
+    };
+    await ctx.answerCbQuery({ text: `Курс: ${labels[island]}` });
+    if (island === "jungle") {
+      await openJungleIsland(ctx);
+      return;
+    }
+    if (island === "blizzard") {
+      await openBlizzardIsland(ctx);
+      return;
+    }
+    await ctx.reply(
+      `⛵ Ти тримаєш курс на ${labels[island]}.\n` +
+        `Скоро тут будуть події, бої та унікальний лут острова.`
+    );
+  });
+
+  bot.action(JUNGLE_EXPLORE_CB, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (userId == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+
+    await ctx.answerCbQuery({ text: "Розвідка..." });
+    const snakeAttack = Math.random() < 0.25;
+    if (!snakeAttack) {
+      await ctx.reply(
+        "🧭 Ти проходиш хащами Джунглів.\nЗнайшов сліди старого табору. Тут точно є ресурси."
+      );
+      return;
+    }
+
+    const winFight = Math.random() < 0.5;
+    if (winFight) {
+      const newBalance = await addBalance(userId, 10);
+      const cap =
+        "🐍 <b>Засідка в джунглях!</b>\n\n" +
+        "Тебе атакувала змія, але ти переміг у сутичці.\n" +
+        "✨ <b>+10 промінчиків</b>\n" +
+        `💰 Баланс: <b>${newBalance}</b>`;
+      if (fs.existsSync(JUNGLE_SNAKE_PATH)) {
+        await ctx.replyWithPhoto(Input.fromLocalFile(JUNGLE_SNAKE_PATH), {
+          caption: cap,
+          parse_mode: "HTML",
+        });
+      } else {
+        await ctx.reply(cap, { parse_mode: "HTML" });
+      }
+      return;
+    }
+
+    const curBalance = await getBalance(userId);
+    const penalty = Math.min(10, curBalance);
+    const newBalance = penalty > 0 ? await addBalance(userId, -penalty) : curBalance;
+    const cap =
+      "🐍 <b>Засідка в джунглях!</b>\n\n" +
+      "Змія вкусила тебе, довелося відступити.\n" +
+      `✨ <b>-${penalty} промінчиків</b>\n` +
+      `💰 Баланс: <b>${newBalance}</b>`;
+    if (fs.existsSync(JUNGLE_SNAKE_PATH)) {
+      await ctx.replyWithPhoto(Input.fromLocalFile(JUNGLE_SNAKE_PATH), {
+        caption: cap,
+        parse_mode: "HTML",
+      });
+    } else {
+      await ctx.reply(cap, { parse_mode: "HTML" });
+    }
+  });
+
+  bot.action(JUNGLE_CHOP_WOOD_CB, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (userId == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+    if (jungleWoodInProgress.has(userId)) {
+      await ctx.answerCbQuery({
+        text: "Заготівля вже триває. Дочекайся завершення.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    jungleWoodInProgress.add(userId);
+    await ctx.answerCbQuery({ text: "Починаю рубати дерево..." });
+
+    const msg = ctx.callbackQuery?.message;
+    const canEditCaption = !!msg && "photo" in msg;
+    const totalSteps = 6;
+
+    try {
+      if (canEditCaption) {
+        await ctx.editMessageCaption(jungleWoodProgressCaption(0, totalSteps), {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: [] },
+        });
+      }
+
+      for (let step = 1; step <= totalSteps; step++) {
+        await sleep(5000);
+        if (!canEditCaption) continue;
+        await ctx.editMessageCaption(jungleWoodProgressCaption(step, totalSteps), {
+          parse_mode: "HTML",
+          reply_markup: step === totalSteps ? jungleIslandKeyboard() : { inline_keyboard: [] },
+        });
+      }
+
+      const totalLogs = await addResourceToInventory(userId, "log", 1);
+      await ctx.reply(
+        `✅ Заготівля завершена!\n🪵 +1 колода додана в інвентар.\nУсього колод: <b>${totalLogs}</b>.`,
+        { parse_mode: "HTML" }
+      );
+    } finally {
+      jungleWoodInProgress.delete(userId);
+    }
+  });
+
+  bot.action(BLIZZARD_EXPLORE_CB, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (userId == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+
+    await ctx.answerCbQuery({ text: "Розвідка..." });
+    const golemAttack = Math.random() < 0.25;
+    if (!golemAttack) {
+      await ctx.reply(
+        "🧭 Ти розвідуєш льодяні печери Хуртовини.\nЗнайшов безпечну стежку між заметами."
+      );
+      return;
+    }
+
+    const winFight = Math.random() < 0.5;
+    if (winFight) {
+      const newBalance = await addBalance(userId, 10);
+      const cap =
+        "☃️ <b>Напад сніговика-голема!</b>\n\n" +
+        "Ти розбив крижаний панцир і переміг.\n" +
+        "✨ <b>+10 промінчиків</b>\n" +
+        `💰 Баланс: <b>${newBalance}</b>`;
+      if (fs.existsSync(BLIZZARD_GOLEM_PATH)) {
+        await ctx.replyWithPhoto(Input.fromLocalFile(BLIZZARD_GOLEM_PATH), {
+          caption: cap,
+          parse_mode: "HTML",
+        });
+      } else {
+        await ctx.reply(cap, { parse_mode: "HTML" });
+      }
+      return;
+    }
+
+    const curBalance = await getBalance(userId);
+    const penalty = Math.min(10, curBalance);
+    const newBalance = penalty > 0 ? await addBalance(userId, -penalty) : curBalance;
+    const cap =
+      "☃️ <b>Напад сніговика-голема!</b>\n\n" +
+      "Голем збив тебе крижаним ударом.\n" +
+      `✨ <b>-${penalty} промінчиків</b>\n` +
+      `💰 Баланс: <b>${newBalance}</b>`;
+    if (fs.existsSync(BLIZZARD_GOLEM_PATH)) {
+      await ctx.replyWithPhoto(Input.fromLocalFile(BLIZZARD_GOLEM_PATH), {
+        caption: cap,
+        parse_mode: "HTML",
+      });
+    } else {
+      await ctx.reply(cap, { parse_mode: "HTML" });
+    }
+  });
+
+  bot.action(BLIZZARD_MINE_ICE_CB, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (userId == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+    if (blizzardIceInProgress.has(userId)) {
+      await ctx.answerCbQuery({
+        text: "Добування вже триває. Дочекайся завершення.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    blizzardIceInProgress.add(userId);
+    await ctx.answerCbQuery({ text: "Починаю добувати лід..." });
+
+    const msg = ctx.callbackQuery?.message;
+    const canEditCaption = !!msg && "photo" in msg;
+    const totalSteps = 6;
+
+    try {
+      if (canEditCaption) {
+        await ctx.editMessageCaption(blizzardIceProgressCaption(0, totalSteps), {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: [] },
+        });
+      }
+
+      for (let step = 1; step <= totalSteps; step++) {
+        await sleep(5000);
+        if (!canEditCaption) continue;
+        await ctx.editMessageCaption(blizzardIceProgressCaption(step, totalSteps), {
+          parse_mode: "HTML",
+          reply_markup: step === totalSteps ? blizzardIslandKeyboard() : { inline_keyboard: [] },
+        });
+      }
+
+      const totalIce = await addResourceToInventory(userId, "ice_block", 1);
+      await ctx.reply(
+        `✅ Добування завершено!\n🧊 +1 брила льоду додана в інвентар.\nУсього брил льоду: <b>${totalIce}</b>.`,
+        { parse_mode: "HTML" }
+      );
+    } finally {
+      blizzardIceInProgress.delete(userId);
+    }
   });
 
   bot.action(CB_MENU_DUMOSVIT, async (ctx) => {

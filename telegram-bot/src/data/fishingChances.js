@@ -6,13 +6,13 @@
  */
 export const FISHING_CHANCES = {
   /** Рідкісна реліквія */
-  relic: 0.04,
+  relic: 0.01,
   /** Ресурси з води (гілка, камінь, мушля) */
-  resource: 0.12,
+  resource: 0.18,
   /** Риба (з урахуванням ваги виду в fishTypes) */
-  fish: 0.38,
+  fish: 0.39,
   /** Порожній закид */
-  miss: 0.46,
+  miss: 0.42,
 };
 
 export function sumFishingChances() {

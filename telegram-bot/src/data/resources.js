@@ -4,6 +4,8 @@
 
 /** @type {ResourceType[]} */
 export const RESOURCE_TYPES = [
+  { id: "ice_block", emoji: "🧊", name: "Брила льоду" },
+  { id: "log", emoji: "🪵", name: "Колода" },
   { id: "twig", emoji: "🪵", name: "Гілочка" },
   { id: "stone", emoji: "🪨", name: "Камінь" },
   { id: "shell", emoji: "🐚", name: "Мушля" },

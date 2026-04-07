@@ -12,7 +12,9 @@ function escapeHtml(s) {
 /**
  * @param {Record<string, number>} inv
  */
-export function formatInventoryCaption(inv, balanceHtml) {
+export function formatInventoryCaption(inv, balanceHtml, opts = {}) {
+  const equippedHook = opts.equippedHook ?? null;
+  const equippedTalisman = opts.equippedTalisman ?? null;
   let text = `🎒 <b>Інвентар</b>\n💰 ${balanceHtml}\n`;
 
   text += `\n<b>🐟 Риба</b>\n`;
@@ -42,6 +44,34 @@ export function formatInventoryCaption(inv, balanceHtml) {
     }
   }
   text += relicLines.length > 0 ? `${relicLines.join("\n")}\n` : `• <i>порожньо</i>\n`;
+
+  text += `\n<b>🛡 Вдягнуто</b>\n`;
+  const eqLines = [];
+  if (equippedHook) {
+    const m = getRelicMeta(equippedHook);
+    eqLines.push(`• 🪝 ${m?.emoji ?? "🏺"} ${escapeHtml(m?.name ?? equippedHook)}`);
+  }
+  if (equippedTalisman) {
+    const m = getRelicMeta(equippedTalisman);
+    eqLines.push(`• 🧿 ${m?.emoji ?? "🏺"} ${escapeHtml(m?.name ?? equippedTalisman)}`);
+  }
+  text += eqLines.length > 0 ? `${eqLines.join("\n")}\n` : `• <i>нічого</i>\n`;
+
+  text += `\n<b>🧰 Можна вдягнути</b>\n`;
+  const wearable = [
+    "relic_hook_silver",
+    "relic_hook_gold",
+    "relic_pearl_talisman",
+    "relic_angler_charm",
+  ];
+  const wearLines = [];
+  for (const id of wearable) {
+    const n = inv[id] ?? 0;
+    if (n < 1) continue;
+    const m = getRelicMeta(id);
+    wearLines.push(`• ${m?.emoji ?? "🏺"} ${escapeHtml(m?.name ?? id)} — ×${n}`);
+  }
+  text += wearLines.length > 0 ? `${wearLines.join("\n")}\n` : `• <i>порожньо</i>\n`;
 
   const unknown = [];
   for (const [k, n] of Object.entries(inv)) {

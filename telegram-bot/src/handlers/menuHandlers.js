@@ -2,6 +2,9 @@ import { Input } from "telegraf";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { ARC_CATALOG, ARC_DURATION_DAYS, getArcById } from "../chasodiy/arcContent.js";
+import { deliverArcNow, getArcCoverPath } from "../chasodiy/arcScheduler.js";
+import { disableArc, enableArc, getArcState } from "../chasodiy/arcStore.js";
 import {
   CB_DV_INT_1,
   CB_DV_INT_2,
@@ -41,6 +44,7 @@ import { formatInventoryCaption } from "../inventoryCaption.js";
 import {
   CB_ALCH_BACK_CHAS,
   CB_CHAS_ALCHEMY,
+  CB_CHAS_ARCS,
   CB_CHAS_BACK_MAIN,
   CB_CHAS_FISH,
   CB_CHAS_INV,
@@ -81,6 +85,11 @@ const JUNGLE_ISLAND_PATH = path.join(__dirname, "../../assets/island-jungle.png"
 const JUNGLE_SNAKE_PATH = path.join(__dirname, "../../assets/jungle-snake.png");
 const BLIZZARD_ISLAND_PATH = path.join(__dirname, "../../assets/island-blizzard.png");
 const BLIZZARD_GOLEM_PATH = path.join(__dirname, "../../assets/blizzard-golem.png");
+const ARC_MENU_RE = /^arc_menu_([a-z_]+)$/;
+const ARC_START_RE = /^arc_start_([a-z_]+)$/;
+const ARC_STOP_RE = /^arc_stop_([a-z_]+)$/;
+const ARC_NOW_RE = /^arc_now_([a-z_]+)$/;
+const ARC_BACK_TO_ONE = "arc_back_to_one";
 const JUNGLE_EXPLORE_CB = "jungle_explore";
 const JUNGLE_CHOP_WOOD_CB = "jungle_chop_wood";
 const BLIZZARD_EXPLORE_CB = "blizzard_explore";
@@ -114,9 +123,31 @@ function chasodiyMenuKeyboard() {
       [{ text: "🎒 Інвентар", callback_data: CB_CHAS_INV }],
       [{ text: "🔮 Алхімія", callback_data: CB_CHAS_ALCHEMY }],
       [{ text: "🗺 Карта плавань", callback_data: CB_CHAS_MAP }],
+      [{ text: "🜂 Арки розвитку", callback_data: CB_CHAS_ARCS }],
       [{ text: "⬅ У головне меню", callback_data: CB_CHAS_BACK_MAIN }],
     ],
   };
+}
+
+function arcsListKeyboard() {
+  const rows = ARC_CATALOG.map((arc) => [
+    { text: `${arc.emoji} ${arc.title}`, callback_data: `arc_menu_${arc.id}` },
+  ]);
+  rows.push([{ text: "⬅ Часодій", callback_data: CB_MENU_CHASODIY }]);
+  return { inline_keyboard: rows };
+}
+
+function arcDetailKeyboard(arcId, enabled) {
+  const rows = [];
+  if (enabled) {
+    rows.push([{ text: "⏸ Зупинити арку", callback_data: `arc_stop_${arcId}` }]);
+    rows.push([{ text: "📩 Надіслати фразу зараз", callback_data: `arc_now_${arcId}` }]);
+  } else {
+    rows.push([{ text: "▶ Почати 30-денну арку", callback_data: `arc_start_${arcId}` }]);
+  }
+  rows.push([{ text: "⬅ До арок", callback_data: ARC_BACK_TO_ONE }]);
+  rows.push([{ text: "⬅ Часодій", callback_data: CB_MENU_CHASODIY }]);
+  return { inline_keyboard: rows };
 }
 
 function mapKeyboard() {
@@ -164,6 +195,13 @@ function blizzardIslandCaption() {
     `Сніг, лід і крижаний вітер.\n` +
     `Обери дію: розвідка або добич льоду.`
   );
+}
+
+function buildArcProgressBar(day, total) {
+  const safeTotal = Math.max(1, total);
+  const safeDay = Math.max(0, Math.min(day, safeTotal));
+  const filled = Math.round((safeDay / safeTotal) * 10);
+  return `${"🟩".repeat(filled)}${"⬜".repeat(10 - filled)}`;
 }
 
 function sleep(ms) {
@@ -321,7 +359,8 @@ async function tryEditChasodiyMenu(ctx) {
     `🎣 <b>Риболовля</b> — риба, ресурси, рідкі реліквії.\n` +
     `🎒 <b>Інвентар</b> — продаж риби, готування → ресурси.\n` +
     `🔮 <b>Алхімія</b> — з ресурсів створюєш реліквії, ресурси й гачки для рибалки.\n` +
-    `🗺 <b>Карта</b> — обери острів для майбутніх пригод.`;
+    `🗺 <b>Карта</b> — обери острів для майбутніх пригод.\n` +
+    `🜂 <b>Арки</b> — особистісні 30-денні сюжетні цикли росту.`;
   try {
     await editMenuBody(ctx, cap, chasodiyMenuKeyboard());
   } catch {
@@ -361,6 +400,74 @@ async function openBlizzardIsland(ctx) {
     parse_mode: "HTML",
     reply_markup: blizzardIslandKeyboard(),
   });
+}
+
+async function tryEditArcsMenu(ctx) {
+  const text =
+    `🜂 <b>Арки розвитку</b>\n\n` +
+    `Обери одну з 3 арок по 30 днів.\n`;
+  try {
+    await editMenuBody(ctx, text, arcsListKeyboard());
+  } catch {
+    await ctx.reply(text, { parse_mode: "HTML", reply_markup: arcsListKeyboard() });
+  }
+}
+
+async function tryEditArcDetailMenu(ctx, arcId) {
+  const userId = ctx.from?.id;
+  if (userId == null) return;
+  const arc = getArcById(arcId);
+  if (!arc) return;
+  const state = await getArcState(userId, arcId);
+  const shownDay = state.startedAtMs > 0 ? Math.min(state.day, ARC_DURATION_DAYS) : 1;
+  const dayLine = `Day <b>${shownDay}/${ARC_DURATION_DAYS}</b>`;
+  const progressBar = buildArcProgressBar(shownDay, ARC_DURATION_DAYS);
+  const progressPct = Math.floor((shownDay / ARC_DURATION_DAYS) * 100);
+  const statusLine = state.enabled && !state.done ? "🟢 Active" : "⚪ Inactive";
+  const text =
+    `${arc.emoji} <b>Arc: ${arc.title}</b>\n\n` +
+    `${arc.summary}\n\n` +
+    `Status: ${statusLine}\n` +
+    `${dayLine}\n` +
+    `${progressBar} <b>${progressPct}%</b>`;
+  const kb = arcDetailKeyboard(arcId, state.enabled && !state.done);
+  const msg = ctx.callbackQuery?.message;
+  const coverPath = getArcCoverPath(arcId);
+  if (msg && "photo" in msg) {
+    try {
+      if (coverPath) {
+        await ctx.editMessageMedia(
+          {
+            type: "photo",
+            media: Input.fromLocalFile(coverPath),
+            caption: text,
+            parse_mode: "HTML",
+          },
+          { reply_markup: kb }
+        );
+      } else {
+        await ctx.editMessageCaption(text, {
+          parse_mode: "HTML",
+          reply_markup: kb,
+        });
+      }
+      return;
+    } catch {
+      /* fallback to sending new message */
+    }
+  }
+  if (coverPath) {
+    await ctx.replyWithPhoto(Input.fromLocalFile(coverPath), {
+      caption: text,
+      parse_mode: "HTML",
+      reply_markup: kb,
+    });
+  } else {
+    await ctx.reply(text, {
+      parse_mode: "HTML",
+      reply_markup: kb,
+    });
+  }
 }
 
 async function tryEditAlchemyMenu(ctx) {
@@ -679,6 +786,73 @@ export function registerMenuHandlers(bot) {
   bot.action(CB_CHAS_MAP, async (ctx) => {
     await ctx.answerCbQuery();
     await openWorldMap(ctx);
+  });
+
+  bot.action(CB_CHAS_ARCS, async (ctx) => {
+    await ctx.answerCbQuery();
+    await tryEditArcsMenu(ctx);
+  });
+
+  bot.action(ARC_MENU_RE, async (ctx) => {
+    const arcId = ctx.match[1];
+    await ctx.answerCbQuery();
+    await tryEditArcDetailMenu(ctx, arcId);
+  });
+
+  bot.action(ARC_BACK_TO_ONE, async (ctx) => {
+    await ctx.answerCbQuery();
+    await tryEditArcsMenu(ctx);
+  });
+
+  bot.action(ARC_START_RE, async (ctx) => {
+    const arcId = ctx.match[1];
+    const userId = ctx.from?.id;
+    if (userId == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+    const arc = getArcById(arcId);
+    if (!arc) {
+      await ctx.answerCbQuery({ text: "Невідома арка.", show_alert: true });
+      return;
+    }
+    const started = await enableArc(userId, arcId);
+    await ctx.answerCbQuery({ text: started ? `Арка ${arc.title} стартувала` : "Арка вже активна" });
+    if (started) {
+      try {
+        await deliverArcNow(ctx.telegram, userId, arcId);
+      } catch {
+        /* ignore */
+      }
+    }
+    await tryEditArcDetailMenu(ctx, arcId);
+  });
+
+  bot.action(ARC_STOP_RE, async (ctx) => {
+    const arcId = ctx.match[1];
+    const userId = ctx.from?.id;
+    if (userId == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+    await disableArc(userId, arcId);
+    await ctx.answerCbQuery({ text: "Арку зупинено" });
+    await tryEditArcDetailMenu(ctx, arcId);
+  });
+
+  bot.action(ARC_NOW_RE, async (ctx) => {
+    const arcId = ctx.match[1];
+    const userId = ctx.from?.id;
+    if (userId == null) {
+      await ctx.answerCbQuery({ text: "Немає профілю.", show_alert: true });
+      return;
+    }
+    try {
+      const ok = await deliverArcNow(ctx.telegram, userId, arcId);
+      await ctx.answerCbQuery({ text: ok ? "Надсилаю цитату" : "Арка не активна", show_alert: !ok });
+    } catch {
+      await ctx.answerCbQuery({ text: "Не вдалося надіслати зараз.", show_alert: true });
+    }
   });
 
   bot.action(CB_MAP_BACK_CHAS, async (ctx) => {

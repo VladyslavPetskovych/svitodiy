@@ -6,7 +6,7 @@ export const ARC_CATALOG = [
     title: "Redemption",
     emoji: "🜂",
     coverFile: "redemption.png",
-    summary: "Self-forgiveness, responsibility, and rebuilding your life direction.",
+    summary: "",
     completionLine: "You turned remorse into disciplined progress.",
   },
   {

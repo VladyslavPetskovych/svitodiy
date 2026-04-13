@@ -68,9 +68,11 @@ import {
   addResourceToInventory,
   consumeResources,
   getBalance,
+  getRawBalance,
   getEquippedHook,
   getEquippedTalisman,
   getInventory,
+  loseAllResourcesAndEquipment,
   getPanelOwner,
   removeFishFromInventory,
   setEquippedHook,
@@ -402,6 +404,17 @@ async function openBlizzardIsland(ctx) {
   });
 }
 
+async function applyNegativeBalanceBattlePenalty(ctx, userId) {
+  const rawBalance = await getRawBalance(userId);
+  if (rawBalance >= 0) return false;
+  await loseAllResourcesAndEquipment(userId);
+  await ctx.reply(
+    "💥 Через від'ємний баланс промінчиків ти програв бій автоматично.\n" +
+      "🎒 Усі ресурси та екіпірування були втрачені."
+  );
+  return true;
+}
+
 async function tryEditArcsMenu(ctx) {
   const text =
     `🜂 <b>Арки розвитку</b>\n\n` +
@@ -485,7 +498,8 @@ async function tryEditAlchemyMenu(ctx) {
       out = rm ? ` → 🏺 ${rm.emoji} ${rm.name}` : " → 🏺 реліквія";
     } else if (rec.resourceId) {
       const rm = getResourceMeta(rec.resourceId);
-      out = rm ? ` → 📦 ${rm.emoji} ${rm.name}` : " → 📦 ресурс";
+      const outputAmount = Math.max(1, Number(rec.outputAmount ?? 1));
+      out = rm ? ` → 📦 ${rm.emoji} ${rm.name} x${outputAmount}` : ` → 📦 ресурс x${outputAmount}`;
     }
     cap += `${rec.emoji} <b>${rec.name}</b>${out}\n`;
     for (const [rid, need] of Object.entries(rec.consumes)) {
@@ -1027,6 +1041,7 @@ export function registerMenuHandlers(bot) {
     }
 
     const winFight = Math.random() < 0.5;
+    if (await applyNegativeBalanceBattlePenalty(ctx, userId)) return;
     if (winFight) {
       const newBalance = await addBalance(userId, 10);
       const cap =
@@ -1128,6 +1143,7 @@ export function registerMenuHandlers(bot) {
     }
 
     const winFight = Math.random() < 0.5;
+    if (await applyNegativeBalanceBattlePenalty(ctx, userId)) return;
     if (winFight) {
       const newBalance = await addBalance(userId, 10);
       const cap =
@@ -1436,8 +1452,9 @@ export function registerMenuHandlers(bot) {
       await addRelicToInventory(userId, recipe.relicId, 1);
       await ctx.answerCbQuery({ text: `🏺 ${recipe.name} готово!` });
     } else if (recipe.resourceId) {
-      await addResourceToInventory(userId, recipe.resourceId, 1);
-      await ctx.answerCbQuery({ text: `📦 ${recipe.name} готово!` });
+      const outputAmount = Math.max(1, Number(recipe.outputAmount ?? 1));
+      await addResourceToInventory(userId, recipe.resourceId, outputAmount);
+      await ctx.answerCbQuery({ text: `📦 ${recipe.name} готово! +${outputAmount}` });
     } else {
       await ctx.answerCbQuery({ text: "Невідомий вихід рецепта.", show_alert: true });
       return;

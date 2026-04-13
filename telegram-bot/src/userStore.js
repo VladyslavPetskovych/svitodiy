@@ -1,4 +1,5 @@
 import { getFishSellPrice } from "./data/fishTypes.js";
+import { RESOURCE_TYPES } from "./data/resources.js";
 import { getRedis } from "./redisClient.js";
 
 const PREFIX = "svitodiy";
@@ -82,9 +83,28 @@ export async function getBalance(telegramUserId) {
   return Math.max(0, Number(raw ?? 0));
 }
 
+export async function getRawBalance(telegramUserId) {
+  const raw = await getRedis().hGet(userKey(telegramUserId), "balance");
+  return Number(raw ?? 0);
+}
+
 export async function addBalance(telegramUserId, delta) {
   const n = await getRedis().hIncrBy(userKey(telegramUserId), "balance", delta);
   return Math.max(0, n);
+}
+
+export async function loseAllResourcesAndEquipment(telegramUserId) {
+  const r = getRedis();
+  const invKey = inventoryKey(telegramUserId);
+  const fieldsToDrop = [
+    ...RESOURCE_TYPES.map((res) => res.id),
+    "relic_hook_silver",
+    "relic_hook_gold",
+    "relic_pearl_talisman",
+    "relic_angler_charm",
+  ];
+  await r.hDel(invKey, ...fieldsToDrop);
+  await r.hDel(userKey(telegramUserId), FIELD_EQUIPPED_HOOK, FIELD_EQUIPPED_TALISMAN);
 }
 
 /**

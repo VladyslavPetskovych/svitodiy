@@ -83,12 +83,13 @@ function formatArcCaption(arc, dayNumber, messageCount) {
   const safeDay = Math.max(1, dayNumber);
   const { quote, action } = pickArcMessage(arc.id, safeDay, messageCount);
   const progressPct = Math.floor((Math.min(safeDay, ARC_DURATION_DAYS) / ARC_DURATION_DAYS) * 100);
+  const summaryLine = arc.summary ? `\n<i>${arc.summary}</i>` : "";
   return (
     `${arc.emoji} <b>Arc: ${arc.title}</b> · Day <b>${safeDay}/${ARC_DURATION_DAYS}</b>\n\n` +
     `“${quote}”\n\n` +
     `🎯 <b>Micro action:</b> ${action}\n\n` +
-    `📈 Progress: <b>${progressPct}%</b>\n` +
-    `<i>${arc.summary}</i>`
+    `📈 Progress: <b>${progressPct}%</b>` +
+    summaryLine
   );
 }
 

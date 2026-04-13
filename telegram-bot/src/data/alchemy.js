@@ -11,11 +11,22 @@
  *   consumes: Record<string, number>,
  *   relicId?: string,
  *   resourceId?: string,
+ *   outputAmount?: number,
  * }} AlchemyRecipe
  */
 
 /** @type {AlchemyRecipe[]} */
 export const ALCHEMY_RECIPES = [
+  {
+    id: "saw_planks",
+    name: "Розпиляти колоду",
+    emoji: "🪚",
+    consumes: {
+      log: 1,
+    },
+    resourceId: "plank",
+    outputAmount: 2,
+  },
   {
     id: "ring_wanderer",
     name: "Кільце мандрівника",

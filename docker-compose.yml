@@ -45,6 +45,11 @@ services:
       TZ: Europe/Kyiv
       SERVER_URL: http://server:3000
       REDIS_URL: redis://redis:6379
+      # Бекап прогресу пишемо на змонтовану папку хоста — переживає
+      # перезапуск/перебудову контейнера і навіть `docker compose down -v`.
+      REDIS_BACKUP_FILE: /app/data/redis-user-backup.json
+    volumes:
+      - ./data:/app/data
     depends_on:
       redis:
         condition: service_healthy

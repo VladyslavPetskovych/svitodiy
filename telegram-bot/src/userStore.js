@@ -162,6 +162,23 @@ export async function recordFishingCast(telegramUserId, kind) {
   await p.exec();
 }
 
+const FIELD_PHONE = "phone";
+
+/** Номер телефону, яким користувач сам поділився (contact). @returns {Promise<string|null>} */
+export async function getUserPhone(telegramUserId) {
+  const v = await getRedis().hGet(userKey(telegramUserId), FIELD_PHONE);
+  if (v == null || v === "") return null;
+  return String(v);
+}
+
+/** Зберігає номер із поділеного контакту. */
+export async function setUserPhone(telegramUserId, phone) {
+  const key = userKey(telegramUserId);
+  const r = getRedis();
+  await r.hSet(key, FIELD_PHONE, String(phone));
+  await r.hSet(key, "updatedAt", new Date().toISOString());
+}
+
 /**
  * Перший візит (наприклад /start) — окремо від рибалки.
  */

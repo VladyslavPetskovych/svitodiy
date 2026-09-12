@@ -180,6 +180,25 @@ export async function backupUserData() {
   }
 }
 
+/** @type {NodeJS.Timeout | null} */
+let flushTimer = null;
+
+/**
+ * Позачерговий бекап після важливої зміни (наприклад запис на дошці) —
+ * щоб нове не чекало до наступного періодичного тіку. Серія правок підряд
+ * зливається в один запис файлу.
+ */
+export function requestBackupSoon(delayMs = 3000) {
+  if (flushTimer != null) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    backupUserData().catch((err) =>
+      console.error("[backup] flush failed:", err.message)
+    );
+  }, delayMs);
+  if (typeof flushTimer.unref === "function") flushTimer.unref();
+}
+
 async function readBackupFile() {
   try {
     const raw = await fs.readFile(BACKUP_FILE, "utf8");

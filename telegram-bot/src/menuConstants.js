@@ -2,6 +2,8 @@ export const CB_MENU_MAIN = "menu_main";
 export const CB_MENU_CHASODIY = "menu_chas";
 export const CB_MENU_DUMOSVIT = "menu_dumosvit";
 export const CB_MENU_LITOPYS = "menu_lit";
+/** Персональний розділ — лише для номерів зі specialAccess.js */
+export const CB_MENU_NASTIA = "menu_nastia";
 export const CB_LIT_ADD = "lit_add";
 export const CB_LIT_LIST = "lit_lst";
 export const CB_LIT_CANCEL = "lit_can";

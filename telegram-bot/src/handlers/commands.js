@@ -1,10 +1,18 @@
+import { message } from "telegraf/filters";
 import { formatBalanceHtml } from "../economy.js";
 import { registerLitopysTextMiddleware } from "../litopys/textMiddleware.js";
 import {
   addBalance,
   getBalance,
+  getUserPhone,
+  setUserPhone,
   touchUser,
 } from "../userStore.js";
+import { isNastiaPhone } from "../specialAccess.js";
+import {
+  registerNastiaHandlers,
+  registerNastiaTextMiddleware,
+} from "../nastia/board.js";
 import { registerDumosvitQuizHandler } from "../dumosvit/scheduler.js";
 import { registerFishingHandlers } from "./fishingPanel.js";
 import { registerMenuHandlers, replyMainMenu } from "./menuHandlers.js";
@@ -28,8 +36,12 @@ function isBotAdmin(telegramUserId) {
  * @param {import("telegraf").Telegraf} bot
  */
 export function registerCommandHandlers(bot) {
+  // Дошка «Настя» перехоплює текст першою: якщо активні обидва очікування,
+  // пріоритет у свіжішої дії.
+  registerNastiaTextMiddleware(bot);
   registerLitopysTextMiddleware(bot);
   registerMenuHandlers(bot);
+  registerNastiaHandlers(bot);
   registerDumosvitQuizHandler(bot);
   registerFishingHandlers(bot);
 
@@ -59,11 +71,61 @@ export function registerCommandHandlers(bot) {
     );
   });
 
+  /**
+   * Номер потрібен лише для персональних розділів (див. specialAccess.js).
+   * Telegram віддає його тільки коли користувач сам натисне кнопку контакту.
+   */
+  bot.on(message("contact"), async (ctx) => {
+    const uid = ctx.from?.id;
+    const contact = ctx.message.contact;
+    if (uid == null) return;
+
+    if (contact.user_id !== uid) {
+      await ctx.reply("Це чужий контакт — надішли свій через кнопку нижче.", {
+        reply_markup: sharePhoneKeyboard(),
+      });
+      return;
+    }
+
+    await touchUser(uid);
+    await setUserPhone(uid, contact.phone_number);
+
+    await ctx.reply("Готово, номер збережено ✅", {
+      reply_markup: { remove_keyboard: true },
+    });
+    if (isNastiaPhone(contact.phone_number)) {
+      await ctx.reply("Відкрито особистий розділ 🌸");
+    }
+    await replyMainMenu(ctx);
+  });
+
   bot.start(async (ctx) => {
     const userId = ctx.from?.id;
     if (userId != null) {
       await touchUser(userId);
     }
     await replyMainMenu(ctx, { withIntro: true });
+    await maybeAskForPhone(ctx);
   });
+}
+
+function sharePhoneKeyboard() {
+  return {
+    keyboard: [[{ text: "📱 Поділитися номером", request_contact: true }]],
+    resize_keyboard: true,
+    one_time_keyboard: true,
+  };
+}
+
+/** Просимо контакт лише в особистому чаті й лише якщо його ще немає. */
+async function maybeAskForPhone(ctx) {
+  const uid = ctx.from?.id;
+  if (uid == null || ctx.chat?.type !== "private") return;
+  if ((await getUserPhone(uid)) != null) return;
+
+  await ctx.reply(
+    "Якщо для твого номера є особистий розділ — поділися контактом 👇\n" +
+      "<i>Необов’язково: без цього бот працює як зазвичай.</i>",
+    { parse_mode: "HTML", reply_markup: sharePhoneKeyboard() }
+  );
 }

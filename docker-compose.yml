@@ -50,13 +50,29 @@ services:
       # Бекап прогресу пишемо на змонтовану папку хоста — переживає
       # перезапуск/перебудову контейнера і навіть `docker compose down -v`.
       REDIS_BACKUP_FILE: /app/data/redis-user-backup.json
+      # Моніторинг у розділі «Адмін»: усі контейнери хоста (через проксі лише
+      # на читання) і процеси хоста (його /proc, змонтований read-only).
+      DOCKER_API_URL: http://docker-proxy:2375
+      HOST_PROC: /host/proc
     volumes:
       - ./data:/app/data
+      - /proc:/host/proc:ro
     depends_on:
       redis:
         condition: service_healthy
       server:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Бот НЕ отримує docker.sock напряму (це було б рівнозначно root на сервері).
+  # Проксі пропускає лише GET-запити до /containers — список, стан, статистику.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
 
 volumes:

@@ -6,7 +6,8 @@ export const CB_MENU_LITOPYS = "menu_lit";
 export const CB_MENU_NASTIA = "menu_nastia";
 /** Моніторинг сервера — лише для номерів адміна зі specialAccess.js */
 export const CB_MENU_ADMIN = "menu_admin";
-export const CB_ADMIN_REFRESH = "adm_refresh";
+/** Вкладки адмінки: adm_v_server | adm_v_docker | adm_v_procs */
+export const CB_ADMIN_VIEW_PREFIX = "adm_v_";
 export const CB_LIT_ADD = "lit_add";
 export const CB_LIT_LIST = "lit_lst";
 export const CB_LIT_CANCEL = "lit_can";

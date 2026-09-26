@@ -1,18 +1,20 @@
 import fs from "fs/promises";
 import os from "os";
 import { getRedis } from "../redisClient.js";
+import { listContainers } from "./docker.js";
+import { bar, escapeHtml, fmtBytes, fmtDuration, fmtTime, light, sleep } from "./format.js";
 
 /**
  * Моніторинг сервера для розділу «Адмін».
  *
- * Бот живе в Docker-контейнері, але /proc/meminfo, /proc/stat, /proc/uptime і
- * loadavg у контейнері показують цифри ВСЬОГО хоста, а /app/data змонтована
- * з диска хоста — тож звідси видно стан сервера загалом, без доступу до docker.sock.
+ * Бот живе в Docker-контейнері, тому читаємо /proc хоста (HOST_PROC, read-only),
+ * а /app/data змонтована з диска хоста — звідси видно стан сервера загалом.
  */
 
 const PREFIX = "svitodiy:sys";
 const STARTS_KEY = `${PREFIX}:bot_starts`;
 const STARTS_KEEP = 20;
+const PROC = process.env.HOST_PROC || "/proc";
 const DISK_PATH = process.env.MONITOR_DISK_PATH || "/app/data";
 
 /** Помилки з моменту запуску процесу (у пам'яті — після рестарту обнуляються). */
@@ -47,7 +49,7 @@ async function readProc(file) {
 
 /** @returns {Promise<{ totalKb: number, availableKb: number, swapTotalKb: number, swapFreeKb: number } | null>} */
 async function memInfo() {
-  const raw = await readProc("/proc/meminfo");
+  const raw = await readProc(`${PROC}/meminfo`);
   if (!raw) {
     return {
       totalKb: os.totalmem() / 1024,
@@ -66,7 +68,7 @@ async function memInfo() {
 }
 
 async function cpuTimes() {
-  const raw = await readProc("/proc/stat");
+  const raw = await readProc(`${PROC}/stat`);
   const line = raw?.split("\n").find((l) => l.startsWith("cpu "));
   if (!line) return null;
   const nums = line.trim().split(/\s+/).slice(1).map(Number);
@@ -79,14 +81,14 @@ async function cpuTimes() {
 async function cpuUsagePercent() {
   const a = await cpuTimes();
   if (!a) return null;
-  await new Promise((r) => setTimeout(r, 500));
+  await sleep(500);
   const b = await cpuTimes();
   if (!b || b.total === a.total) return null;
   return 100 * (1 - (b.idle - a.idle) / (b.total - a.total));
 }
 
 async function hostUptimeSec() {
-  const raw = await readProc("/proc/uptime");
+  const raw = await readProc(`${PROC}/uptime`);
   const n = Number(raw?.split(" ")[0]);
   return Number.isFinite(n) ? n : os.uptime();
 }
@@ -147,6 +149,24 @@ async function telegramInfo(telegram) {
   }
 }
 
+/** Короткий підсумок для вкладки «Сервер»; деталі — у вкладці «Контейнери». */
+async function dockerSummary() {
+  try {
+    const list = await listContainers();
+    const running = list.filter((c) => c.State === "running").length;
+    const bad = list.filter(
+      (c) =>
+        c.State === "restarting" ||
+        c.State === "dead" ||
+        (c.State === "running" && c.Status?.includes("unhealthy")) ||
+        (c.State === "exited" && !/Exited \(0\)/.test(c.Status ?? ""))
+    ).length;
+    return { ok: true, running, total: list.length, bad };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 async function lastStarts() {
   try {
     return await getRedis().lRange(STARTS_KEY, 0, 4);
@@ -155,62 +175,12 @@ async function lastStarts() {
   }
 }
 
-// ───────────── форматування ─────────────
-
-function escapeHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function fmtBytes(bytes) {
-  const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
-}
-
-function fmtDuration(sec) {
-  if (!Number.isFinite(sec)) return "—";
-  const d = Math.floor(sec / 86400);
-  const h = Math.floor((sec % 86400) / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  if (d > 0) return `${d} д ${h} год`;
-  if (h > 0) return `${h} год ${m} хв`;
-  return `${m} хв`;
-}
-
-function fmtTime(date) {
-  return new Date(date).toLocaleString("uk-UA", {
-    timeZone: process.env.TZ || "Europe/Kyiv",
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-/** 🟢 < warn ≤ 🟡 < bad ≤ 🔴 */
-function light(percent, warn = 70, bad = 90) {
-  if (percent == null) return "⚪️";
-  if (percent >= bad) return "🔴";
-  if (percent >= warn) return "🟡";
-  return "🟢";
-}
-
-function bar(percent) {
-  const filled = Math.round(Math.min(100, Math.max(0, percent)) / 10);
-  return "▓".repeat(filled) + "░".repeat(10 - filled);
-}
-
 /**
  * Повний звіт у HTML для Telegram.
  * @param {import("telegraf").Telegram} telegram
  */
 export async function buildMonitorReport(telegram) {
-  const [mem, cpu, uptime, disk, redis, api, tg, starts] = await Promise.all([
+  const [mem, cpu, uptime, disk, redis, api, tg, starts, docker] = await Promise.all([
     memInfo(),
     cpuUsagePercent(),
     hostUptimeSec(),
@@ -219,6 +189,7 @@ export async function buildMonitorReport(telegram) {
     apiServerInfo(),
     telegramInfo(telegram),
     lastStarts(),
+    dockerSummary(),
   ]);
 
   const cores = os.cpus().length || 1;
@@ -285,6 +256,15 @@ export async function buildMonitorReport(telegram) {
       ? `🟢 API-сервер — ${api.ms} мс`
       : `🔴 API-сервер — ${escapeHtml(api.error ?? `HTTP ${api.status}`)}`
   );
+
+  if (docker.ok) {
+    lines.push(
+      `${docker.bad > 0 ? "🔴" : "🟢"} Docker — контейнерів працює ${docker.running} з ${docker.total}` +
+        (docker.bad > 0 ? ` · проблемних: <b>${docker.bad}</b>` : "")
+    );
+  } else {
+    lines.push(`🔴 Docker — ${escapeHtml(docker.error)}`);
+  }
 
   // ── Бот ──
   const rss = process.memoryUsage().rss;

@@ -27,6 +27,11 @@ async function main() {
   const stopBackupLoop = startUserBackupLoop();
 
   const bot = new Telegraf(token);
+  // Без цього будь-яка помилка в обробнику (напр. користувач заблокував бота)
+  // зупиняє polling і весь процес падає.
+  bot.catch((err, ctx) => {
+    console.error(`[telegram-bot] update ${ctx?.update?.update_id} failed:`, err);
+  });
   registerCommandHandlers(bot);
 
   const stopDumosvit = startDumosvitScheduler(bot, 45_000);
@@ -34,9 +39,6 @@ async function main() {
   const stopArcs = startArcScheduler(bot, 60_000);
 
   await syncBotCommands(bot);
-
-  await bot.launch();
-  console.log("[telegram-bot] polling…");
 
   const shutdown = async (signal) => {
     stopDumosvit();
@@ -50,7 +52,15 @@ async function main() {
 
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));
+
+  // У Telegraf 4.16 launch() резолвиться лише після зупинки бота,
+  // тому обробники сигналів реєструємо до нього.
+  await bot.launch(() => console.log("[telegram-bot] polling…"));
 }
+
+process.on("unhandledRejection", (err) => {
+  console.error("[telegram-bot] unhandledRejection:", err);
+});
 
 main().catch((err) => {
   console.error(err);

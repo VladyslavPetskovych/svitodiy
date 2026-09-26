@@ -8,12 +8,13 @@ import {
   setUserPhone,
   touchUser,
 } from "../userStore.js";
-import { isNastiaPhone } from "../specialAccess.js";
+import { isAdminPhone, isNastiaPhone } from "../specialAccess.js";
 import {
   registerNastiaHandlers,
   registerNastiaTextMiddleware,
 } from "../nastia/board.js";
 import { registerDumosvitQuizHandler } from "../dumosvit/scheduler.js";
+import { registerAdminHandlers } from "../admin/handlers.js";
 import { registerFishingHandlers } from "./fishingPanel.js";
 import { registerMenuHandlers, replyMainMenu } from "./menuHandlers.js";
 
@@ -44,6 +45,7 @@ export function registerCommandHandlers(bot) {
   registerNastiaHandlers(bot);
   registerDumosvitQuizHandler(bot);
   registerFishingHandlers(bot);
+  registerAdminHandlers(bot);
 
   /** Лише для ID з BOT_ADMIN_USER_IDS у .env — докинути ✨ після нового Redis на сервері */
   bot.command("grant_balance", async (ctx) => {
@@ -95,6 +97,9 @@ export function registerCommandHandlers(bot) {
     });
     if (isNastiaPhone(contact.phone_number)) {
       await ctx.reply("Відкрито особистий розділ 🌸");
+    }
+    if (isAdminPhone(contact.phone_number)) {
+      await ctx.reply("Відкрито розділ «Адмін» 🛠");
     }
     await replyMainMenu(ctx);
   });

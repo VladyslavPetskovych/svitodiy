@@ -4,6 +4,9 @@ export const CB_MENU_DUMOSVIT = "menu_dumosvit";
 export const CB_MENU_LITOPYS = "menu_lit";
 /** Персональний розділ — лише для номерів зі specialAccess.js */
 export const CB_MENU_NASTIA = "menu_nastia";
+/** Моніторинг сервера — лише для номерів адміна зі specialAccess.js */
+export const CB_MENU_ADMIN = "menu_admin";
+export const CB_ADMIN_REFRESH = "adm_refresh";
 export const CB_LIT_ADD = "lit_add";
 export const CB_LIT_LIST = "lit_lst";
 export const CB_LIT_CANCEL = "lit_can";

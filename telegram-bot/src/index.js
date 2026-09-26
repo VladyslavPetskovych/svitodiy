@@ -9,6 +9,7 @@ import { startLitopysScheduler } from "./litopys/scheduler.js";
 import { startArcScheduler } from "./chasodiy/arcScheduler.js";
 import { connectRedis, disconnectRedis } from "./redisClient.js";
 import { restoreUserDataIfRedisEmpty, startUserBackupLoop } from "./userBackup.js";
+import { recordBotError, recordBotStart } from "./admin/monitor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
@@ -23,6 +24,7 @@ if (!token) {
 
 async function main() {
   await connectRedis();
+  await recordBotStart();
   await restoreUserDataIfRedisEmpty();
   const stopBackupLoop = startUserBackupLoop();
 
@@ -31,6 +33,7 @@ async function main() {
   // зупиняє polling і весь процес падає.
   bot.catch((err, ctx) => {
     console.error(`[telegram-bot] update ${ctx?.update?.update_id} failed:`, err);
+    recordBotError(err);
   });
   registerCommandHandlers(bot);
 
@@ -60,6 +63,7 @@ async function main() {
 
 process.on("unhandledRejection", (err) => {
   console.error("[telegram-bot] unhandledRejection:", err);
+  recordBotError(err);
 });
 
 main().catch((err) => {

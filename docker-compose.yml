@@ -1,8 +1,8 @@
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # Порт навмисно не публікуємо: Redis без пароля не можна відкривати в інтернет.
+    # Бот підключається до нього всередині docker-мережі (redis://redis:6379).
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes

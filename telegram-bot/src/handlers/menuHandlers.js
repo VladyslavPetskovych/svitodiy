@@ -58,6 +58,7 @@ import {
   CB_MENU_LITOPYS,
   CB_MENU_MAIN,
   CB_MENU_NASTIA,
+  CB_MENU_ADMIN,
   CB_LIT_ADD,
   CB_LIT_CANCEL,
   CB_LIT_HOME,
@@ -80,7 +81,7 @@ import {
   setEquippedTalisman,
   sellFishUnits,
 } from "../userStore.js";
-import { hasNastiaAccess } from "../specialAccess.js";
+import { hasAdminAccess, hasNastiaAccess } from "../specialAccess.js";
 import { sendFishingPanel } from "./fishingPanel.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -110,8 +111,11 @@ const DUMOSVIT_MENU_TEXT =
   "Нагадування: обери інтенсивність нижче, потім увімкни таймер. " +
   "Після картки з відповіддю натисни <b>Окей</b>, щоб прибрати її з чату.";
 
-/** @param {boolean} [withNastia] — додатковий розділ для дозволених номерів */
-function mainMenuKeyboard(withNastia = false) {
+/**
+ * @param {boolean} [withNastia] — додатковий розділ для дозволених номерів
+ * @param {boolean} [withAdmin] — моніторинг сервера для номерів адміна
+ */
+function mainMenuKeyboard(withNastia = false, withAdmin = false) {
   const rows = [
     [{ text: "⚔️ Часодій · РПГ", callback_data: CB_MENU_CHASODIY }],
     [{ text: "📚 Думосвіт · іспанська", callback_data: CB_MENU_DUMOSVIT }],
@@ -119,6 +123,9 @@ function mainMenuKeyboard(withNastia = false) {
   ];
   if (withNastia) {
     rows.push([{ text: "🌸 Настя", callback_data: CB_MENU_NASTIA }]);
+  }
+  if (withAdmin) {
+    rows.push([{ text: "🛠 Адмін · сервер", callback_data: CB_MENU_ADMIN }]);
   }
   return { inline_keyboard: rows };
 }
@@ -339,7 +346,10 @@ export async function replyMainMenu(ctx, opts = {}) {
   await ctx.replyWithPhoto(Input.fromLocalFile(MAIN_MENU_IMAGE_PATH), {
     caption: cap,
     parse_mode: "HTML",
-    reply_markup: mainMenuKeyboard(await hasNastiaAccess(userId)),
+    reply_markup: mainMenuKeyboard(
+      await hasNastiaAccess(userId),
+      await hasAdminAccess(userId)
+    ),
   });
 }
 
@@ -350,7 +360,7 @@ async function tryEditMainMenu(ctx) {
     await editMenuBody(
       ctx,
       buildMainMenuCaption(formatBalanceHtml(bal), false),
-      mainMenuKeyboard(await hasNastiaAccess(uid))
+      mainMenuKeyboard(await hasNastiaAccess(uid), await hasAdminAccess(uid))
     );
   } catch {
     await replyMainMenu(ctx);

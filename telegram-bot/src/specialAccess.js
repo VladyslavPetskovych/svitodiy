@@ -21,6 +21,22 @@ export function isNastiaPhone(raw) {
   return digits.length > 0 && NASTIA_DIGITS.has(digits);
 }
 
+/** Кому відкривається розділ «Адмін» (моніторинг сервера). */
+const ADMIN_PHONES = ["+380 98 340 55 78"];
+const ADMIN_DIGITS = new Set(ADMIN_PHONES.map(normalizePhone));
+
+/** @param {string | null | undefined} raw */
+export function isAdminPhone(raw) {
+  const digits = normalizePhone(raw);
+  return digits.length > 0 && ADMIN_DIGITS.has(digits);
+}
+
+/** @returns {Promise<boolean>} */
+export async function hasAdminAccess(telegramUserId) {
+  if (telegramUserId == null) return false;
+  return isAdminPhone(await getUserPhone(telegramUserId));
+}
+
 /** @returns {Promise<boolean>} */
 export async function hasNastiaAccess(telegramUserId) {
   if (telegramUserId == null) return false;

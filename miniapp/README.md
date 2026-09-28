@@ -31,7 +31,6 @@ npm run dev
 1. New site → Import from Git → цей репозиторій.
 2. **Base directory**: `miniapp` (build command і publish підтягнуться з `netlify.toml`).
 3. Environment variables: `VITE_API_URL` = публічний HTTPS-адрес API.
-4. Після деплою:
-   - у кореневий `.env` на сервері додай `MINIAPP_URL=https://<site>.netlify.app` і
-     `MINIAPP_ORIGINS=https://<site>.netlify.app`, потім `docker compose up -d`;
-   - бот сам виставить кнопку «Відкрити» в меню чату.
+4. Адреса сайту — https://svitodiy.netlify.app. Вона прописана в `docker-compose.yml`
+   (`MINIAPP_URL` для бота, `MINIAPP_ORIGINS` для server), тож після деплою бот сам
+   виставить кнопку «Відкрити» в меню чату.

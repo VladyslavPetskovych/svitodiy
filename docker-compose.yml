@@ -26,6 +26,8 @@ services:
     environment:
       PORT: "3000"
       REDIS_URL: redis://redis:6379
+      # Лише Mini App з Netlify може звертатися до /api/me з браузера.
+      MINIAPP_ORIGINS: https://svitodiy.netlify.app
     depends_on:
       redis:
         condition: service_healthy
@@ -53,6 +55,8 @@ services:
       TZ: Europe/Kyiv
       SERVER_URL: http://server:3000
       REDIS_URL: redis://redis:6379
+      # Кнопка «Відкрити» в меню чату веде на Mini App.
+      MINIAPP_URL: https://svitodiy.netlify.app
       # Бекап прогресу пишемо на змонтовану папку хоста — переживає
       # перезапуск/перебудову контейнера і навіть `docker compose down -v`.
       REDIS_BACKUP_FILE: /app/data/redis-user-backup.json

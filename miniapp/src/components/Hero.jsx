@@ -1,7 +1,7 @@
 import { BOT_URL } from '../lib/telegram.js'
 import { ButtonLink, Container } from './ui.jsx'
 
-export default function Hero({ inTelegram, firstName }) {
+export default function Hero() {
   return (
     <section id="top" className="relative overflow-hidden">
       {/* М'яке «небо» за островом */}
@@ -9,7 +9,7 @@ export default function Hero({ inTelegram, firstName }) {
       <Container className="relative grid items-center gap-10 py-12 md:grid-cols-2 md:py-20">
         <div>
           <p className="font-pixel text-[10px] leading-relaxed text-accent uppercase sm:text-xs">
-            {firstName ? `Привіт, ${firstName}!` : 'Бот у Telegram'}
+            Гра й бот у Telegram
           </p>
           <h1 className="mt-3 font-pixel text-3xl leading-tight sm:text-5xl">Світодій</h1>
           <p className="mt-5 max-w-md text-lg text-muted">
@@ -17,11 +17,7 @@ export default function Hero({ inTelegram, firstName }) {
             нагадає вчасно.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            {inTelegram ? (
-              <ButtonLink href="#profile">Мій профіль</ButtonLink>
-            ) : (
-              <ButtonLink href={BOT_URL}>Почати в Telegram</ButtonLink>
-            )}
+            <ButtonLink href={BOT_URL}>Грати в Telegram</ButtonLink>
             <ButtonLink href="#sections" variant="ghost">
               Що вміє бот
             </ButtonLink>

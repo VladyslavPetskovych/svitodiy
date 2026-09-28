@@ -2,13 +2,13 @@ import { BOT_URL } from '../lib/telegram.js'
 import { ButtonLink, Container } from './ui.jsx'
 
 const NAV = [
-  ['#profile', 'Профіль'],
+  ['#profile', 'Гра'],
   ['#sections', 'Розділи'],
   ['#chasodiy', 'Часодій'],
   ['#arcs', 'Арки'],
 ]
 
-export default function Header({ inTelegram }) {
+export default function Header() {
   return (
     <header className="sticky top-0 z-20 border-b border-line/70 bg-bg/80 backdrop-blur-md">
       <Container className="flex h-16 items-center gap-6">
@@ -22,12 +22,9 @@ export default function Header({ inTelegram }) {
             </a>
           ))}
         </nav>
-        {/* У Telegram бот і так відкритий — кнопка зайва. */}
-        {!inTelegram && (
-          <ButtonLink href={BOT_URL} className="ml-auto px-4 py-2 text-sm md:ml-0">
-            Відкрити бота
-          </ButtonLink>
-        )}
+        <ButtonLink href={BOT_URL} className="ml-auto px-4 py-2 text-sm md:ml-0">
+          Відкрити бота
+        </ButtonLink>
       </Container>
     </header>
   )

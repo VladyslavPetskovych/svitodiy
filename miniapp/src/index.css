@@ -32,6 +32,26 @@
   --danger: #ff7b6e;
 }
 
+/* Гра (Mini App у Telegram) має власну незмінну палітру: море, пергамент, дерево, золото. */
+@theme {
+  --color-sea-900: #0a1c2a;
+  --color-sea-800: #0f2a3d;
+  --color-sea-700: #16405c;
+  --color-sea-500: #2a7bb0;
+  --color-sky: #7cc4f0;
+  --color-cream: #f7eed8;
+  --color-parch: #e8d5a9;
+  --color-parch-dark: #d3bf8c;
+  --color-ink: #3a2616;
+  --color-ink-soft: #7a5f41;
+  --color-wood: #8b5d3b;
+  --color-wood-dark: #5b3a22;
+  --color-gold: #ffcf3f;
+  --color-good: #5cb83c;
+  --color-bad: #e2553e;
+  --color-magic: #b57bff;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);

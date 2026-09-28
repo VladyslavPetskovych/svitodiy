@@ -1,5 +1,4 @@
-# У Netlify: Site settings → Build & deploy → Base directory = miniapp
-# (тоді цей файл підхопиться автоматично).
+# У Netlify: Build settings → Base directory = miniapp (тоді цей файл підхопиться автоматично).
 [build]
   command = "npm run build"
   publish = "dist"
@@ -7,8 +6,17 @@
 [build.environment]
   NODE_VERSION = "22"
 
-# SPA: будь-який шлях віддає index.html (на майбутнє, коли з'явиться роутинг).
+# /api/* обробляє edge-функція netlify/edge-functions/api.js (проксі на сервер гри,
+# адреса — змінна API_ORIGIN). Edge-функції виконуються раніше за редиректи нижче.
+
+# SPA: будь-який інший шлях віддає index.html.
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Картинки гри не змінюються між деплоями без зміни імені — кешуємо довго.
+[[headers]]
+  for = "/game/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"

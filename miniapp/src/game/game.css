@@ -1,0 +1,192 @@
+/*
+ * Піксельні рамки й кнопки — Kenney «Pixel UI Pack» (CC0, www.kenney.nl),
+ * файли в public/game/ui. Масштаб ×2 з nearest-neighbour, щоб пікселі лишались чіткими.
+ */
+
+.game-root {
+  background:
+    radial-gradient(120% 60% at 50% -10%, #1f5a80 0%, transparent 60%),
+    linear-gradient(180deg, #123550 0%, #0a1c2a 100%);
+  color: var(--color-cream);
+  min-height: 100dvh;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pixelated {
+  image-rendering: pixelated;
+}
+
+/* Дерев'яна панель із заклепками (шапка, таббар, заголовки). */
+.px-wood {
+  border-style: solid;
+  border-width: 6px;
+  border-image: url("/game/ui/panel-wood.png") 16 fill / 32px round;
+  image-rendering: pixelated;
+}
+
+/* Пергамент — основні картки з темним «чорнильним» текстом. */
+.px-paper {
+  border-style: solid;
+  border-width: 6px;
+  border-image: url("/game/ui/panel-paper.png") 16 fill / 32px round;
+  image-rendering: pixelated;
+  color: var(--color-ink);
+}
+
+/* Вкладка-комірка для предметів. */
+.px-slot {
+  border-style: solid;
+  border-width: 4px;
+  border-image: url("/game/ui/slot.png") 14 fill / 20px round;
+  image-rendering: pixelated;
+}
+
+/* Кнопки: текстура + натиснутий стан. */
+.px-btn {
+  --btn: url("/game/ui/btn-yellow.png");
+  --btn-pressed: url("/game/ui/btn-yellow-pressed.png");
+  border-style: solid;
+  border-width: 4px 4px 8px;
+  border-image-source: var(--btn);
+  border-image-slice: 8 fill;
+  border-image-width: 16px;
+  image-rendering: pixelated;
+  color: #3a2616;
+  transition: transform 60ms;
+}
+.px-btn:active:not(:disabled),
+.px-btn[data-pressed="true"] {
+  border-image-source: var(--btn-pressed);
+  transform: translateY(3px);
+}
+.px-btn:disabled {
+  --btn: url("/game/ui/btn-grey.png");
+  --btn-pressed: url("/game/ui/btn-grey.png");
+  color: #6b6b6b;
+  cursor: not-allowed;
+}
+.px-btn-green {
+  --btn: url("/game/ui/btn-green.png");
+  --btn-pressed: url("/game/ui/btn-green-pressed.png");
+  color: #173b0c;
+}
+.px-btn-blue {
+  --btn: url("/game/ui/btn-blue.png");
+  --btn-pressed: url("/game/ui/btn-blue-pressed.png");
+  color: #fff;
+  text-shadow: 0 2px 0 #11507a;
+}
+.px-btn-red {
+  --btn: url("/game/ui/btn-red.png");
+  --btn-pressed: url("/game/ui/btn-red-pressed.png");
+  color: #fff;
+  text-shadow: 0 2px 0 #8a2b12;
+}
+.px-btn-paper {
+  --btn: url("/game/ui/btn-paper.png");
+  --btn-pressed: url("/game/ui/btn-paper-pressed.png");
+  color: var(--color-ink);
+}
+
+/* Смужка прогресу в піксельному стилі. */
+.px-bar {
+  height: 14px;
+  background: #3b2a1c;
+  box-shadow:
+    0 0 0 2px #1c120a,
+    inset 0 2px 0 rgb(0 0 0 / 0.35);
+  image-rendering: pixelated;
+  overflow: hidden;
+}
+.px-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(180deg, #9be36b 0 35%, #5cb83c 35% 80%, #3f8f25 80%);
+  transition: width 300ms ease-out;
+}
+.px-bar.gold > span {
+  background: linear-gradient(180deg, #ffe58a 0 35%, #ffcf3f 35% 80%, #d49a12 80%);
+}
+.px-bar.sky > span {
+  background: linear-gradient(180deg, #b6e3ff 0 35%, #6cc0f5 35% 80%, #2f86c4 80%);
+}
+
+/* Вода: легкі блискітки, що повільно пливуть. */
+.water-shimmer {
+  background-image:
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.18) 0 6px, transparent 6px 40px),
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.1) 0 3px, transparent 3px 26px);
+  background-size: 200px 2px, 140px 2px;
+  background-repeat: repeat-x;
+  background-position: 0 30%, 0 70%;
+  animation: shimmer 6s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes shimmer {
+  to {
+    background-position: 200px 30%, -140px 70%;
+  }
+}
+
+.ripple {
+  position: absolute;
+  border: 2px solid rgb(255 255 255 / 0.85);
+  border-radius: 50%;
+  animation: ripple 1.6s ease-out infinite;
+}
+@keyframes ripple {
+  from {
+    width: 6px;
+    height: 3px;
+    opacity: 1;
+  }
+  to {
+    width: 70px;
+    height: 22px;
+    opacity: 0;
+  }
+}
+
+
+.glow-rays {
+  background: repeating-conic-gradient(from 0deg, rgb(255 214 90 / 0.35) 0 10deg, transparent 10deg 30deg);
+  animation: spin 12s linear infinite;
+  border-radius: 50%;
+  mask-image: radial-gradient(circle, #000 30%, transparent 70%);
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.shake {
+  animation: shake 0.35s;
+}
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .water-shimmer,
+  .ripple,
+  .glow-rays {
+    animation: none;
+  }
+}

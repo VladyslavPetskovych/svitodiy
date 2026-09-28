@@ -3,8 +3,8 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
 import express from "express";
-import { requireTelegramUser } from "./telegramAuth.js";
-import { connectRedis, getUserSnapshot, upsertProfile } from "./userRepo.js";
+import { connectRedis } from "./bot.js";
+import { buildApiRouter } from "./routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
@@ -19,6 +19,7 @@ if (!BOT_TOKEN) {
 }
 
 // Список дозволених origin для mini app (Netlify-домен). Порожньо — дозволено всім (локальна розробка).
+// Через проксі Netlify (/api/* на тому ж домені) CORS взагалі не задіяний.
 const allowedOrigins = (process.env.MINIAPP_ORIGINS ?? "")
   .split(",")
   .map((s) => s.trim())
@@ -26,8 +27,9 @@ const allowedOrigins = (process.env.MINIAPP_ORIGINS ?? "")
 
 const app = express();
 
+app.disable("x-powered-by");
 app.use(cors(allowedOrigins.length ? { origin: allowedOrigins } : undefined));
-app.use(express.json());
+app.use(express.json({ limit: "16kb" }));
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "server" });
@@ -37,17 +39,7 @@ app.get("/api/ping", (_req, res) => {
   res.json({ message: "pong", at: new Date().toISOString() });
 });
 
-// Дані поточного користувача mini app. id береться лише з підписаного initData,
-// тож чужий профіль підставити не вийде.
-app.get("/api/me", requireTelegramUser(BOT_TOKEN), async (req, res) => {
-  try {
-    await upsertProfile(req.tgUser);
-    res.json(await getUserSnapshot(req.tgUser.id));
-  } catch (err) {
-    console.error("[server] /api/me failed:", err);
-    res.status(500).json({ error: "internal" });
-  }
-});
+app.use("/api", buildApiRouter(BOT_TOKEN));
 
 await connectRedis();
 

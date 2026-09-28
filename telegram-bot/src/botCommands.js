@@ -32,7 +32,7 @@ async function syncMiniAppButton(bot) {
   try {
     await bot.telegram.setChatMenuButton({
       menuButton: url
-        ? { type: "web_app", text: "Відкрити", web_app: { url } }
+        ? { type: "web_app", text: "🎮 Грати", web_app: { url } }
         : { type: "commands" },
     });
     console.log("[telegram-bot] menu button:", url ?? "commands");

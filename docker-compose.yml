@@ -14,20 +14,25 @@ services:
       retries: 5
 
   server:
+    # Контекст — корінь репо: сервер використовує ігрові модулі бота (server/src/bot.js).
     build:
-      context: ./server
-      dockerfile: Dockerfile
-    # API потрібне Mini App ззовні, але порт відкриваємо лише на 127.0.0.1:
-    # назовні його віддає reverse proxy хоста (nginx/Caddy) з HTTPS.
+      context: .
+      dockerfile: server/Dockerfile
+    # Порт відкритий назовні: Mini App ходить сюди через проксі Netlify
+    # (miniapp/netlify/edge-functions/api.js, змінна API_ORIGIN у Netlify).
+    # Усе під /api, крім /api/catalog, вимагає підписаний Telegram initData.
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     env_file:
       - .env
     environment:
       PORT: "3000"
       REDIS_URL: redis://redis:6379
-      # Лише Mini App з Netlify може звертатися до /api/me з браузера.
+      # Лише Mini App з Netlify може звертатися до API напряму з браузера.
       MINIAPP_ORIGINS: https://svitodiy.netlify.app
+      # Модулі бота інколи просять позачерговий бекап (дошка «Настя»). Справжній
+      # бекап робить контейнер бота кожні 2 хв, тож тут пишемо в тимчасову папку.
+      REDIS_BACKUP_FILE: /tmp/svitodiy-backup/redis-user-backup.json
     depends_on:
       redis:
         condition: service_healthy

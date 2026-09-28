@@ -1,36 +1,64 @@
-# Світодій — Telegram Mini App
+# Світодій — гра в Telegram Mini App
 
-React + Vite + Tailwind v4. Показує профіль, баланс, статистику рибалки та інвентар користувача.
+React + Vite + Tailwind v4 + [motion](https://motion.dev) для анімацій.
+
+- **У Telegram** (кнопка «🎮 Грати» в чаті з ботом) відкривається гра — `src/game`.
+- **У звичайному браузері** — лендинг з описом і посиланням на бота (`src/App.jsx`, `src/components`).
 
 ## Як це працює
 
 ```
-Telegram ──initData──▶ Mini App (Netlify) ──Authorization: tma <initData>──▶ server /api/me ──▶ Redis
+Telegram ──initData──▶ Гра (Netlify) ──/api/*──▶ edge-функція Netlify ──▶ server (docker) ──▶ Redis ◀── бот
 ```
 
-- Telegram передає в апку `initData`: підписаний токеном бота рядок з `user.id`, ім'ям, username, фото.
-- `server` перевіряє підпис (`server/src/telegramAuth.js`), тож підставити чужий id не вийде.
-- Дані беруться з того ж Redis, що й у бота: `svitodiy:user:<id>` (hash) і `svitodiy:inv:<id>` (hash).
-  Під час кожного відкриття апки server оновлює в `svitodiy:user:<id>` поля профілю:
-  `firstName`, `lastName`, `username`, `photoUrl`, `languageCode`, `isPremium`, `lastSeenAt` (+ `firstSeenAt`, якщо його ще немає).
+- Уся ігрова логіка — на сервері (`server/src/game`), і він **імпортує модулі бота** (`server/src/bot.js`):
+  шанси рибалки, рецепти, ціни, арки, Думосвіт, Літописець, дошка «Настя». Прогрес спільний із ботом.
+- Сервер перевіряє підпис `initData` токеном бота — чужий id не підставити, ✨ не «намалювати» з клієнта.
+- Після кожної дії сервер повертає свіжий `state`, клієнт лише показує його.
+- `/api/*` на домені Netlify проксіює `netlify/edge-functions/api.js` на адресу з `API_ORIGIN` —
+  тож для API не потрібен окремий домен і сертифікат, а CORS не задіяний.
+
+## Розділи гри
+
+| Вкладка | Що всередині | Звідки в боті |
+|---|---|---|
+| 🏝️ Острів | Щоденна нагорода, заготівля, «наступна ціль», плитки розділів, журнал | головне меню |
+| 🎣 Рибалка | Закид → очікування → «Тягни!» → картка улову; гачок і талісман; довідник риби | `/fish` |
+| 🗺️ Мапа | Острови Джунглі/Хуртовина (розвідка з боями, заготівля 30 с), Пустеля — скоро | Карта плавань |
+| 🎒 Рюкзак | Речі (продати, приготувати, вдягнути) + Алхімія (рецепти з підказками, де взяти ресурс) | `/inv`, Алхімія |
+| 📖 Щоденник | Думосвіт (картки, тести, нагадування в чат), Літописець, Арки, Настя, Адмін | відповідні розділи |
+
+Нове лише в апці (налаштовується в `server/src/game/catalog.js` → `GAME_CONFIG`):
+щоденна нагорода за серію днів (5…30 ✨), +1 ✨ за правильну відповідь у тесті Думосвіту (до 20 на день),
+кулдаун закиду 1.5 с проти автоклікера. Рівень гравця — лише візуальний, на економіку не впливає.
+
+Адмін-моніторинг лишається в боті: йому потрібен доступ до Docker, а сервер гри відкритий в інтернет.
+
+## Графіка
+
+- Арт — з `telegram-bot/assets`, стиснутий у WebP (`public/game/art`, `public/game/fish`).
+- Рамки, панелі й кнопки — [Kenney Pixel UI Pack](https://kenney.nl/assets/pixel-ui-pack) (CC0),
+  `public/game/ui`, підключені через CSS `border-image` у `src/game/game.css`.
 
 ## Локальна розробка
 
 ```bash
-cp .env.example .env.local   # VITE_API_URL=http://localhost:3000
+# у корені репо: Redis + сервер гри на :3000
+npm run docker:redis
+npm run dev:server
+
+# тут
 npm install
 npm run dev
 ```
 
-У звичайному браузері `initData` немає, тож апка покаже «Відкрий через бота».
-Щоб перевірити в Telegram, потрібен HTTPS: підійде тунель (`cloudflared tunnel --url http://localhost:5173`
-або ngrok). Отриманий URL постав у `MINIAPP_URL` і перезапусти бота.
+У звичайному браузері відкриється лендинг. Щоб побачити гру, відкрий її з Telegram через HTTPS-тунель
+(`cloudflared tunnel --url http://localhost:5173`) і тимчасово постав цей URL у `MINIAPP_URL`.
 
-## Деплой на Netlify
+## Деплой
 
-1. New site → Import from Git → цей репозиторій.
-2. **Base directory**: `miniapp` (build command і publish підтягнуться з `netlify.toml`).
-3. Environment variables: `VITE_API_URL` = публічний HTTPS-адрес API.
-4. Адреса сайту — https://svitodiy.netlify.app. Вона прописана в `docker-compose.yml`
-   (`MINIAPP_URL` для бота, `MINIAPP_ORIGINS` для server), тож після деплою бот сам
-   виставить кнопку «Відкрити» в меню чату.
+1. **Сервер гри** — `docker compose up -d --build` (робить GitHub Actions при пуші в `main`).
+   Порт `3000` має бути відкритий у фаєрволі сервера.
+2. **Netlify** — Base directory `miniapp`, змінна середовища **`API_ORIGIN`** = `http://<IP-сервера>:3000`,
+   потім Trigger deploy.
+3. Бот сам поставить кнопку «🎮 Грати» (`MINIAPP_URL` у `docker-compose.yml`).

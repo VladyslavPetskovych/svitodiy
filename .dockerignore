@@ -1,0 +1,9 @@
+# Для збірки server (context — корінь репозиторію). Бот збирається з ./telegram-bot зі своїм .dockerignore.
+**/node_modules
+.git
+.github
+.env
+data
+miniapp
+telegram-bot/assets
+telegram-bot/scripts

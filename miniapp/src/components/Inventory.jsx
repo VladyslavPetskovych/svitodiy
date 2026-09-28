@@ -1,4 +1,5 @@
 import { INVENTORY_GROUPS, itemMeta } from '../lib/items.js'
+import { Card } from './ui.jsx'
 
 export default function Inventory({ inventory, equipped }) {
   const known = new Set(INVENTORY_GROUPS.flatMap((g) => Object.keys(g.items)))
@@ -14,26 +15,28 @@ export default function Inventory({ inventory, equipped }) {
   const equippedIds = new Set([equipped.hook, equipped.talisman].filter(Boolean))
 
   return (
-    <section className="rounded-2xl bg-tg-section p-4">
-      <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-tg-hint">Інвентар</h2>
+    <Card className="p-5">
+      <h3 className="mb-3 text-sm font-semibold text-muted">Інвентар</h3>
 
-      {groups.length === 0 && <p className="text-tg-hint">Поки порожньо — закинь вудку в боті 🎣</p>}
+      {groups.length === 0 && (
+        <p className="py-6 text-center text-muted">Поки порожньо — закинь вудку в боті 🎣</p>
+      )}
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-5">
         {groups.map((g) => (
           <div key={g.title}>
-            <h3 className="mb-1 font-medium">{g.title}</h3>
-            <ul className="divide-y divide-tg-secondary">
+            <h4 className="mb-2 font-display text-base font-semibold">{g.title}</h4>
+            <ul className="grid gap-2 sm:grid-cols-2">
               {g.ids.map((id) => {
                 const { emoji, name } = itemMeta(id)
                 return (
-                  <li key={id} className="flex items-center gap-3 py-2">
+                  <li key={id} className="flex items-center gap-3 rounded-xl bg-surface-2 px-3 py-2">
                     <span className="text-xl">{emoji}</span>
-                    <span className="flex-1">
+                    <span className="min-w-0 flex-1 text-sm">
                       {name}
-                      {equippedIds.has(id) && <span className="ml-2 text-xs text-tg-link">екіпіровано</span>}
+                      {equippedIds.has(id) && <span className="block text-xs text-accent">екіпіровано</span>}
                     </span>
-                    <span className="font-semibold tabular-nums">×{inventory[id]}</span>
+                    <span className="font-bold tabular-nums">×{inventory[id]}</span>
                   </li>
                 )
               })}
@@ -41,6 +44,6 @@ export default function Inventory({ inventory, equipped }) {
           </div>
         ))}
       </div>
-    </section>
+    </Card>
   )
 }

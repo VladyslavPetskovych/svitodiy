@@ -1,24 +1,84 @@
 @import "tailwindcss";
 
-/*
- * Кольори беремо з теми Telegram: telegram-web-app.js сам виставляє
- * --tg-theme-* на <html>, тож апка автоматично світла/темна як у клієнта.
- * Fallback — для відкриття у звичайному браузері.
- */
+/* Тема перемикається класом .dark на <html> (див. lib/telegram.js). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Палітра взята з піксель-арту бота: небо, море і помаранчевий дах хатинки. */
+:root {
+  --bg: #eef6fc;
+  --surface: #ffffff;
+  --surface-2: #e3eff8;
+  --line: #d2e2ee;
+  --text: #0f2233;
+  --muted: #587084;
+  --sea: #2672ad;
+  --accent: #e0703a;
+  --accent-shadow: #a94c20;
+  --accent-text: #ffffff;
+  --danger: #c7392f;
+}
+
+.dark {
+  --bg: #0b1622;
+  --surface: #122233;
+  --surface-2: #1a2e42;
+  --line: #213a52;
+  --text: #e8f1f8;
+  --muted: #8ea6ba;
+  --sea: #6cb2e6;
+  --accent: #f08a4b;
+  --accent-shadow: #9c4a1d;
+  --accent-text: #1a0d05;
+  --danger: #ff7b6e;
+}
+
 @theme inline {
-  --color-tg-bg: var(--tg-theme-bg-color, #ffffff);
-  --color-tg-text: var(--tg-theme-text-color, #111827);
-  --color-tg-hint: var(--tg-theme-hint-color, #8e8e93);
-  --color-tg-link: var(--tg-theme-link-color, #2481cc);
-  --color-tg-button: var(--tg-theme-button-color, #2481cc);
-  --color-tg-button-text: var(--tg-theme-button-text-color, #ffffff);
-  --color-tg-secondary: var(--tg-theme-secondary-bg-color, #f2f2f7);
-  --color-tg-section: var(--tg-theme-section-bg-color, #ffffff);
-  --color-tg-destructive: var(--tg-theme-destructive-text-color, #e53935);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-sea: var(--sea);
+  --color-accent: var(--accent);
+  --color-accent-shadow: var(--accent-shadow);
+  --color-accent-text: var(--accent-text);
+  --color-danger: var(--danger);
+  --font-sans: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-pixel: "Press Start 2P", "Manrope", monospace;
+  --font-display: "Unbounded", "Manrope", system-ui, sans-serif;
+  --animate-float: float 6s ease-in-out infinite;
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  @apply bg-tg-secondary text-tg-text antialiased;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  @apply bg-bg font-sans text-text antialiased;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Якорі не ховаються під липкою шапкою. */
+section[id] {
+  scroll-margin-top: 5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .animate-float {
+    animation: none;
+  }
 }

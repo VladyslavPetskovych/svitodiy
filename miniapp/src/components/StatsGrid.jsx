@@ -1,3 +1,5 @@
+import { Card } from './ui.jsx'
+
 const STATS = [
   ['casts', '🎣', 'Закидів'],
   ['catches', '🐟', 'Риби'],
@@ -8,18 +10,18 @@ const STATS = [
 
 export default function StatsGrid({ stats }) {
   return (
-    <section className="rounded-2xl bg-tg-section p-4">
-      <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-tg-hint">Рибалка</h2>
-      <div className="grid grid-cols-3 gap-2">
+    <Card className="p-5">
+      <h3 className="mb-3 text-sm font-semibold text-muted">Рибалка</h3>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-3">
         {STATS.map(([key, emoji, label]) => (
-          <div key={key} className="rounded-xl bg-tg-secondary p-3 text-center">
-            <p className="text-lg font-semibold">
+          <div key={key} className="rounded-xl bg-surface-2 p-3 text-center">
+            <p className="text-lg font-bold tabular-nums">
               {emoji} {stats[key]}
             </p>
-            <p className="text-xs text-tg-hint">{label}</p>
+            <p className="text-xs text-muted">{label}</p>
           </div>
         ))}
       </div>
-    </section>
+    </Card>
   )
 }

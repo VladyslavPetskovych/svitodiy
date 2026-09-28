@@ -1,0 +1,14 @@
+# У Netlify: Site settings → Build & deploy → Base directory = miniapp
+# (тоді цей файл підхопиться автоматично).
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# SPA: будь-який шлях віддає index.html (на майбутнє, коли з'явиться роутинг).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

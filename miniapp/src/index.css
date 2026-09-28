@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/*
+ * Кольори беремо з теми Telegram: telegram-web-app.js сам виставляє
+ * --tg-theme-* на <html>, тож апка автоматично світла/темна як у клієнта.
+ * Fallback — для відкриття у звичайному браузері.
+ */
+@theme inline {
+  --color-tg-bg: var(--tg-theme-bg-color, #ffffff);
+  --color-tg-text: var(--tg-theme-text-color, #111827);
+  --color-tg-hint: var(--tg-theme-hint-color, #8e8e93);
+  --color-tg-link: var(--tg-theme-link-color, #2481cc);
+  --color-tg-button: var(--tg-theme-button-color, #2481cc);
+  --color-tg-button-text: var(--tg-theme-button-text-color, #ffffff);
+  --color-tg-secondary: var(--tg-theme-secondary-bg-color, #f2f2f7);
+  --color-tg-section: var(--tg-theme-section-bg-color, #ffffff);
+  --color-tg-destructive: var(--tg-theme-destructive-text-color, #e53935);
+}
+
+body {
+  @apply bg-tg-secondary text-tg-text antialiased;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}

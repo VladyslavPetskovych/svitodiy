@@ -17,12 +17,18 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
+    # API потрібне Mini App ззовні, але порт відкриваємо лише на 127.0.0.1:
+    # назовні його віддає reverse proxy хоста (nginx/Caddy) з HTTPS.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     env_file:
       - .env
     environment:
       PORT: "3000"
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test:

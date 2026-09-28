@@ -22,3 +22,5 @@ jobs:
             git reset --hard origin/main
             docker compose -p svitodiy up -d --build
             docker image prune -f
+            # Кеш збірки росте з кожним деплоєм — лишаємо лише за останній тиждень.
+            docker builder prune -f --filter until=168h

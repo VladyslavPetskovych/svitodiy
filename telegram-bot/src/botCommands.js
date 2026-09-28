@@ -20,4 +20,23 @@ export async function syncBotCommands(bot) {
   } catch (e) {
     console.warn("[telegram-bot] setMyCommands не вдалося:", e.message);
   }
+  await syncMiniAppButton(bot);
+}
+
+/**
+ * Кнопка біля поля вводу, що відкриває Mini App. Telegram приймає лише https-URL.
+ * @param {import("telegraf").Telegraf} bot
+ */
+async function syncMiniAppButton(bot) {
+  const url = process.env.MINIAPP_URL;
+  try {
+    await bot.telegram.setChatMenuButton({
+      menuButton: url
+        ? { type: "web_app", text: "Відкрити", web_app: { url } }
+        : { type: "commands" },
+    });
+    console.log("[telegram-bot] menu button:", url ?? "commands");
+  } catch (e) {
+    console.warn("[telegram-bot] setChatMenuButton не вдалося:", e.message);
+  }
 }

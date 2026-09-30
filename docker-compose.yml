@@ -33,6 +33,14 @@ services:
       # Модулі бота інколи просять позачерговий бекап (дошка «Настя»). Справжній
       # бекап робить контейнер бота кожні 2 хв, тож тут пишемо в тимчасову папку.
       REDIS_BACKUP_FILE: /tmp/svitodiy-backup/redis-user-backup.json
+      # «Адмін · сервер» у Mini App — ті самі звіти, що в боті, з тим самим
+      # доступом лише на читання (див. telegram-bot нижче).
+      TZ: Europe/Kyiv
+      DOCKER_API_URL: http://docker-proxy:2375
+      HOST_PROC: /host/proc
+    volumes:
+      - ./data:/app/data:ro
+      - /proc:/host/proc:ro
     depends_on:
       redis:
         condition: service_healthy

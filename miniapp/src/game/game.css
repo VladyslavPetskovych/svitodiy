@@ -190,3 +190,19 @@
     animation: none;
   }
 }
+
+/* Звіт «Адмін · сервер»: HTML-розмітка з бота (<b>, <i>, <code>). */
+.admin-report b {
+  color: #fff;
+}
+.admin-report i {
+  color: var(--color-sky);
+}
+.admin-report code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  background: #ffffff12;
+  border-radius: 2px;
+  padding: 0 3px;
+  white-space: pre-wrap;
+}

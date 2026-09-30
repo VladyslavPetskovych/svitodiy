@@ -1,12 +1,13 @@
 import { motion } from 'motion/react'
 import { useState } from 'react'
 import { useGame } from '../context.js'
-import { Paper, PxButton, ScreenTitle, Sheet } from '../ui.jsx'
+import { haptic } from '../tg.js'
+import { Paper, ScreenTitle } from '../ui.jsx'
 
 /** Щоденник — «життєві» розділи бота: навчання, планер, арки, особисте. */
 export default function Journal() {
-  const { state, catalog, go, wa } = useGame()
-  const [adminInfo, setAdminInfo] = useState(false)
+  const { state, catalog, go } = useGame()
+  const sharePhone = useSharePhone()
   const activeArc = catalog.arcs.find((a) => state.arcs[a.id]?.enabled)
   const intensity = catalog.dumosvitIntensity.find((x) => x.level === state.dumosvit.intensity)
 
@@ -39,7 +40,17 @@ export default function Journal() {
     cards.push({ icon: '🌸', title: 'Настя', text: 'Спільна дошка записів', status: 'Особистий розділ', onClick: () => go('board') })
   }
   if (state.access.admin) {
-    cards.push({ icon: '🛠', title: 'Адмін', text: 'Моніторинг сервера', status: 'Доступно в чаті з ботом', onClick: () => setAdminInfo(true) })
+    cards.push({ icon: '🛠', title: 'Адмін · сервер', text: 'Сервер, контейнери й процеси', status: 'Моніторинг', onClick: () => go('admin') })
+  }
+  // Як у боті на /start: персональні розділи відкриваються лише за номером.
+  if (!state.access.phone && sharePhone.supported) {
+    cards.push({
+      icon: '📱',
+      title: 'Особисті розділи',
+      text: 'Якщо для твого номера є розділ — поділися контактом',
+      status: sharePhone.busy ? 'Перевіряю…' : 'Необов’язково',
+      onClick: sharePhone.run,
+    })
   }
 
   return (
@@ -67,16 +78,41 @@ export default function Journal() {
           </Paper>
         </motion.button>
       ))}
-
-      <Sheet open={adminInfo} onClose={() => setAdminInfo(false)} title="🛠 Адмін">
-        <p className="text-center text-sm text-ink-soft">
-          Моніторинг сервера, контейнерів і процесів працює в чаті з ботом: <b>/menu → 🛠 Адмін · сервер</b>. Там він має
-          доступ до Docker лише на читання, і так безпечніше, ніж відкривати його в інтернет.
-        </p>
-        <PxButton variant="blue" className="mt-4 w-full" onClick={() => wa.close()}>
-          Повернутися в чат
-        </PxButton>
-      </Sheet>
     </div>
   )
+}
+
+/**
+ * WebApp.requestContact: Telegram питає дозвіл і надсилає контакт боту в чат
+ * (бот збереже його сам), а нам віддає підписану копію — її перевіряє сервер.
+ */
+function useSharePhone() {
+  const { wa, act, toast } = useGame()
+  const [busy, setBusy] = useState(false)
+  const supported = typeof wa.requestContact === 'function' && wa.isVersionAtLeast?.('6.9')
+
+  const run = () => {
+    if (busy) return
+    wa.requestContact(async (ok, result) => {
+      if (!ok) return
+      setBusy(true)
+      let res = result?.response ? await act('POST', '/contact', { response: result.response }, { silent: true }) : null
+      // Запасний шлях: підпис не пройшов — контакт усе одно дійшов до бота, трохи чекаємо.
+      if (!res) {
+        await new Promise((r) => setTimeout(r, 2500))
+        res = await act('GET', '/state', undefined, { silent: true })
+      }
+      setBusy(false)
+      const access = res?.state?.access
+      if (!access?.phone) {
+        toast('Не вдалося зберегти номер. Спробуй через /start у чаті з ботом.', 'error')
+      } else if (access.nastia || access.admin) {
+        haptic('success')
+        toast('Відкрито особистий розділ ✨')
+      } else {
+        toast('Номер збережено ✅')
+      }
+    })
+  }
+  return { supported, busy, run }
 }

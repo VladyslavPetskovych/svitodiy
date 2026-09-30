@@ -177,9 +177,11 @@ async function lastStarts() {
 
 /**
  * Повний звіт у HTML для Telegram.
- * @param {import("telegraf").Telegram} telegram
+ * @param {Pick<import("telegraf").Telegram, "getMe">} telegram
+ * @param {{ processTitle?: string }} [opts] — підпис секції про поточний процес
+ *   (звіт будує і бот, і API-сервер для Mini App)
  */
-export async function buildMonitorReport(telegram) {
+export async function buildMonitorReport(telegram, { processTitle = "🤖 <b>Бот</b>" } = {}) {
   const [mem, cpu, uptime, disk, redis, api, tg, starts, docker] = await Promise.all([
     memInfo(),
     cpuUsagePercent(),
@@ -266,9 +268,9 @@ export async function buildMonitorReport(telegram) {
     lines.push(`🔴 Docker — ${escapeHtml(docker.error)}`);
   }
 
-  // ── Бот ──
+  // ── Поточний процес ──
   const rss = process.memoryUsage().rss;
-  lines.push("", "🤖 <b>Бот</b>");
+  lines.push("", processTitle);
   lines.push(`Працює без перезапуску: <b>${fmtDuration(process.uptime())}</b>`);
   lines.push(`Пам'ять процесу: ${fmtBytes(rss)} · Node ${process.version}`);
   if (redis.ok) lines.push(`Користувачів у базі: <b>${redis.users}</b>`);
@@ -283,7 +285,7 @@ export async function buildMonitorReport(telegram) {
     );
   }
   if (starts.length > 0) {
-    lines.push(`Останні запуски: ${starts.map((s) => fmtTime(s)).join(", ")}`);
+    lines.push(`Останні запуски бота: ${starts.map((s) => fmtTime(s)).join(", ")}`);
   }
 
   return lines.join("\n");

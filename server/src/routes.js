@@ -1,8 +1,11 @@
 import express from "express";
+import { recordBotError } from "./bot.js";
+import { adminReport, saveContact } from "./game/admin.js";
 import { buildCatalog } from "./game/catalog.js";
 import { cast, cookFish, craft, equip, sellAllFish, sellFish } from "./game/chasodiy.js";
 import { claimDaily } from "./game/daily.js";
 import { GameError } from "./game/errors.js";
+import { collectHome, upgradeBuilding } from "./game/homestead.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
 import {
   answerQuiz,
@@ -40,6 +43,7 @@ function handler(fn, { withState = true } = {}) {
         return;
       }
       console.error(`[server] ${req.method} ${req.path} failed:`, err);
+      recordBotError(err); // лічильник помилок для вкладки «Адмін · сервер»
       res.status(500).json({ error: "internal", message: "Щось пішло не так. Спробуй ще раз." });
     }
   };
@@ -68,6 +72,9 @@ export function buildApiRouter(botToken) {
   api.get("/state", loadState);
   api.get("/me", loadState); // стара назва з першої версії апки
 
+  // Номер із WebApp.requestContact → відкриває персональні розділи, як контакт у боті.
+  api.post("/contact", handler((req) => saveContact(uid(req), body(req).response, botToken)));
+
   api.post("/daily/claim", handler((req) => claimDaily(uid(req))));
 
   // Часодій
@@ -77,6 +84,10 @@ export function buildApiRouter(botToken) {
   api.post("/fish/cook",handler((req) => cookFish(uid(req), body(req).fishId)));
   api.post("/equip", handler((req) => equip(uid(req), body(req).slot, body(req).relicId ?? null)));
   api.post("/alchemy/craft", handler((req) => craft(uid(req), body(req).recipeId)));
+
+  // Рідний острів: будівлі й комора
+  api.post("/home/collect", handler((req) => collectHome(uid(req))));
+  api.post("/home/:id/upgrade", handler((req) => upgradeBuilding(uid(req), req.params.id)));
 
   // Острови
   api.post("/islands/:id/explore", handler((req) => explore(uid(req), req.params.id)));
@@ -112,6 +123,13 @@ export function buildApiRouter(botToken) {
     })
   );
   api.delete("/board/:id", handler((req) => removeNote(uid(req), req.params.id), { withState: false }));
+
+  // Адмін · сервер (доступ за номером, як у боті). Звіт збирається 1–2 с.
+  api.get(
+    "/admin/:view",
+    rateLimit({ windowMs: 60_000, max: 20 }),
+    handler((req) => adminReport(uid(req), req.params.view, botToken), { withState: false })
+  );
 
   return api;
 }

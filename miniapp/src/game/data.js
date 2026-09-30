@@ -43,23 +43,35 @@ export function levelOf(stats) {
   return { level, xp, progress: (xp - from) / (to - from) }
 }
 
-/** Скільки рецептів можна скрафтити зараз. */
-export function craftableCount(catalog, inventory) {
-  return catalog.recipes.filter((r) => Object.entries(r.consumes).every(([id, n]) => (inventory[id] ?? 0) >= n)).length
+/* ───────── Рідний острів (формула — як у server/src/game/homestead.js) ───────── */
+
+const HOUR = 3_600_000
+
+export function storageHours(catalog, levels) {
+  return catalog.buildings.find((b) => b.id === 'house').levels[levels.house]?.storageHours ?? 8
 }
 
-/**
- * Підказка «що робити далі»: перший рецепт спорядження, якого ще немає,
- * і чого для нього бракує. Веде новачка по петлі лови → готуй → крафти.
- */
-export function nextGoal(catalog, index, inventory) {
-  const gear = catalog.recipes.filter((r) => index.get(r.output.id)?.kind === 'relic')
-  const target = gear.find((r) => !(inventory[r.output.id] > 0))
-  if (!target) return null
-  const missing = Object.entries(target.consumes)
-    .filter(([id, n]) => (inventory[id] ?? 0) < n)
-    .map(([id, n]) => ({ item: itemOf(index, id), need: n - (inventory[id] ?? 0) }))
-  return { recipe: target, output: itemOf(index, target.output.id), missing }
+/** Скільки лежить у коморі зараз (дробові числа) і наскільки вона заповнена (0…1). */
+export function homeStorage(catalog, home, now) {
+  const capMs = storageHours(catalog, home.levels) * HOUR
+  const elapsed = Math.max(0, Math.min(now - home.collectedAt, capMs))
+  const perBuilding = {}
+  const total = { ...home.carry }
+  for (const b of catalog.buildings) {
+    const produces = b.levels[home.levels[b.id]]?.produces ?? {}
+    const own = {}
+    for (const [id, perHour] of Object.entries(produces)) {
+      own[id] = (perHour * elapsed) / HOUR
+      total[id] = (total[id] ?? 0) + own[id]
+    }
+    perBuilding[b.id] = own
+  }
+  return { total, perBuilding, fill: elapsed / capMs, fullInMs: capMs - elapsed }
+}
+
+/** Чи вистачає на ціну: balance — ✨, решта — ресурси з рюкзака. */
+export function canAfford(cost = {}, balance, inventory) {
+  return Object.entries(cost).every(([id, n]) => (id === 'balance' ? balance : (inventory[id] ?? 0)) >= n)
 }
 
 /** Де взяти ресурс — для підказок у рюкзаку й алхімії. */

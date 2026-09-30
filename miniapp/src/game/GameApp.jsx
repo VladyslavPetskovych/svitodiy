@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import './game.css'
 import { levelOf } from './data.js'
+import Admin from './screens/Admin.jsx'
 import { Arcs, ArcDetail } from './screens/Arcs.jsx'
 import Backpack from './screens/Backpack.jsx'
 import Board from './screens/Board.jsx'
@@ -37,6 +38,7 @@ const SCREENS = {
   arcs: Arcs,
   arc: ArcDetail,
   board: Board,
+  admin: Admin,
 }
 
 export default function GameApp({ wa }) {

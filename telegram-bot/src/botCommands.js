@@ -8,6 +8,7 @@ const COMMANDS = [
   { command: "fish", description: "Риболовля (Часодій)" },
   { command: "inv", description: "Інвентар і продаж риби" },
   { command: "litopys", description: "Літописець — завдання й нагадування" },
+  { command: "phone", description: "Поділитися номером (особисті розділи)" },
 ];
 
 /**

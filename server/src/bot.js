@@ -55,3 +55,6 @@ export {
   listNotes,
   updateNote,
 } from "../../telegram-bot/src/nastia/boardStore.js";
+export { buildMonitorReport, recordBotError } from "../../telegram-bot/src/admin/monitor.js";
+export { buildContainersReport } from "../../telegram-bot/src/admin/docker.js";
+export { buildProcessesReport } from "../../telegram-bot/src/admin/processes.js";

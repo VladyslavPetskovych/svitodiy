@@ -5,10 +5,12 @@ import {
   getDumosvitIntensity,
   getInventory,
   getRedis,
+  getUserPhone,
   hasAdminAccess,
   hasNastiaAccess,
 } from "../bot.js";
 import { GAME_CONFIG } from "./catalog.js";
+import { getHome } from "./homestead.js";
 import { dailyClaimKey, jobKey, kyivDay, previousDay, quizRewardKey, userKey } from "./keys.js";
 
 /**
@@ -68,15 +70,16 @@ async function getJob(userId) {
 /** Усе про гравця одним запитом — після кожної дії клієнт просто замінює стан. */
 export async function getState(userId) {
   const r = getRedis();
-  const [h, inventory, job, access, arcs, intensity, reminders, quizCount] = await Promise.all([
+  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home] = await Promise.all([
     r.hGetAll(userKey(userId)),
     getInventory(userId),
     getJob(userId),
-    Promise.all([hasNastiaAccess(userId), hasAdminAccess(userId)]),
+    Promise.all([hasNastiaAccess(userId), hasAdminAccess(userId), getUserPhone(userId)]),
     Promise.all(ARC_CATALOG.map(async (a) => [a.id, await getArcState(userId, a.id)])),
     getDumosvitIntensity(userId),
     dumosvitIsScheduled(userId),
     r.get(quizRewardKey(userId, kyivDay())),
+    getHome(userId),
   ]);
 
   for (const k of Object.keys(inventory)) {
@@ -104,7 +107,9 @@ export async function getState(userId) {
     equipped: { hook: h.equippedHook || null, talisman: h.equippedTalisman || null },
     inventory,
     job,
-    access: { nastia: access[0], admin: access[1] },
+    home,
+    // phone — чи є номер узагалі: без нього персональні розділи не відкрити.
+    access: { nastia: access[0], admin: access[1], phone: access[2] != null },
     daily: await getDailyState(userId, h),
     arcs: Object.fromEntries(
       arcs.map(([id, s]) => [id, { enabled: s.enabled && !s.done, done: s.done, day: s.day, startedAtMs: s.startedAtMs }])

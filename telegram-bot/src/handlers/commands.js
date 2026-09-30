@@ -104,6 +104,14 @@ export function registerCommandHandlers(bot) {
     await replyMainMenu(ctx);
   });
 
+  /** Поділитися номером будь-коли — /start просить його лише в перший раз. */
+  bot.command("phone", async (ctx) => {
+    if (ctx.chat?.type !== "private") return;
+    await ctx.reply("Натисни кнопку нижче, щоб поділитися номером 👇", {
+      reply_markup: sharePhoneKeyboard(),
+    });
+  });
+
   bot.start(async (ctx) => {
     const userId = ctx.from?.id;
     if (userId != null) {

@@ -11,6 +11,7 @@ import {
   TALISMAN_FISH_SHIFT,
   intensityLabel,
 } from "../bot.js";
+import { BUILDINGS } from "./homestead.js";
 
 /**
  * Налаштування, яких у боті немає — лише для Mini App.
@@ -119,6 +120,7 @@ export function buildCatalog() {
     cookDrops: COOK_DROP_WEIGHTS.map((d) => d.id),
     fishingChances: FISHING_CHANCES,
     islands: ISLANDS.map(({ calm: _calm, ...rest }) => rest),
+    buildings: BUILDINGS,
     arcs: ARC_CATALOG.map((a) => ({ id: a.id, title: a.title, emoji: a.emoji, summary: a.summary })),
     arcDurationDays: ARC_DURATION_DAYS,
     dumosvitIntensity: [1, 2, 3].map((level) => ({ level, label: intensityLabel(level) })),

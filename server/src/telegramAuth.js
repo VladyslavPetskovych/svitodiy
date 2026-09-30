@@ -4,17 +4,15 @@ import crypto from "crypto";
 const MAX_AGE_SEC = 24 * 3600;
 
 /**
- * Перевіряє підпис initData з Telegram Mini App.
+ * Перевіряє підпис рядка від Telegram (initData або відповідь requestContact —
+ * обидва підписані однаково) і повертає його параметри без hash.
  * @see https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
- * @param {string} initData — сирий рядок window.Telegram.WebApp.initData
- * @param {string} botToken
- * @returns {{ id: number, first_name?: string, last_name?: string, username?: string,
- *   language_code?: string, is_premium?: boolean, photo_url?: string } | null}
+ * @returns {URLSearchParams | null}
  */
-export function verifyInitData(initData, botToken) {
-  if (!initData || !botToken) return null;
+export function verifySignedParams(raw, botToken) {
+  if (typeof raw !== "string" || !raw || !botToken) return null;
 
-  const params = new URLSearchParams(initData);
+  const params = new URLSearchParams(raw);
   const hash = params.get("hash");
   if (!hash) return null;
   params.delete("hash");
@@ -33,7 +31,19 @@ export function verifyInitData(initData, botToken) {
 
   const authDate = Number(params.get("auth_date"));
   if (!authDate || Date.now() / 1000 - authDate > MAX_AGE_SEC) return null;
+  return params;
+}
 
+/**
+ * Перевіряє підпис initData з Telegram Mini App.
+ * @param {string} initData — сирий рядок window.Telegram.WebApp.initData
+ * @param {string} botToken
+ * @returns {{ id: number, first_name?: string, last_name?: string, username?: string,
+ *   language_code?: string, is_premium?: boolean, photo_url?: string } | null}
+ */
+export function verifyInitData(initData, botToken) {
+  const params = verifySignedParams(initData, botToken);
+  if (!params) return null;
   try {
     const user = JSON.parse(params.get("user") ?? "null");
     return user && Number.isInteger(user.id) ? user : null;

@@ -6,6 +6,7 @@ import { getRedis } from "../bot.js";
  */
 export const userKey = (id) => `svitodiy:user:${id}`; // той самий hash, що в userStore.js
 export const jobKey = (id) => `svitodiy:job:${id}`;
+export const homeKey = (id) => `svitodiy:home:${id}`; // рідний острів: рівні будівель, комора
 export const cooldownKey = (id, action) => `svitodiy:cd:${action}:${id}`;
 export const dailyClaimKey = (id, day) => `svitodiy:daily:${id}:${day}`;
 export const quizRewardKey = (id, day) => `svitodiy:quizrw:${id}:${day}`;

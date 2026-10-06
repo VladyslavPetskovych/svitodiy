@@ -94,7 +94,8 @@ export default function Fishing() {
       reward({
         title: epic ? 'НЕЙМОВІРНО!' : 'Улов!',
         rarity: item.rarity,
-        image: item.image,
+        image: item.image ?? undefined,
+        icon: item.image ? undefined : item.emoji,
         subtitle: `${item.emoji} ${item.name}`,
         lines: [`📏 ~${item.size} · 💰 ${item.sellPrice} ✨`, item.flavor, `У рюкзаку: ×${outcome.total}`],
         tone: epic ? 'epic' : 'good',
@@ -360,7 +361,7 @@ export function EquipSheet({ slot, onClose }) {
 
 /** Хто водиться у водах острова — з рідкістю й ціною. */
 function FishGuide() {
-  const { catalog, state } = useGame()
+  const { catalog, state, items } = useGame()
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -374,14 +375,23 @@ function FishGuide() {
             .map((f) => {
               const r = RARITY[f.rarity]
               const caught = (state.inventory[f.id] ?? 0) > 0
+              const image = items.get(f.id)?.image
               return (
                 <div key={f.id} className="flex items-center gap-3 rounded-sm bg-parch-dark/50 p-1.5">
-                  <img
-                    src={`/game/fish/${f.id}.webp`}
-                    alt=""
-                    className="h-12 w-20 rounded-sm object-cover"
-                    style={{ boxShadow: `0 0 0 2px ${r.color}` }}
-                  />
+                  {image ? (
+                    <img src={image} alt="" className="h-12 w-20 rounded-sm object-cover" style={{ boxShadow: `0 0 0 2px ${r.color}` }} />
+                  ) : (
+                    // Арту ще немає — емодзі на «воді» кольору рідкості.
+                    <span
+                      className="flex h-12 w-20 shrink-0 items-center justify-center rounded-sm text-3xl"
+                      style={{
+                        boxShadow: `0 0 0 2px ${r.color}`,
+                        background: `radial-gradient(circle at 50% 60%, ${r.color}55, #0f2a3d 80%)`,
+                      }}
+                    >
+                      {f.emoji}
+                    </span>
+                  )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-extrabold">
                       {f.emoji} {f.name}

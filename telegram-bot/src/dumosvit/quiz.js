@@ -90,7 +90,7 @@ export function formatQuizCaption(es) {
   const safe = escapeHtml(es);
   return (
     `📖 <b>Думосвіт</b> · 🧪 <b>Тест</b>\n\n` +
-    `🇪🇸 <b>${safe}</b>\n\n` +
+    `<b>${safe}</b>\n\n` +
     `Обери правильний переклад українською:`
   );
 }

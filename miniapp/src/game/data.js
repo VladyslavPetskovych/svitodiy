@@ -7,10 +7,15 @@ export const RARITY = {
   mythic: { label: 'Міфічна', color: '#c77dff' },
 }
 
+/** Риби, для яких є акварель у public/game/fish. Решта показується емодзі. */
+const FISH_ART = new Set(['trout', 'carp', 'perch', 'pike', 'golden_crucian', 'river_bream', 'whisker_cat', 'moon_carp'])
+
 /** Словник id → опис предмета (риба, ресурс, реліквія). */
 export function buildItemIndex(catalog) {
   const index = new Map()
-  for (const f of catalog.fish) index.set(f.id, { ...f, kind: 'fish', image: `/game/fish/${f.id}.webp` })
+  for (const f of catalog.fish) {
+    index.set(f.id, { ...f, kind: 'fish', image: FISH_ART.has(f.id) ? `/game/fish/${f.id}.webp` : null })
+  }
   for (const r of catalog.resources) index.set(r.id, { ...r, kind: 'resource' })
   for (const r of catalog.relics) {
     index.set(r.id, { ...r, kind: 'relic', image: r.id === 'relic_ring_wanderer' ? '/game/art/relic-ring.webp' : null })

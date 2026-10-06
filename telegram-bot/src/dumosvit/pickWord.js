@@ -71,7 +71,7 @@ export function formatDumosvitCaption(entry) {
     const safeTitle = escapeHtml(entry.title);
     const safeBody = escapeHtml(entry.body);
     const ex = entry.exampleEs
-      ? `\n\n🇪🇸 <b>${escapeHtml(entry.exampleEs)}</b>`
+      ? `\n\n<b>${escapeHtml(entry.exampleEs)}</b>`
       : "";
     return (
       `📖 <b>Думосвіт</b> · 💡 <i>${safeTitle}</i>\n\n` +
@@ -87,7 +87,7 @@ export function formatDumosvitCaption(entry) {
   return (
     `📖 <b>Думосвіт</b> · ${kindLine}\n\n` +
     `<b>${safeEs}</b>\n` +
-    `🇺🇦 ${safeUk}` +
+    `${safeUk}` +
     footer
   );
 }

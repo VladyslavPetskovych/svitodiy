@@ -110,7 +110,7 @@ function FlashCard({ card, flipped, onFlip }) {
         <p className="font-pixel text-[10px] text-ink-soft">💡 ПОРАДА</p>
         <p className="mt-2 text-lg font-extrabold">{card.title}</p>
         <p className="mt-2 text-sm leading-relaxed">{card.body}</p>
-        {card.exampleEs && <p className="mt-3 rounded-sm bg-parch-dark/60 p-2 font-bold">🇪🇸 {card.exampleEs}</p>}
+        {card.exampleEs && <p className="mt-3 rounded-sm bg-parch-dark/60 p-2 font-bold">{card.exampleEs}</p>}
       </Paper>
     )
   }
@@ -120,15 +120,15 @@ function FlashCard({ card, flipped, onFlip }) {
       <motion.div animate={{ rotateY: flipped ? 180 : 0 }} transition={{ duration: 0.45 }} style={{ transformStyle: 'preserve-3d' }} className="relative">
         <Paper className="flex min-h-[260px] flex-col items-center justify-center p-4 text-center" style={{ backfaceVisibility: 'hidden' }}>
           <p className="font-pixel text-[10px] text-ink-soft">{phrase ? '💬 ФРАЗА' : '🔤 СЛОВО'}</p>
-          <p className="mt-4 text-3xl font-extrabold">🇪🇸 {card.es}</p>
+          <p className="mt-4 text-3xl font-extrabold">{card.es}</p>
           <p className="mt-6 text-xs text-ink-soft">Торкнись, щоб побачити переклад</p>
         </Paper>
         <Paper
           className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center"
           style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
         >
-          <p className="text-lg font-bold text-ink-soft">🇪🇸 {card.es}</p>
-          <p className="mt-3 text-3xl font-extrabold">🇺🇦 {card.uk}</p>
+          <p className="text-lg font-bold text-ink-soft">{card.es}</p>
+          <p className="mt-3 text-3xl font-extrabold">{card.uk}</p>
         </Paper>
       </motion.div>
     </button>
@@ -139,7 +139,7 @@ function Quiz({ card, answer, onChoose }) {
   return (
     <Paper className="p-3">
       <p className="font-pixel text-[10px] text-ink-soft">🧪 ТЕСТ</p>
-      <p className="mt-3 text-center text-2xl font-extrabold">🇪🇸 {card.es}</p>
+      <p className="mt-3 text-center text-2xl font-extrabold">{card.es}</p>
       <p className="mt-1 text-center text-xs text-ink-soft">Обери правильний переклад</p>
       <div className="mt-4 flex flex-col gap-2">
         {card.options.map((o, i) => {

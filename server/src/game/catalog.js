@@ -42,6 +42,15 @@ const FISH_RARITY = {
   whisker_cat: "rare",
   golden_crucian: "legendary",
   moon_carp: "mythic",
+  coral_perch: "rare",
+  zander: "rare",
+  storm_eel: "rare",
+  sea_wanderer_tuna: "rare",
+  elder_sturgeon: "legendary",
+  crystal_salmon: "legendary",
+  royal_catfish: "mythic",
+  sunscale_koi: "mythic",
+  abyss_dragonfish: "mythic",
 };
 
 /** Острови з карти бота. Тривалість заготівлі — як у боті (6 кроків × 5 с). */

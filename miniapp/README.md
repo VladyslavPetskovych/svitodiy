@@ -39,6 +39,10 @@ Telegram ──initData──▶ Гра (Netlify) ──/api/*──▶ edge-ф�
 - Арт — з `telegram-bot/assets`, стиснутий у WebP (`public/game/art`, `public/game/fish`).
 - Рамки, панелі й кнопки — [Kenney Pixel UI Pack](https://kenney.nl/assets/pixel-ui-pack) (CC0),
   `public/game/ui`, підключені через CSS `border-image` у `src/game/game.css`.
+- Прогулянка рідним островом («🚶 Зійти на острів» на головній) — текстури землі, води, піни й
+  спрайти (мандрівник, будівлі всіх рівнів, дерева, причал) генеруються кодом:
+  `npm run gen:island` → `public/game/walk/*.png` і `src/game/walk/atlas.json`.
+  Розкладка острова й точки взаємодії — `src/game/walk/layout.js`, рушій — `src/game/walk/engine.js`.
 
 ## Локальна розробка
 

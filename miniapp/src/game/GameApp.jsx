@@ -10,6 +10,7 @@ import Dumosvit from './screens/Dumosvit.jsx'
 import Fishing from './screens/Fishing.jsx'
 import Home from './screens/Home.jsx'
 import Island from './screens/Island.jsx'
+import IslandWalk from './screens/IslandWalk.jsx'
 import Journal from './screens/Journal.jsx'
 import Litopys from './screens/Litopys.jsx'
 import WorldMap from './screens/WorldMap.jsx'
@@ -33,6 +34,7 @@ const SCREENS = {
   backpack: Backpack,
   journal: Journal,
   island: Island,
+  walk: IslandWalk,
   dumosvit: Dumosvit,
   litopys: Litopys,
   arcs: Arcs,

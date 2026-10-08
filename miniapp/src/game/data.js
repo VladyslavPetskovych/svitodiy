@@ -93,3 +93,10 @@ export function sourceOf(catalog, id) {
 export function formatDate(ms) {
   return new Date(ms).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
+
+/** Зібраний врожай: «+3 ✨ · 🪵×2». */
+export function formatAmounts(items, got) {
+  return Object.entries(got)
+    .map(([id, n]) => (id === 'balance' ? `+${n} ✨` : `${itemOf(items, id).emoji}×${n}`))
+    .join(' · ')
+}

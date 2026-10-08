@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useMemo, useState } from 'react'
-import { canAfford, homeStorage, itemOf, storageHours } from '../data.js'
-import { useGame } from '../context.js'
+import { useMemo, useState } from 'react'
+import { canAfford, formatAmounts, homeStorage, itemOf, storageHours } from '../data.js'
+import { useGame, useNow } from '../context.js'
 import { ART_PX, BUILDING_SPOTS, PALETTE, buildingSprites, plotSprite } from '../islandSprites.js'
 import { haptic } from '../tg.js'
 import { Bar, Chip, PxButton, Sheet } from '../ui.jsx'
@@ -16,7 +16,7 @@ const CHEST_OPEN_ROWS = ['KKKKKKKKK', 'KyYyYyYyK', 'KbbbbbbbK', 'KbbbbbbbK', 'KB
 
 /** Рідний острів: сама сцена й розбудова. Решта розділів — у вкладках. */
 export default function Home() {
-  const { catalog } = useGame()
+  const { catalog, go } = useGame()
   const [sheet, setSheet] = useState(null) // id будівлі
   const [daily, setDaily] = useState(false)
   const building = catalog.buildings.find((b) => b.id === sheet)
@@ -24,22 +24,14 @@ export default function Home() {
   return (
     <div className="flex flex-col gap-3">
       <Island onBuilding={setSheet} onChest={() => setDaily(true)} />
+      <PxButton variant="blue" size="lg" className="w-full" onClick={() => go('walk')}>
+        🚶 Зійти на острів
+      </PxButton>
       <BuildingRow onOpen={setSheet} />
       <BuildingSheet building={building} onClose={() => setSheet(null)} />
       <DailySheet open={daily} onClose={() => setDaily(false)} />
     </div>
   )
-}
-
-/** Серверний час, що оновлюється раз на кілька секунд — для комори. */
-function useNow(ms = 2000) {
-  const { serverNow } = useGame()
-  const [now, setNow] = useState(serverNow)
-  useEffect(() => {
-    const id = setInterval(() => setNow(serverNow()), ms)
-    return () => clearInterval(id)
-  }, [serverNow, ms])
-  return now
 }
 
 /* ───────── Сцена ───────── */
@@ -303,7 +295,7 @@ function LevelPips({ level, max, className = '' }) {
 
 /* ───────── Шторка будівлі: зараз → після покращення ───────── */
 
-function BuildingSheet({ building: b, onClose }) {
+export function BuildingSheet({ building: b, onClose }) {
   const { state, catalog, items, act, toast } = useGame()
   const [busy, setBusy] = useState(false)
   const open = !!b
@@ -406,7 +398,7 @@ function Row({ label, now, next }) {
 
 /* ───────── Щоденна нагорода (скриня на березі) ───────── */
 
-function DailySheet({ open, onClose }) {
+export function DailySheet({ open, onClose }) {
   const { state, catalog, act, reward } = useGame()
   const { claimedToday, todayIndex } = state.daily
   const rewards = catalog.config.dailyRewards
@@ -459,12 +451,6 @@ function formatRates(items, produces) {
       const icon = id === 'balance' ? '✨' : itemOf(items, id).emoji
       return perHour >= 1 ? `${icon} ${perHour}/год` : `${icon} 1 за ${Math.round(1 / perHour)} год`
     })
-    .join(' · ')
-}
-
-function formatAmounts(items, got) {
-  return Object.entries(got)
-    .map(([id, n]) => (id === 'balance' ? `+${n} ✨` : `${itemOf(items, id).emoji}×${n}`))
     .join(' · ')
 }
 

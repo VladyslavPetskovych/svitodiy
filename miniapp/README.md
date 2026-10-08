@@ -43,6 +43,11 @@ Telegram ──initData──▶ Гра (Netlify) ──/api/*──▶ edge-ф�
   спрайти (мандрівник, будівлі всіх рівнів, дерева, причал) генеруються кодом:
   `npm run gen:island` → `public/game/walk/*.png` і `src/game/walk/atlas.json`.
   Розкладка острова й точки взаємодії — `src/game/walk/layout.js`, рушій — `src/game/walk/engine.js`.
+- Пісочниця («🔨 Будувати на острові» на прогулянці): гравець ставить, пересуває й прибирає декор.
+  Назви, категорії й ціни — `server/src/game/decor.js` (каталог `decor`, ліміт `decorMax`), розстановка —
+  у Redis `svitodiy:deco:<id>`, ендпойнти `POST /home/deco`, `POST /home/deco/:id/move`, `DELETE /home/deco/:id`
+  (прибрав — ресурси повертаються). Геометрія й спрайти — `src/game/walk/decor.js`. Новий предмет = запис
+  у `DECOR` на сервері + рядок у `DECO_GEOM` + спрайт у генераторі.
 
 ## Локальна розробка
 

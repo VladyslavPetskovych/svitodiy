@@ -11,6 +11,7 @@ import {
   TALISMAN_FISH_SHIFT,
   intensityLabel,
 } from "../bot.js";
+import { DECOR, DECOR_MAX } from "./decor.js";
 import { BUILDINGS } from "./homestead.js";
 
 /**
@@ -130,6 +131,8 @@ export function buildCatalog() {
     fishingChances: FISHING_CHANCES,
     islands: ISLANDS.map(({ calm: _calm, ...rest }) => rest),
     buildings: BUILDINGS,
+    decor: DECOR,
+    decorMax: DECOR_MAX,
     arcs: ARC_CATALOG.map((a) => ({ id: a.id, title: a.title, emoji: a.emoji, summary: a.summary })),
     arcDurationDays: ARC_DURATION_DAYS,
     dumosvitIntensity: [1, 2, 3].map((level) => ({ level, label: intensityLabel(level) })),

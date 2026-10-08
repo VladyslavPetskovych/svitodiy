@@ -1,3 +1,5 @@
+import { DECO_GEOM, decoFootprint } from './decor.js'
+
 /**
  * Рідний острів «зсередини»: розміри мапи, рельєф і де що стоїть.
  * Спільне для генератора текстур (scripts/gen-island-art.mjs) і екрана IslandWalk.
@@ -108,7 +110,7 @@ export const DECOR = [
  * blocks — прямокутники [x, y, w, h], куди не можна ступити; walk — куди можна попри воду.
  * @returns {{ s: string, x: number, y: number, layer: 'floor'|'obj', blocks?: number[][], walk?: number[] }[]}
  */
-export function placements(levels, chestOpen) {
+export function placements(levels, chestOpen, deco = []) {
   const out = []
   const add = (s, x, y, extra = {}) => out.push({ s, x, y, layer: 'obj', ...extra })
 
@@ -150,6 +152,13 @@ export function placements(levels, chestOpen) {
   else add('rubble', l.x, l.y, { blocks: [[l.x - 10, l.y - 8, 20, 8]] })
 
   add(chestOpen ? 'chest_open' : 'chest', CHEST.x, CHEST.y, { blocks: [[CHEST.x - 7, CHEST.y - 6, 14, 6]] })
+
+  // Декор гравця з пісочниці. Підлога не заважає ходити, решта — так.
+  for (const d of deco) {
+    const g = DECO_GEOM[d.k]
+    if (!g) continue
+    out.push({ s: g.sprite, x: d.x, y: d.y, layer: g.floor ? 'floor' : 'obj', uid: d.id, kind: d.k, blocks: g.floor ? [] : [decoFootprint(d.k, d.x, d.y)] })
+  }
   return out
 }
 

@@ -1,4 +1,5 @@
 import atlas from './atlas.json'
+import { DECO_GEOM, decoFootprint } from './decor.js'
 import { CELL, INTERACT, MAP, PIER, SPOTS, START, placements, walkGrid } from './layout.js'
 
 /**
@@ -117,8 +118,8 @@ function findPath(grid, from, to) {
   return out
 }
 
-/** Де на мапі димарі й вогні — залежить від рівнів. */
-function effectsFor(levels) {
+/** Де на мапі димарі й вогні — залежить від рівнів і декору гравця. */
+function effectsFor(levels, deco) {
   const h = SPOTS.house
   const w = SPOTS.workshop
   const l = SPOTS.lighthouse
@@ -130,13 +131,53 @@ function effectsFor(levels) {
     lights.push({ x: l.x, y: l.y - H + 22, r: 16 + levels.lighthouse * 6, beam: levels.lighthouse >= 3 })
   }
   if (levels.pier >= 2) for (const dx of [-15, 15]) lights.push({ x: PIER.x + dx, y: 357, r: 9 })
-  return { smoke, lights }
+  const fires = []
+  for (const d of deco) {
+    const g = DECO_GEOM[d.k]
+    if (g?.light) lights.push({ x: d.x, y: d.y + g.light.dy, r: g.light.r, uid: d.id, warm: g.fire })
+    if (g?.fire) fires.push({ x: d.x, y: d.y - 5, uid: d.id })
+  }
+  return { smoke, lights, fires }
+}
+
+/** Клітинки, які накриває прямокутник [x, y, w, h]; -1 — за межами мапи. */
+function cellsOf([x, y, w, h]) {
+  const out = []
+  for (let cy = Math.floor(y / CELL); cy <= Math.floor((y + h - 1) / CELL); cy++)
+    for (let cx = Math.floor(x / CELL); cx <= Math.floor((x + w - 1) / CELL); cx++)
+      out.push(cx < 0 || cy < 0 || cx >= cols || cy >= rows ? -1 : cy * cols + cx)
+  return out
+}
+
+/** Суша, на якій можна будувати: з генератора, без мостків над водою. */
+const land = walkGrid(atlas.walk, [])
+
+/** Чи досяжні з клітинки start усі точки взаємодії. */
+function allReachable(grid, start) {
+  const seen = new Uint8Array(cols * rows)
+  const queue = [start]
+  seen[start] = 1
+  for (let head = 0; head < queue.length; head++) {
+    const c = queue[head]
+    const cx = c % cols
+    const cy = Math.floor(c / cols)
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cx + dx
+      const ny = cy + dy
+      const n = ny * cols + nx
+      if (nx < 0 || ny < 0 || nx >= cols || ny >= rows || seen[n] || !grid[n]) continue
+      seen[n] = 1
+      queue.push(n)
+    }
+  }
+  return INTERACT.every((it) => seen[cellOf(it.near[0], it.near[1])])
 }
 
 /**
  * @param {HTMLCanvasElement} canvas
  * @param {object} assets результат loadAssets()
- * @param {{ onNear: (id: string|null) => void, onInteract: (id: string) => void, onBubble: () => void }} cb
+ * @param {{ onNear: (id: string|null) => void, onInteract: (id: string) => void, onBubble: () => void,
+ *   onBuildTap: (p: { x: number, y: number, uid: string|null }) => void }} cb
  */
 export function createWalk(canvas, assets, cb) {
   const ctx = canvas.getContext('2d')
@@ -144,7 +185,12 @@ export function createWalk(canvas, assets, cb) {
   const player = { x: START.x, y: START.y, dir: 'down', moving: false, step: 0 }
   let list = []
   let grid = null
-  let fx = { smoke: [], lights: [] }
+  let fx = { smoke: [], lights: [], fires: [] }
+  // Пісочниця: режим, привид предмета, що ставимо, і виділена прикраса.
+  let mode = 'walk'
+  let ghost = null // { kind, x, y, uid?, ok, reason? }
+  let selected = null
+  const free = { x: 0, y: 0 } // камера в режимі будівництва
   let bubbles = {} // id будівлі → емодзі
   let bubbleHits = []
   let path = []
@@ -160,10 +206,11 @@ export function createWalk(canvas, assets, cb) {
   let last = performance.now()
   let t = 0
 
-  function setWorld(levels, chestOpen) {
-    list = placements(levels, chestOpen)
+  function setWorld(levels, chestOpen, deco = []) {
+    list = placements(levels, chestOpen, deco)
     grid = walkGrid(atlas.walk, list)
-    fx = effectsFor(levels)
+    fx = effectsFor(levels, deco)
+    if (selected && !list.some((p) => p.uid === selected)) selected = null
     if (!canStand(grid, player.x, player.y)) {
       player.x = START.x
       player.y = START.y
@@ -185,6 +232,46 @@ export function createWalk(canvas, assets, cb) {
     const dx = ((e.clientX - r.left) / r.width) * canvas.width
     const dy = ((e.clientY - r.top) / r.height) * canvas.height
     return { x: dx / scale + cam.x, y: dy / scale + cam.y, dx, dy }
+  }
+
+  /**
+   * Чи можна поставити декор: на суші, не на зайнятому місці
+   * й так, щоб до всіх будівель, скрині й причалу лишався прохід.
+   * @returns {{ ok: boolean, reason?: string }}
+   */
+  function canPlace(kind, x, y, ignoreUid = null) {
+    const g = DECO_GEOM[kind]
+    if (!g) return { ok: false, reason: 'Невідомий предмет' }
+    const fp = decoFootprint(kind, x, y)
+    const cells = cellsOf(fp)
+    if (cells.some((c) => c < 0 || !land[c])) return { ok: false, reason: 'Тут будувати не можна' }
+    const others = list.filter((p) => !p.uid || p.uid !== ignoreUid)
+    const busy = new Uint8Array(cols * rows)
+    for (const p of others) {
+      for (const b of p.blocks ?? []) for (const c of cellsOf(b)) if (c >= 0) busy[c] = 1
+      // Підлогу на підлогу не кладемо.
+      if (g.floor && p.uid && DECO_GEOM[p.kind]?.floor)
+        for (const c of cellsOf(decoFootprint(p.kind, p.x, p.y))) if (c >= 0) busy[c] = 1
+    }
+    if (cells.some((c) => busy[c])) return { ok: false, reason: 'Місце зайняте' }
+    if (!g.floor) {
+      const test = walkGrid(atlas.walk, [...others, { blocks: [fp] }])
+      const me = cellOf(player.x, player.y)
+      if (!test[me]) return { ok: false, reason: 'Тут стоїть мандрівник' }
+      if (!allReachable(test, me)) return { ok: false, reason: 'Це перекриє прохід' }
+    }
+    return { ok: true }
+  }
+
+  /** Що з декору гравця під точкою (спершу предмети, потім підлога). */
+  function decoAt(p) {
+    const hits = list.filter((q) => {
+      if (!q.uid) return false
+      const f = frames[q.s]
+      return p.x >= q.x - f.w / 2 && p.x <= q.x + f.w / 2 && p.y >= q.y - f.h && p.y <= q.y + 1
+    })
+    hits.sort((a, b) => (a.layer === 'floor') - (b.layer === 'floor') || b.y - a.y)
+    return hits[0]?.uid ?? null
   }
 
   function walkTo(target, goalId = null) {
@@ -216,15 +303,30 @@ export function createWalk(canvas, assets, cb) {
   const onDown = (e) => {
     canvas.setPointerCapture?.(e.pointerId)
     const p = toWorld(e)
+    if (mode === 'build') {
+      held = { ...p, camX: free.x, camY: free.y, moved: false }
+      return
+    }
     held = { ...p, at: performance.now(), moved: false }
     tap(p)
   }
   const onMove = (e) => {
     if (!held) return
     const p = toWorld(e)
-    if (Math.hypot(p.dx - held.dx, p.dy - held.dy) > 12 * (window.devicePixelRatio || 1)) held = { ...p, at: held.at, moved: true }
+    const far = Math.hypot(p.dx - held.dx, p.dy - held.dy) > 10 * (window.devicePixelRatio || 1)
+    if (mode === 'build') {
+      // Будівництво: палець тягне камеру.
+      if (far) held.moved = true
+      if (held.moved) {
+        free.x = held.camX - (p.dx - held.dx) / scale
+        free.y = held.camY - (p.dy - held.dy) / scale
+      }
+      return
+    }
+    if (far) held = { ...p, at: held.at, moved: true }
   }
   const onUp = () => {
+    if (mode === 'build' && held && !held.moved) cb.onBuildTap({ x: held.x, y: held.y, uid: decoAt(held) })
     held = null
   }
   const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' }
@@ -244,7 +346,21 @@ export function createWalk(canvas, assets, cb) {
     } else keys.delete(k)
   }
 
+  const clampCam = (v, max) => (max <= 0 ? max / 2 : Math.max(0, Math.min(max, v)))
+
   function update(dt) {
+    if (mode === 'build') {
+      // Стрілки рухають камеру; мандрівник чекає.
+      const vx = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0)
+      const vy = (keys.has('down') ? 1 : 0) - (keys.has('up') ? 1 : 0)
+      free.x = clampCam(free.x + vx * 140 * dt, MAP.w - cam.w)
+      free.y = clampCam(free.y + vy * 140 * dt, MAP.h - cam.h)
+      player.moving = false
+      player.step = 0
+      cam.x = Math.round(free.x)
+      cam.y = Math.round(free.y)
+      return
+    }
     // Палець тримають і ведуть — перераховуємо шлях раз на 150 мс.
     if (held?.moved && t - lastRepath > 0.15) {
       lastRepath = t
@@ -309,15 +425,26 @@ export function createWalk(canvas, assets, cb) {
     }
 
     // Камера: гравець по центру, без виходу за мапу.
-    const clamp = (v, max) => (max <= 0 ? max / 2 : Math.max(0, Math.min(max, v)))
-    cam.x = Math.round(clamp(player.x - cam.w / 2, MAP.w - cam.w))
-    cam.y = Math.round(clamp(player.y - 12 - cam.h / 2, MAP.h - cam.h))
+    cam.x = Math.round(clampCam(player.x - cam.w / 2, MAP.w - cam.w))
+    cam.y = Math.round(clampCam(player.y - 12 - cam.h / 2, MAP.h - cam.h))
   }
 
   function sprite(name, x, y) {
     const f = frames[name]
     if (!f) return
     ctx.drawImage(assets.sprites, f.x, f.y, f.w, f.h, Math.round(x - f.w / 2), Math.round(y - f.h), f.w, f.h)
+  }
+
+  /** Прикрасу, яку зараз пересуваємо, на старому місці не малюємо. */
+  const hidden = (p) => ghost?.uid && p.uid === ghost.uid
+
+  /** Рамка «ніжок»: заливка й контур. */
+  function footprint([x, y, w, h], fill, stroke) {
+    ctx.fillStyle = fill
+    ctx.fillRect(x, y, w, h)
+    ctx.strokeStyle = stroke
+    ctx.lineWidth = 1 / scale
+    ctx.strokeRect(x, y, w, h)
   }
 
   function draw() {
@@ -341,7 +468,14 @@ export function createWalk(canvas, assets, cb) {
     const shore = Math.floor(t / 0.3) % Math.round(assets.foam.height / MAP.h)
     ctx.drawImage(assets.foam, 0, shore * MAP.h, MAP.w, MAP.h, 0, 0, MAP.w, MAP.h)
 
-    for (const p of list) if (p.layer === 'floor') sprite(p.s, p.x, p.y)
+    for (const p of list) if (p.layer === 'floor' && !hidden(p)) sprite(p.s, p.x, p.y)
+
+    // Сітка будівництва — ледь помітна, щоб було видно, куди ляже предмет.
+    if (mode === 'build') {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)'
+      for (let x = Math.floor(cam.x / CELL) * CELL; x < cam.x + cam.w; x += CELL) ctx.fillRect(x, cam.y, 1 / scale, cam.h)
+      for (let y = Math.floor(cam.y / CELL) * CELL; y < cam.y + cam.h; y += CELL) ctx.fillRect(cam.x, y, cam.w, 1 / scale)
+    }
 
     // Ціль переходу: пульсуюче кільце.
     if (marker) {
@@ -352,7 +486,7 @@ export function createWalk(canvas, assets, cb) {
     }
 
     // Гравець + об'єкти, відсортовані за низом.
-    const objs = list.filter((p) => p.layer !== 'floor')
+    const objs = list.filter((p) => p.layer !== 'floor' && !hidden(p))
     objs.push({ s: 'hero', x: player.x, y: player.y })
     objs.sort((a, b) => a.y - b.y)
     for (const p of objs) {
@@ -380,12 +514,27 @@ export function createWalk(canvas, assets, cb) {
         ctx.fillRect(Math.round(s.x + Math.sin(ph * 5 + k) * 2 + ph * 10 - size / 2), Math.round(s.y - 2 - ph * 34), size, size)
       }
 
-    // Вогні: маяк і ліхтарі на причалі.
+    // Полум'я вогнищ: піксельні язики, що мерехтять.
+    for (const f of fx.fires) {
+      if (ghost?.uid === f.uid) continue
+      for (let k = 0; k < 7; k++) {
+        const ph = (t * 1.6 + k / 7) % 1
+        const x = Math.round(f.x + Math.sin(k * 2.3 + t * 7) * (2.5 - ph * 2))
+        const y = Math.round(f.y - ph * 10)
+        const size = ph < 0.3 ? 2 : 1
+        ctx.fillStyle = ph < 0.25 ? '#fff2a8' : ph < 0.55 ? '#ffb53a' : ph < 0.8 ? '#ff6a2a' : 'rgba(120, 110, 100, 0.5)'
+        ctx.fillRect(x, y, size, size)
+      }
+    }
+
+    // Вогні: маяк, ліхтарі на причалі й декор гравця.
     for (const l of fx.lights) {
-      const pulse = 0.75 + Math.sin(t * 3 + l.x) * 0.25
+      if (ghost?.uid && l.uid === ghost.uid) continue
+      const pulse = l.warm ? 0.8 + Math.sin(t * 11 + l.x) * 0.12 + Math.sin(t * 17) * 0.08 : 0.75 + Math.sin(t * 3 + l.x) * 0.25
       const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r)
-      g.addColorStop(0, `rgba(255, 230, 140, ${0.45 * pulse})`)
-      g.addColorStop(1, 'rgba(255, 230, 140, 0)')
+      const rgb = l.warm ? '255, 170, 80' : '255, 230, 140'
+      g.addColorStop(0, `rgba(${rgb}, ${0.45 * pulse})`)
+      g.addColorStop(1, `rgba(${rgb}, 0)`)
       ctx.fillStyle = g
       ctx.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2)
       if (l.beam) {
@@ -405,6 +554,23 @@ export function createWalk(canvas, assets, cb) {
         ctx.closePath()
         ctx.fill()
         ctx.restore()
+      }
+    }
+
+    // Будівництво: виділена прикраса й привид нового місця.
+    if (mode === 'build') {
+      const blink = 0.55 + Math.sin(t * 6) * 0.25
+      const sel = selected && !ghost && list.find((p) => p.uid === selected)
+      if (sel) footprint(decoFootprint(sel.kind, sel.x, sel.y), `rgba(255, 220, 90, ${0.25 * blink})`, `rgba(255, 230, 120, ${blink})`)
+      if (ghost) {
+        const fp = decoFootprint(ghost.kind, ghost.x, ghost.y)
+        const stroke = ghost.ok ? 'rgba(170, 255, 170, 0.95)' : 'rgba(255, 110, 100, 1)'
+        footprint(fp, ghost.ok ? 'rgba(110, 230, 120, 0.35)' : 'rgba(255, 80, 70, 0.45)', stroke)
+        // Невдале місце — привид блідий, а червона рамка лягає поверх нього.
+        ctx.globalAlpha = ghost.ok ? 0.6 + blink * 0.3 : 0.35
+        sprite(DECO_GEOM[ghost.kind].sprite, ghost.x, ghost.y)
+        ctx.globalAlpha = 1
+        if (!ghost.ok) footprint(fp, `rgba(255, 80, 70, ${0.3 * blink})`, stroke)
       }
     }
 
@@ -475,6 +641,34 @@ export function createWalk(canvas, assets, cb) {
 
   return {
     setWorld,
+    canPlace,
+    /** 'walk' — гуляємо, 'build' — пісочниця: палець рухає камеру, тап — вибір місця. */
+    setMode(m) {
+      if (m === mode) return
+      mode = m
+      held = null
+      keys.clear()
+      path = []
+      goal = null
+      marker = null
+      if (m === 'build') {
+        free.x = cam.x
+        free.y = cam.y
+        near = null
+        cb.onNear(null)
+      } else {
+        ghost = null
+        selected = null
+      }
+    },
+    /** Привид предмета (або null). Повертає його разом із тим, чи можна тут ставити. */
+    setGhost(g) {
+      ghost = g ? { ...g, ...canPlace(g.kind, g.x, g.y, g.uid ?? null) } : null
+      return ghost
+    },
+    setSelected(uid) {
+      selected = uid
+    },
     setBubbles(b) {
       bubbles = b
     },

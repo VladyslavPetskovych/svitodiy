@@ -10,6 +10,7 @@ import {
   hasNastiaAccess,
 } from "../bot.js";
 import { GAME_CONFIG } from "./catalog.js";
+import { getDecor } from "./decor.js";
 import { getHome } from "./homestead.js";
 import { dailyClaimKey, jobKey, kyivDay, previousDay, quizRewardKey, userKey } from "./keys.js";
 
@@ -70,7 +71,7 @@ async function getJob(userId) {
 /** Усе про гравця одним запитом — після кожної дії клієнт просто замінює стан. */
 export async function getState(userId) {
   const r = getRedis();
-  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home] = await Promise.all([
+  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, deco] = await Promise.all([
     r.hGetAll(userKey(userId)),
     getInventory(userId),
     getJob(userId),
@@ -80,6 +81,7 @@ export async function getState(userId) {
     dumosvitIsScheduled(userId),
     r.get(quizRewardKey(userId, kyivDay())),
     getHome(userId),
+    getDecor(userId),
   ]);
 
   for (const k of Object.keys(inventory)) {
@@ -108,6 +110,7 @@ export async function getState(userId) {
     inventory,
     job,
     home,
+    deco,
     // phone — чи є номер узагалі: без нього персональні розділи не відкрити.
     access: { nastia: access[0], admin: access[1], phone: access[2] != null },
     daily: await getDailyState(userId, h),

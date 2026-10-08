@@ -1699,6 +1699,271 @@ function sailboat() {
   return img.outline(C.K, 0.9)
 }
 
+/* ───────── Декор для пісочниці ───────── */
+
+function decoWildflowers() {
+  const img = new Img(10, 8)
+  const pal = { G: '#3f7d27', g: '#74bb44', Y: '#ffd83a', W: '#fbfbf4', P: '#f28ab0', B: '#5b8ef0', c: '#f5c21b' }
+  img.rows(['.W....P...', 'WcW..PcP..', '.W.Y..P.B.', '.g.g.Bg.B.', 'gG..gG.gB.', '.G.gG..G..', '.gGG.gGg..', '..G...G...'], 0, 0, pal)
+  return img
+}
+
+function decoFlowerBed() {
+  const img = new Img(18, 12)
+  shadow(img, 9, 10, 9, 2, 0.25)
+  img.rect(1, 4, 16, 7, C.woodLo)
+  img.rect(2, 5, 14, 5, '#5e3d25')
+  img.hline(1, 16, 4, C.woodPale)
+  for (let x = 3; x < 15; x += 3) {
+    const col = ['#e2382c', '#ffd83a', '#f28ab0', '#5b8ef0'][(x / 3) % 4 | 0]
+    img.set(x, 6, '#3f7d27')
+    img.set(x + 1, 7, '#74bb44')
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) img.set(x + dx, 3 + dy, col)
+    img.set(x, 3, '#fff2a8')
+    img.set(x, 5, '#3f7d27')
+  }
+  return img.outline(C.K, 0.8)
+}
+
+function decoSunflowers() {
+  const img = new Img(14, 26)
+  shadow(img, 7, 24, 6, 1.5)
+  for (const [x, top] of [[4, 6], [10, 2]]) {
+    img.vline(x, top + 4, 24, '#3f7d27')
+    img.set(x + 1, top + 10, '#74bb44')
+    img.set(x + 2, top + 9, '#74bb44')
+    img.set(x - 1, top + 14, '#74bb44')
+    img.set(x - 2, top + 13, '#74bb44')
+    img.ellipse(x, top + 2, 3.5, 3.5, '#ffc61a')
+    img.ellipse(x, top + 2, 1.6, 1.6, '#6b4426')
+    img.set(x - 1, top, '#ffe680')
+  }
+  return img.outline(C.K, 0.7)
+}
+
+function decoSapling() {
+  const img = new Img(18, 28)
+  shadow(img, 9, 26, 7, 2)
+  img.rect(8, 14, 2, 13, C.wood)
+  img.vline(8, 14, 26, C.woodLo)
+  canopy(img, [[9, 9, 7], [5, 12, 4], [13, 12, 4]], LEAF, 41)
+  return img.outline('#1e3a12')
+}
+
+function decoPine() {
+  const img = new Img(28, 46)
+  shadow(img, 14, 43, 11, 3)
+  img.rect(12, 34, 4, 10, C.wood)
+  img.vline(12, 34, 43, C.woodLo)
+  const PINE = ['#9ad861', '#5fa043', '#3f7f37', '#2d6230', '#1e4626']
+  // Яруси хвої: трикутники, світліші зліва.
+  for (const [top, half, hgt] of [[2, 6, 12], [10, 9, 13], [19, 12, 15]]) {
+    for (let y = 0; y < hgt; y++) {
+      const w = Math.round(1 + (half * y) / (hgt - 1))
+      for (let x = -w; x <= w; x++) {
+        const u = (x + w) / (2 * w + 1)
+        const k = y === hgt - 1 ? 4 : u < 0.25 ? 1 : u < 0.6 ? 2 : u < 0.85 ? 3 : 4
+        img.set(14 + x, top + y, PINE[k])
+        if (k <= 2 && hash(x, y + top, 47) < 0.08) img.set(14 + x, top + y, PINE[0])
+      }
+    }
+  }
+  img.set(14, 1, '#ffd23c')
+  return img.outline('#16301b')
+}
+
+function decoPumpkins() {
+  const img = new Img(20, 13)
+  shadow(img, 10, 11, 9, 2)
+  img.hline(2, 17, 6, '#3f7d27')
+  img.set(5, 5, '#74bb44')
+  img.set(14, 5, '#74bb44')
+  for (const [x, y, r] of [[5, 8, 4], [14, 8, 3.5], [10, 9, 3]]) {
+    img.ellipse(x, y, r, r * 0.75, '#e8892d')
+    img.vline(x, y - 2, y + 2, '#b8621b')
+    img.set(x - 2, y - 1, '#ffb05a')
+    img.set(x, y - 3, '#3f7d27')
+  }
+  return img.outline(C.K, 0.8)
+}
+
+function decoSteppingStone() {
+  const img = new Img(10, 7)
+  img.ellipse(5.5, 4.5, 4.5, 2.4, '#6b5130', 0.3)
+  for (let y = 0; y < 6; y++)
+    for (let x = 0; x < 9; x++) {
+      const dx = (x + 0.5 - 4.5) / 4.5
+      const dy = (y + 0.5 - 3) / 2.6
+      const r = dx * dx + dy * dy
+      if (r > 1) continue
+      const light = -dx * 0.4 - dy * 0.7
+      img.set(x, y, ramp(STONE_PALS[0], 0.5 + light * 0.45 + (r > 0.7 ? -0.15 : 0), x, y))
+    }
+  return img
+}
+
+function decoCobbleTile() {
+  const img = new Img(16, 16)
+  img.rect(0, 0, 16, 16, '#5a524a')
+  const stones = [[0, 0, 8, 6], [8, 0, 8, 6], [0, 6, 5, 5], [5, 6, 6, 5], [11, 6, 5, 5], [0, 11, 8, 5], [8, 11, 8, 5]]
+  stones.forEach(([x, y, w, h], k) => {
+    const pal = STONE_PALS[k % 3]
+    for (let j = 1; j < h; j++)
+      for (let i = 1; i < w; i++) {
+        if ((i === 1 || i === w - 1) && (j === 1 || j === h - 1)) continue
+        let tone = 0.5 + (hash(k, 0, 51) - 0.5) * 0.2
+        if (j === 1 || i === 1) tone = 0.85
+        if (j === h - 1 || i === w - 1) tone = 0.2
+        img.set(x + i - 0.5, y + j - 0.5, ramp(pal, tone, x + i, y + j))
+      }
+  })
+  return img
+}
+
+function decoPlankFloor() {
+  const img = planks(16, 16, true)
+  img.hline(0, 15, 0, C.woodHi)
+  for (const [x, y] of [[2, 2], [13, 2], [2, 13], [13, 13]]) img.set(x, y, C.K)
+  return img
+}
+
+function decoStoneLantern() {
+  const img = new Img(12, 22)
+  shadow(img, 6, 20, 5, 1.5)
+  const S = (x, y, w, h, tone) => {
+    for (let j = 0; j < h; j++)
+      for (let i = 0; i < w; i++) img.set(x + i, y + j, ramp(STONE_PALS[0], tone + (i === 0 ? 0.25 : i === w - 1 ? -0.25 : 0), x + i, y + j))
+  }
+  S(3, 15, 6, 6, 0.5)
+  S(4, 11, 4, 4, 0.55)
+  S(2, 9, 8, 2, 0.6)
+  img.rect(3, 4, 6, 5, '#3b3631')
+  img.rect(4, 5, 4, 3, C.light)
+  img.rect(4, 5, 2, 1, C.lightHi)
+  S(1, 2, 10, 2, 0.65)
+  S(4, 0, 4, 2, 0.6)
+  return img.outline(C.K)
+}
+
+function decoWell() {
+  const img = new Img(28, 32)
+  shadow(img, 14, 29, 13, 3)
+  // Кам'яне кільце з водою.
+  stoneWall(img, 3, 18, 22, 11, 14)
+  img.ellipse(14, 18, 11, 4, '#8f887c')
+  img.ellipse(14, 18, 8.5, 2.6, '#1d3550')
+  img.ellipse(13, 17.5, 4, 1, '#3b6f9a')
+  // Дашок на стовпах, коловорот і відро.
+  img.rect(4, 6, 2, 13, C.wood)
+  img.rect(22, 6, 2, 13, C.wood)
+  img.vline(4, 6, 18, C.woodLo)
+  img.vline(22, 6, 18, C.woodLo)
+  tileRoof(img, 1, 1, 26, 6)
+  img.hline(1, 26, 7, '#6e281a')
+  img.hline(6, 21, 10, C.woodPale)
+  img.vline(14, 10, 14, '#c8b48c')
+  img.rect(12, 14, 4, 3, C.wood)
+  img.hline(12, 15, 14, C.woodPale)
+  return img.outline(C.K)
+}
+
+function decoFence() {
+  const img = new Img(18, 16)
+  shadow(img, 9, 14, 9, 1.5, 0.2)
+  for (const x of [1, 8, 15]) {
+    img.rect(x, 3, 2, 12, C.wood)
+    img.vline(x, 3, 14, C.woodLo)
+    img.hline(x, x + 1, 2, C.woodPale)
+  }
+  for (const y of [6, 10]) {
+    img.hline(0, 17, y, C.woodPale)
+    img.hline(0, 17, y + 1, C.wood)
+  }
+  return img.outline(C.K, 0.9)
+}
+
+function decoBench() {
+  const img = new Img(26, 17)
+  shadow(img, 13, 15, 12, 2)
+  img.rect(2, 2, 22, 3, C.wood)
+  img.hline(2, 23, 2, C.woodHi)
+  img.rect(2, 6, 22, 2, C.wood)
+  img.hline(2, 23, 6, C.woodHi)
+  img.rect(1, 9, 24, 3, C.woodPale)
+  img.hline(1, 24, 9, '#ddb67e')
+  img.hline(1, 24, 11, C.wood)
+  for (const x of [3, 21]) img.rect(x, 2, 2, 13, C.woodLo)
+  return img.outline(C.K)
+}
+
+function decoHay() {
+  const img = new Img(22, 18)
+  shadow(img, 11, 16, 10, 2)
+  for (let y = 3; y < 16; y++)
+    for (let x = 1; x < 21; x++) {
+      const dx = (x + 0.5 - 11) / 10
+      const dy = (y + 0.5 - 10) / 7
+      if (dx * dx + dy * dy * (y < 10 ? 1.4 : 0.6) > 1) continue
+      const light = -dx * 0.5 - dy * 0.7
+      img.set(x, y, light > 0.35 ? '#f6dc7a' : light > -0.1 ? '#e3bf4f' : light > -0.5 ? '#c49a35' : '#9a7424')
+      if (hash(x, y, 61) < 0.12) img.set(x, y, '#fff0a8')
+      if (hash(x, y, 62) < 0.08) img.set(x, y, '#9a7424')
+    }
+  img.hline(3, 18, 11, '#8e2a1f')
+  return img.outline(C.K, 0.85)
+}
+
+function decoSignpost() {
+  const img = new Img(18, 22)
+  shadow(img, 9, 20, 4, 1.5)
+  img.rect(8, 4, 2, 17, C.wood)
+  img.vline(8, 4, 20, C.woodLo)
+  // Дві дощечки-стрілки в різні боки.
+  img.rows(['.LLLLLLLL..', 'LLLLLLLLLL.', '.LLLLLLLL..'], 6, 4, { L: C.woodPale })
+  img.rows(['..LLLLLLLL.', '.LLLLLLLLLL', '..LLLLLLLL.'], 1, 10, { L: '#c08c58' })
+  img.hline(8, 13, 5, C.wood)
+  img.hline(4, 9, 11, C.wood)
+  return img.outline(C.K)
+}
+
+function decoCampfire() {
+  const img = new Img(18, 12)
+  shadow(img, 9, 10, 8, 2)
+  for (const [x, y] of [[2, 7], [5, 9], [9, 10], [13, 9], [16, 7], [14, 5], [4, 5]]) {
+    img.ellipse(x, y, 2, 1.5, '#8f887c')
+    img.set(x - 1, y - 1, '#c8c2b6')
+  }
+  // Поліна навхрест і жар; полум'я малює рушій.
+  for (let i = 0; i < 9; i++) {
+    img.set(5 + i, 4 + Math.floor(i / 3), C.wood)
+    img.set(13 - i, 4 + Math.floor(i / 3), '#6b4426')
+  }
+  img.rect(7, 6, 5, 2, '#ff8a2a')
+  img.set(9, 6, '#ffd35a')
+  return img.outline(C.K, 0.8)
+}
+
+function decoSprites() {
+  return {
+    deco_wildflowers: decoWildflowers(),
+    deco_flower_bed: decoFlowerBed(),
+    deco_sunflowers: decoSunflowers(),
+    deco_sapling: decoSapling(),
+    deco_pine: decoPine(),
+    deco_pumpkins: decoPumpkins(),
+    deco_stepping_stone: decoSteppingStone(),
+    deco_cobble_tile: decoCobbleTile(),
+    deco_plank_floor: decoPlankFloor(),
+    deco_stone_lantern: decoStoneLantern(),
+    deco_well: decoWell(),
+    deco_fence: decoFence(),
+    deco_bench: decoBench(),
+    deco_hay: decoHay(),
+    deco_signpost: decoSignpost(),
+    deco_campfire: decoCampfire(),
+  }
+}
+
 /* ───────── Атлас ───────── */
 
 function buildSprites() {
@@ -1730,6 +1995,7 @@ function buildSprites() {
     post_lantern: postLantern(),
     boat: boat(),
     sailboat: sailboat(),
+    ...decoSprites(),
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)
@@ -1820,7 +2086,7 @@ writeFileSync(join(OUT_PUBLIC, 'ground.png'), encodePng(ground))
 writeFileSync(join(OUT_PUBLIC, 'foam.png'), encodePng(foam))
 writeFileSync(join(OUT_PUBLIC, 'water.png'), encodePng(water))
 writeFileSync(join(OUT_PUBLIC, 'sprites.png'), encodePng(atlas))
-writeFileSync(OUT_ATLAS, JSON.stringify({ frames, walk: walkGrid(t) }) + '\n')
+writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t) }) + '\n')
 console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів)`)
 
 const pi = process.argv.indexOf('--preview')

@@ -4,6 +4,7 @@ import { adminReport, saveContact } from "./game/admin.js";
 import { buildCatalog } from "./game/catalog.js";
 import { cast, cookFish, craft, equip, sellAllFish, sellFish } from "./game/chasodiy.js";
 import { claimDaily } from "./game/daily.js";
+import { moveDecor, placeDecor, removeDecor } from "./game/decor.js";
 import { GameError } from "./game/errors.js";
 import { collectHome, upgradeBuilding } from "./game/homestead.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
@@ -88,6 +89,11 @@ export function buildApiRouter(botToken) {
   // Рідний острів: будівлі й комора
   api.post("/home/collect", handler((req) => collectHome(uid(req))));
   api.post("/home/:id/upgrade", handler((req) => upgradeBuilding(uid(req), req.params.id)));
+
+  // Пісочниця: декор на острові
+  api.post("/home/deco", handler((req) => placeDecor(uid(req), body(req).kind, body(req).x, body(req).y)));
+  api.post("/home/deco/:id/move", handler((req) => moveDecor(uid(req), req.params.id, body(req).x, body(req).y)));
+  api.delete("/home/deco/:id", handler((req) => removeDecor(uid(req), req.params.id)));
 
   // Острови
   api.post("/islands/:id/explore", handler((req) => explore(uid(req), req.params.id)));

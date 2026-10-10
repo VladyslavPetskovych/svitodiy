@@ -2,9 +2,9 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import { canAfford, formatAmounts, homeStorage, itemOf, storageHours } from '../data.js'
 import { useGame, useNow } from '../context.js'
-import { ART_PX, BUILDING_SPOTS, PALETTE, buildingSprites, plotSprite } from '../islandSprites.js'
+import { ART_PX, BUILDING_SPOTS, PALETTE, bubbleTop, buildingSprites, plotSprite } from '../islandSprites.js'
 import { haptic } from '../tg.js'
-import { Bar, Chip, PxButton, Sheet } from '../ui.jsx'
+import { Bar, Chip, ItemIcon, PxButton, Sheet } from '../ui.jsx'
 
 /** Яку частину home.webp (900×900) показуємо на головній. */
 const SCENE = { x: 150, y: 240, w: 640, h: 520 }
@@ -69,8 +69,8 @@ function Scene({ crop, levels, className = '', children }) {
 }
 
 function PlacedSprite({ sprite, crop }) {
-  const w = sprite.rows[0].length * ART_PX
-  const h = sprite.rows.length * ART_PX
+  const w = sprite.src ? sprite.w : sprite.rows[0].length * ART_PX
+  const h = sprite.src ? sprite.h : sprite.rows.length * ART_PX
   const box = { left: pctX(crop, sprite.x - w / 2), width: `${(w / crop.w) * 100}%`, height: `${(h / crop.h) * 100}%` }
   return (
     <>
@@ -81,18 +81,24 @@ function PlacedSprite({ sprite, crop }) {
         animate={{ scaleY: 1, opacity: 1 }}
         transition={{ type: 'spring', stiffness: 240, damping: 14 }}
       >
-        <PixelArt rows={sprite.rows} />
+        <SpriteArt sprite={sprite} />
       </motion.div>
       {sprite.reflect && (
         <div
           className="pointer-events-none absolute opacity-35"
           style={{ ...box, top: pctY(crop, sprite.y), maskImage: 'linear-gradient(#000, transparent)', WebkitMaskImage: 'linear-gradient(#000, transparent)' }}
         >
-          <PixelArt rows={sprite.rows} className="-scale-y-100" />
+          <SpriteArt sprite={sprite} className="-scale-y-100" />
         </div>
       )}
     </>
   )
+}
+
+/** Готова піксельна картинка або спрайт із рядків символів. */
+function SpriteArt({ sprite, className = '' }) {
+  if (sprite.src) return <img src={sprite.src} alt="" draggable={false} className={`pixelated block size-full ${className}`} />
+  return <PixelArt rows={sprite.rows} className={className} />
 }
 
 /** Рядки символів → SVG; сусідні однакові пікселі зливаються в один прямокутник. */
@@ -179,14 +185,14 @@ function Island({ onBuilding, onChest }) {
                     type="button"
                     onClick={collect}
                     className="absolute -translate-x-1/2 -translate-y-full"
-                    style={{ left: pctX(SCENE, spot.x), top: pctY(SCENE, spot.top) }}
+                    style={{ left: pctX(SCENE, spot.x), top: pctY(SCENE, bubbleTop(b.id, lvl)) }}
                     initial={{ opacity: 0, scale: 0.4 }}
                     animate={{ opacity: 1, scale: 1, y: [0, -4, 0] }}
                     exit={{ opacity: 0, scale: 1.6, y: -30 }}
                     transition={{ default: { duration: 0.25 }, y: { duration: 1.8, repeat: Infinity, ease: 'easeInOut' } }}
                   >
                     <span className="flex size-8 items-center justify-center rounded-full border-2 border-wood-dark bg-cream text-base shadow-[0_3px_0_#0006]">
-                      {own[0] === 'balance' ? '✨' : itemOf(items, own[0]).emoji}
+                      {own[0] === 'balance' ? '✨' : <ItemIcon item={itemOf(items, own[0])} size={22} />}
                     </span>
                   </motion.button>
                 )}
@@ -349,7 +355,7 @@ export function BuildingSheet({ building: b, onClose }) {
                   const item = id === 'balance' ? { emoji: '✨', name: 'Світло' } : itemOf(items, id)
                   return (
                     <Chip key={id} ok={have >= n}>
-                      {item.emoji} {Math.min(have, n)}/{n}
+                      <ItemIcon item={item} size={18} /> {Math.min(have, n)}/{n}
                     </Chip>
                   )
                 })}

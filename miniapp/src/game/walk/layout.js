@@ -56,6 +56,12 @@ export const SPOTS = {
   pier: { x: 256, y: 338 },
 }
 
+/**
+ * Де світиться ліхтар маяка (від якоря спрайта, px) — для сяйва й променя в рушії.
+ * Спрайти маяка намальовані окремо: public/game/buildings/lighthouse_0..3.png.
+ */
+export const LIGHTHOUSE_LAMP = { 1: [3, -60], 2: [-3, -80], 3: [0, -97] }
+
 /** Місток із берега до майстерні на палях. */
 export const BOARDWALK = { x0: 404, x1: 442, y: 281, h: 14 }
 
@@ -148,8 +154,8 @@ export function placements(levels, chestOpen, deco = []) {
 
   // Маяк на скелях.
   const l = SPOTS.lighthouse
-  if (levels.lighthouse > 0) add(`lighthouse_${levels.lighthouse}`, l.x, l.y, { blocks: [[l.x - 12, l.y - 12, 24, 12]] })
-  else add('rubble', l.x, l.y, { blocks: [[l.x - 10, l.y - 8, 20, 8]] })
+  // Маяк стоїть на власному кам'яному острівці — заступає і його.
+  add(`lighthouse_${Math.max(0, levels.lighthouse)}`, l.x, l.y, { blocks: [[l.x - 24, l.y - 24, 48, 20]] })
 
   add(chestOpen ? 'chest_open' : 'chest', CHEST.x, CHEST.y, { blocks: [[CHEST.x - 7, CHEST.y - 6, 14, 6]] })
 
@@ -192,7 +198,7 @@ export const INTERACT = [
   { id: 'house', label: 'Хатинка', near: [256, 160], r: 18, box: [222, 84, 68, 70] },
   { id: 'garden', label: 'Город', near: [372, 234], r: 20, box: [340, 176, 64, 50] },
   { id: 'workshop', label: 'Майстерня', near: [468, 282], r: 20, box: [436, 212, 64, 80] },
-  { id: 'lighthouse', label: 'Маяк', near: [84, 284], r: 20, box: [62, 170, 44, 104] },
+  { id: 'lighthouse', label: 'Маяк', near: [84, 284], r: 20, box: [50, 140, 68, 132] },
   { id: 'chest', label: 'Скриня', near: [200, 324], r: 16, box: [188, 318, 24, 22] },
   { id: 'pier', label: 'Причал', near: [256, 352], r: 14, box: [240, 344, 32, 30] },
   { id: 'fishing', label: 'Рибалити', near: [256, 418], r: 14, box: [240, 396, 32, 34] },

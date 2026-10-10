@@ -43,3 +43,18 @@ export async function hasNastiaAccess(telegramUserId) {
   const phone = await getUserPhone(telegramUserId);
   return isNastiaPhone(phone);
 }
+
+/**
+ * Спільний рідний острів у Mini App: ці гравці бачать і розбудовують один і той самий дім
+ * (рівні будівель, комору й декор). Рюкзаки й ✨ лишаються в кожного свої.
+ */
+const SHARED_HOME_PHONES = ["+380 98 340 55 78", "+371 277 48107"];
+const SHARED_HOME_DIGITS = new Set(SHARED_HOME_PHONES.map(normalizePhone));
+const SHARED_HOME_ID = "shared-1";
+
+/** id спільного дому або null, якщо в гравця свій. @returns {Promise<string|null>} */
+export async function sharedHomeId(telegramUserId) {
+  if (telegramUserId == null) return null;
+  const digits = normalizePhone(await getUserPhone(telegramUserId));
+  return digits.length > 0 && SHARED_HOME_DIGITS.has(digits) ? SHARED_HOME_ID : null;
+}

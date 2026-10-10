@@ -36,13 +36,29 @@ Telegram ──initData──▶ Гра (Netlify) ──/api/*──▶ edge-ф�
 
 ## Графіка
 
-- Арт — з `telegram-bot/assets`, стиснутий у WebP (`public/game/art`, `public/game/fish`).
+- Арт сцен — з `telegram-bot/assets`, стиснутий у WebP (`public/game/art`).
+- Піксельні іконки риби (`public/game/fish`), ресурсів і реліквій (`public/game/items`) нарізані з AI-аркушів
+  у `art/` скриптом `scripts/cut-sheet.py` (потрібні `pip install pillow numpy`): він прибирає фон, ловить
+  сітку «фальшивих» AI-пікселів і зводить кожен спрайт до справжнього розміру. Нова іконка = файл
+  `<id>.png` + id у `FISH_ART` / `ITEM_ART` (`src/game/data.js`). Приклад:
+  `python scripts/cut-sheet.py art/items-sheet.png 4 4 public/game/items log plank twig …` (по рядках, `-` — пропустити).
+- Намальовані будівлі (`public/game/buildings/<кадр>.png`, напр. `lighthouse_0..3` з `art/lighthouse-sheet.png`)
+  генератор острова кладе в атлас замість згенерованих кадрів з тією ж назвою; ці ж PNG показує сцена на головній
+  (`src/game/islandSprites.js`). Після нарізки — `npm run gen:island`. У маяка 3-го рівня рожеві відблиски фону
+  в променях ліхтаря підфарбовано вручну — після повторної нарізки їх треба прибрати знову.
 - Рамки, панелі й кнопки — [Kenney Pixel UI Pack](https://kenney.nl/assets/pixel-ui-pack) (CC0),
   `public/game/ui`, підключені через CSS `border-image` у `src/game/game.css`.
 - Прогулянка рідним островом («🚶 Зійти на острів» на головній) — текстури землі, води, піни й
   спрайти (мандрівник, будівлі всіх рівнів, дерева, причал) генеруються кодом:
   `npm run gen:island` → `public/game/walk/*.png` і `src/game/walk/atlas.json`.
   Розкладка острова й точки взаємодії — `src/game/walk/layout.js`, рушій — `src/game/walk/engine.js`.
+- Острів рівний — ходити можна всюди, крім води й предметів. Тап по хатинці — заходиш досередини
+  (`src/game/walk/home.js`: кімната, меблі за рівнем хатинки, ліжко/піч/полиця); фон кімнати й меблі
+  малює той самий генератор (`public/game/walk/home.png`, кадри `home_*`).
+- Спільний острів: гравці з номерами зі `SHARED_HOME_PHONES` (`telegram-bot/src/specialAccess.js`) бачать
+  один дім — рівні будівель, комору й декор (`server/src/game/household.js`). Рюкзак і ✨ лишаються особисті;
+  спільний дім створюється з острова того, хто зайшов першим.
+- Монети з різних металів (`scripts/gen-coins.py` → `public/game/items/coin_*.png`) поки ніде не використані.
 - Пісочниця («🔨 Будувати на острові» на прогулянці): гравець ставить, пересуває й прибирає декор.
   Назви, категорії й ціни — `server/src/game/decor.js` (каталог `decor`, ліміт `decorMax`), розстановка —
   у Redis `svitodiy:deco:<id>`, ендпойнти `POST /home/deco`, `POST /home/deco/:id/move`, `DELETE /home/deco/:id`

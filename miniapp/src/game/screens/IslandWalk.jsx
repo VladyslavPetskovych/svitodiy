@@ -3,16 +3,19 @@ import { useEffect, useRef, useState } from 'react'
 import { canAfford, formatAmounts, homeStorage, itemOf } from '../data.js'
 import { useGame, useNow } from '../context.js'
 import { haptic, useBackButton } from '../tg.js'
-import { PxButton, ScreenTitle, Segmented } from '../ui.jsx'
+import { ItemIcon, PxButton, ScreenTitle, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
 import { DECO_GEOM, snapDeco } from '../walk/decor.js'
 import { createWalk, loadAssets } from '../walk/engine.js'
+import { homeInteract } from '../walk/home.js'
 import { INTERACT } from '../walk/layout.js'
 import { BuildingSheet, DailySheet } from './Home.jsx'
 
 const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚' }
+/** Що написати на кнопці дії. */
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати' }
 const CATS = [
   { value: 'plants', label: '🌿 Рослини' },
   { value: 'stone', label: '🪨 Камінь' },
@@ -37,6 +40,7 @@ export default function IslandWalk() {
   const [ghost, setGhost] = useState(null) // { kind, x, y, uid?, ok, reason? }
   const [sel, setSel] = useState(null) // id виділеної прикраси
   const [busy, setBusy] = useState(false)
+  const [scene, setScene] = useState('island') // 'island' | 'home'
   const now = useNow()
   const { home } = state
   const deco = state.deco ?? NO_DECO
@@ -52,12 +56,22 @@ export default function IslandWalk() {
     haptic('success')
     toast(`Зібрано: ${formatAmounts(items, res.got)}`)
   }
+  const goScene = (id) => {
+    haptic('medium')
+    engine.current?.setScene(id)
+    setScene(id)
+  }
   const interact = (id) => {
     haptic('light')
-    if (BUILDINGS.has(id)) setSheet(id)
+    if (id === 'house') goScene('home')
+    else if (id === 'exit') goScene('island')
+    else if (BUILDINGS.has(id)) setSheet(id)
     else if (id === 'chest') setDaily(true)
     else if (id === 'fishing') switchTab('fishing')
     else if (id === 'boat') switchTab('map')
+    else if (id === 'bed') toast('😴 Подрімав під вишитою ковдрою — сил додалось!')
+    else if (id === 'stove') switchTab('backpack') // готують рибу в рюкзаку
+    else if (id === 'shelf') switchTab('journal')
   }
 
   /* ───── Пісочниця: дії ───── */
@@ -140,6 +154,8 @@ export default function IslandWalk() {
     setSel(null)
     engine.current?.setMode('walk')
   }
+  // «Назад» у Telegram у хаті — вийти надвір.
+  useBackButton(scene === 'home', () => goScene('island'))
   // «Назад» у Telegram: спершу скасовує вибір, потім виходить із будівництва.
   useBackButton(build, () => {
     if (!ghost && !pick && !sel) return exitBuild()
@@ -200,17 +216,20 @@ export default function IslandWalk() {
     engine.current?.setBubbles(build ? {} : JSON.parse(bubbleKey))
   }, [ready, bubbleKey, build])
 
-  const spot = INTERACT.find((i) => i.id === near)
+  const indoors = scene === 'home'
+  const spot = (indoors ? homeInteract(Math.max(1, home.levels.house)) : INTERACT).find((i) => i.id === near)
   const building = catalog.buildings.find((b) => b.id === sheet)
 
   return (
     <div className="flex flex-col gap-3">
       <ScreenTitle
-        title={build ? '🔨 Будуємо острів' : `🏝️ Острів ${name}`}
+        title={build ? '🔨 Будуємо острів' : indoors ? '🏠 Хатинка' : `🏝️ ${home.shared ? 'Спільний острів' : `Острів ${name}`}`}
         subtitle={
           build
             ? 'Тягни пальцем, щоб роззирнутися. Обери предмет і торкнись місця.'
-            : 'Торкнись землі — підеш туди. Підійди до будівлі, скрині чи причалу.'
+            : indoors
+              ? 'Тепло біля печі. Двері внизу ведуть надвір.'
+              : 'Торкнись землі — підеш туди. Тапни хатинку, щоб зайти всередину.'
         }
       />
 
@@ -233,7 +252,7 @@ export default function IslandWalk() {
           </div>
         )}
         <p className="pointer-events-none absolute top-2 left-2 rounded-sm bg-black/35 px-2 py-1 font-pixel text-[9px] text-cream drop-shadow">
-          {build ? `ДЕКОР ${deco.length}/${catalog.decorMax ?? 150}` : `ОСТРІВ ${name.toUpperCase()}`}
+          {build ? `ДЕКОР ${deco.length}/${catalog.decorMax ?? 150}` : indoors ? 'ХАТИНКА' : home.shared ? 'СПІЛЬНИЙ ОСТРІВ' : `ОСТРІВ ${name.toUpperCase()}`}
         </p>
       </div>
 
@@ -274,8 +293,13 @@ export default function IslandWalk() {
                     <p className="truncate text-[11px] text-cream/75">{spotHint(catalog, home.levels, chestOpen, spot.id)}</p>
                   </div>
                   <PxButton size="sm" variant="green" onClick={() => interact(spot.id)}>
-                    {spot.id === 'fishing' ? 'Рибалити' : spot.id === 'boat' ? 'Плисти' : 'Відкрити'}
+                    {ACTION[spot.id] ?? 'Відкрити'}
                   </PxButton>
+                  {spot.id === 'house' && (
+                    <PxButton size="sm" variant="paper" onClick={() => setSheet('house')} aria-label="Покращити хатинку">
+                      🔨
+                    </PxButton>
+                  )}
                 </motion.div>
               ) : (
                 <motion.p
@@ -286,14 +310,20 @@ export default function IslandWalk() {
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.15 }}
                 >
-                  Тапни будівлю — мандрівник сам до неї дійде. На ПК — стрілки/WASD і E.
+                  {indoors ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.' : 'Тапни будівлю — мандрівник сам до неї дійде. На ПК — стрілки/WASD і E.'}
                 </motion.p>
               )}
             </AnimatePresence>
           </div>
-          <PxButton variant="yellow" size="lg" className="w-full" disabled={!ready} onClick={enterBuild}>
-            🔨 Будувати на острові
-          </PxButton>
+          {indoors ? (
+            <PxButton variant="blue" size="lg" className="w-full" onClick={() => goScene('island')}>
+              🚪 Вийти надвір
+            </PxButton>
+          ) : (
+            <PxButton variant="yellow" size="lg" className="w-full" disabled={!ready} onClick={enterBuild}>
+              🔨 Будувати на острові
+            </PxButton>
+          )}
         </>
       )}
 
@@ -391,8 +421,8 @@ function BuildPanel({ cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, 
                 <span className="flex min-h-[14px] flex-wrap justify-center gap-x-1 px-0.5 text-[9px] leading-tight text-ink-soft">
                   {Object.keys(d.cost).length
                     ? Object.entries(d.cost).map(([id, n]) => (
-                        <span key={id} className={(state.inventory[id] ?? 0) >= n ? '' : 'text-[#9a2f1d]'}>
-                          {itemOf(items, id).emoji}
+                        <span key={id} className={`inline-flex items-center ${(state.inventory[id] ?? 0) >= n ? '' : 'text-[#9a2f1d]'}`}>
+                          <ItemIcon item={itemOf(items, id)} size={13} />
                           {n}
                         </span>
                       ))
@@ -444,6 +474,10 @@ function spotIcon(catalog, id) {
 }
 
 function spotHint(catalog, levels, chestOpen, id) {
+  if (id === 'exit') return 'Повернутися на острів'
+  if (id === 'bed') return 'Перина й вишита ковдра'
+  if (id === 'stove') return 'Готують рибу — у рюкзаку'
+  if (id === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'
   if (id === 'chest') return chestOpen ? 'Сьогодні вже відкрито — повертайся завтра' : 'Щоденна нагорода чекає!'
   if (id === 'fishing') return 'Закинути вудку з краю причалу'
   if (id === 'boat') return 'Попливти до інших островів'

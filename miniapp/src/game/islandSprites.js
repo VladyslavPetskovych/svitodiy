@@ -1,3 +1,5 @@
+import atlas from './walk/atlas.json'
+
 /**
  * Піксельні спрайти будівель острова — у палітрі home.webp.
  * Кожен спрайт — рядки символів (символ = піксель, «.» — прозорий).
@@ -52,30 +54,23 @@ function canvas(w, h) {
   }
 }
 
-/* ───────── Маяк: з кожним рівнем вищий, на 3-му — яскравий вогонь ───────── */
+/* ───────── Маяк: окремі спрайти public/game/buildings/lighthouse_0..3.png ───────── */
 
-function lighthouse(level) {
-  const tower = 5 + 4 * level
-  const top = [
-    '......KKK......',
-    '.....KRRRK.....',
-    '....KRRRRrK....',
-    '....KKKKKKK....',
-    level >= 3 ? '....KyYyYyK....' : '....KYKYKYK....',
-    level >= 3 ? '....KYyYyYK....' : '....KYYYYYK....',
-    '...KKKKKKKKK...',
-  ]
-  const body = Array.from({ length: tower }, (_, i) => {
-    const red = Math.floor(i / 3) % 2 === 1
-    const [c, sh] = red ? ['R', 'r'] : ['W', 'w']
-    if (i === 2) return `....K${c}KYK${sh}K....`
-    if (i === tower - 2) return `....K${c}KKK${sh}K....`
-    if (i === tower - 1) return `....K${c}KKK${sh}K....`
-    return `....K${c}${c}${c}${c}${sh}K....`
-  })
-  const rocks = ['..dsSSsSSSsSd..', '.dsSsSSsdSSsSd.', 'ddsdsdddsdsddsd']
-  const all = [...top, ...body, ...rocks]
-  return canvas(15, all.length).stamp(all, 0, 0).done()
+/** Скільки пікселів home.webp на піксель спрайта маяка — він намальований дрібніше за ART_PX. */
+const LIGHTHOUSE_SCALE = 1.55
+/** Низ кам'яного острівця маяка у воді ліворуч від хатинки. */
+const LIGHTHOUSE_BASE = { x: 205, y: 606 }
+
+/** Рівень 0 — порожній острівець із табличкою. Розмір беремо з атласу, куди генератор кладе ці ж PNG. */
+function lighthouseSprite(level) {
+  const f = atlas.frames[`lighthouse_${level}`]
+  return {
+    src: `/game/buildings/lighthouse_${level}.png`,
+    w: f.w * LIGHTHOUSE_SCALE,
+    h: f.h * LIGHTHOUSE_SCALE,
+    ...LIGHTHOUSE_BASE,
+    reflect: true,
+  }
 }
 
 /* ───────── Город: грядки, далі паркан і капуста, потім гарбузи й опудало ───────── */
@@ -150,7 +145,8 @@ const SIGN = ['.KKKKK.', '.KLLLK.', '.KLKLK.', '.KKKKK.', '...B...', '...B...']
 /**
  * Що намалювати для будівлі на рівні: список спрайтів з позиціями.
  * reflect — віддзеркалити у воді (стоїть на воді, як човен на картинці).
- * @returns {{ rows: string[], x: number, y: number, reflect?: boolean }[]}
+ * Спрайт або з рядків символів (rows), або готова картинка (src) розміром w×h пікселів home.webp.
+ * @returns {{ rows?: string[], src?: string, w?: number, h?: number, x: number, y: number, reflect?: boolean }[]}
  */
 export function buildingSprites(id, level) {
   switch (id) {
@@ -175,7 +171,7 @@ export function buildingSprites(id, level) {
         ...(level >= 3 ? [{ rows: SAILBOAT, x: 292, y: 614, reflect: true }] : []),
       ]
     case 'lighthouse':
-      return level > 0 ? [{ rows: lighthouse(level), x: 205, y: 600, reflect: true }] : []
+      return level > 0 ? [lighthouseSprite(level)] : []
     case 'garden':
       return level > 0 ? [{ rows: garden(level), x: 612, y: 552 }] : []
     case 'workshop':
@@ -189,7 +185,7 @@ export function buildingSprites(id, level) {
 export const BUILDING_SPOTS = {
   house: { x: 460, y: 440, top: 390 },
   pier: { x: 470, y: 580, top: 545 },
-  lighthouse: { x: 205, y: 540, top: 460 },
+  lighthouse: { x: 205, y: 520, top: 460 },
   garden: { x: 612, y: 520, top: 495 },
   workshop: { x: 745, y: 560, top: 510 },
 }
@@ -199,10 +195,16 @@ export function plotSprite(id) {
   const { x, y } = BUILDING_SPOTS[id]
   switch (id) {
     case 'lighthouse':
-      return { rows: canvas(15, 9).stamp(SIGN, 4, 0).stamp(['..dsSSsSSSsSd..', '.dsSsSSsdSSsSd.', 'ddsdsdddsdsddsd'], 0, 6).done(), x, y: 600, reflect: true }
+      return lighthouseSprite(0)
     case 'workshop':
       return { rows: canvas(18, 9).stamp(SIGN, 5, 0).stamp(['.BBBBBBBBBBBBBBBB.', '..B.....B......B..', '..B.....B......B..'], 0, 6).done(), x, y: 603, reflect: true }
     default:
       return { rows: canvas(12, 8).stamp(SIGN, 2, 0).stamp(['.MMMMMMMMMM.', 'mMmMmMmMmMmm'], 0, 6).done(), x, y: y + 32 }
   }
+}
+
+/** Де показати бульбашку врожаю: над дахом; маяк з кожним рівнем вищий. */
+export function bubbleTop(id, level) {
+  if (id === 'lighthouse' && level > 0) return LIGHTHOUSE_BASE.y - lighthouseSprite(level).h + 6
+  return BUILDING_SPOTS[id].top
 }

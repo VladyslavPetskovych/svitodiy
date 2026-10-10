@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
+import { homeOwner } from "./household.js";
 import { decoKey, takeCooldown } from "./keys.js";
 
 /**
  * Пісочниця рідного острова: гравець сам розставляє декор.
  * Лише Mini App. Ціна — ресурси з рюкзака; прибрав — повернули все, тож експериментувати не шкода.
  * Геометрія (скільки клітинок займає, чи це підлога) — на клієнті, miniapp/src/game/walk/decor.js.
+ * У спільному домі декор теж спільний: платить той, хто ставить, повертається тому, хто прибирає.
  */
 export const DECOR = [
   { id: "wildflowers", cat: "plants", name: "Польові квіти", emoji: "🌼", cost: {} },
@@ -42,7 +44,7 @@ const ITEM_ID = /^[a-z0-9]{6,16}$/;
 
 /** @returns {Promise<{ id: string, k: string, x: number, y: number }[]>} */
 export async function getDecor(userId) {
-  const h = await getRedis().hGetAll(decoKey(userId));
+  const h = await getRedis().hGetAll(await key(userId));
   const out = [];
   for (const [id, raw] of Object.entries(h)) {
     try {
@@ -67,9 +69,14 @@ function itemId(id) {
   return id;
 }
 
+/** Ключ декору дому, де живе гравець (свого чи спільного). */
+async function key(userId) {
+  return decoKey((await homeOwner(userId)).owner);
+}
+
 /** Одна зміна за раз: подвійний тап не спише ресурси двічі. */
 async function lock(userId) {
-  if (!(await takeCooldown(userId, "deco", 250))) {
+  if (!(await takeCooldown((await homeOwner(userId)).owner, "deco", 250))) {
     throw new GameError(429, "cooldown", "Секунду — ще ставимо попереднє.");
   }
 }
@@ -81,13 +88,13 @@ export async function placeDecor(userId, kind, x, y) {
   await lock(userId);
 
   const r = getRedis();
-  const key = decoKey(userId);
-  if ((await r.hLen(key)) >= DECOR_MAX) throw conflict("full", `На острові вже ${DECOR_MAX} прикрас — прибери щось.`);
+  const k = await key(userId);
+  if ((await r.hLen(k)) >= DECOR_MAX) throw conflict("full", `На острові вже ${DECOR_MAX} прикрас — прибери щось.`);
   if (Object.keys(def.cost).length && !(await consumeResources(userId, def.cost))) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
   const id = randomBytes(6).toString("hex");
-  await r.hSet(key, id, JSON.stringify({ k: def.id, ...pos }));
+  await r.hSet(k, id, JSON.stringify({ k: def.id, ...pos }));
   return { item: { id, k: def.id, ...pos } };
 }
 
@@ -96,10 +103,11 @@ export async function moveDecor(userId, id, x, y) {
   const pos = coords(x, y);
   await lock(userId);
   const r = getRedis();
-  const raw = await r.hGet(decoKey(userId), id);
+  const hk = await key(userId);
+  const raw = await r.hGet(hk, id);
   if (!raw) throw new GameError(404, "not_found", "Цієї прикраси вже немає.");
   const { k } = JSON.parse(raw);
-  await r.hSet(decoKey(userId), id, JSON.stringify({ k, ...pos }));
+  await r.hSet(hk, id, JSON.stringify({ k, ...pos }));
   return { item: { id, k, ...pos } };
 }
 
@@ -107,10 +115,11 @@ export async function removeDecor(userId, id) {
   itemId(id);
   await lock(userId);
   const r = getRedis();
-  const raw = await r.hGet(decoKey(userId), id);
+  const hk = await key(userId);
+  const raw = await r.hGet(hk, id);
   if (!raw) throw new GameError(404, "not_found", "Цієї прикраси вже немає.");
   // hDel повертає 1 лише першому — повторний запит не поверне ресурси вдруге.
-  if ((await r.hDel(decoKey(userId), id)) !== 1) throw new GameError(404, "not_found", "Цієї прикраси вже немає.");
+  if ((await r.hDel(hk, id)) !== 1) throw new GameError(404, "not_found", "Цієї прикраси вже немає.");
   const def = BY_ID.get(JSON.parse(raw).k);
   const refund = def?.cost ?? {};
   for (const [res, n] of Object.entries(refund)) await addResourceToInventory(userId, res, n);

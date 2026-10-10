@@ -7,19 +7,58 @@ export const RARITY = {
   mythic: { label: 'Міфічна', color: '#c77dff' },
 }
 
-/** Риби, для яких є акварель у public/game/fish. Решта показується емодзі. */
-const FISH_ART = new Set(['trout', 'carp', 'perch', 'pike', 'golden_crucian', 'river_bream', 'whisker_cat', 'moon_carp'])
+/**
+ * Риби з піксельним спрайтом у public/game/fish (нарізано з art/fish-sheet.png: scripts/cut-sheet.py).
+ * Решта показується емодзі.
+ */
+const FISH_ART = new Set([
+  'trout',
+  'carp',
+  'perch',
+  'pike',
+  'golden_crucian',
+  'river_bream',
+  'whisker_cat',
+  'moon_carp',
+  'coral_perch',
+  'zander',
+  'storm_eel',
+  'sea_wanderer_tuna',
+  'elder_sturgeon',
+  'crystal_salmon',
+  'royal_catfish',
+  'sunscale_koi',
+])
+
+/** Ресурси й реліквії з піксельним спрайтом у public/game/items (art/items-sheet.png). */
+const ITEM_ART = new Set([
+  'log',
+  'plank',
+  'twig',
+  'stone',
+  'shell',
+  'seaweed',
+  'ice_block',
+  'fish_eye',
+  'fish_bone',
+  'old_coin',
+  'glass_shard',
+  'metal_scrap',
+  'silver_piece',
+  'relic_ring_wanderer',
+  'relic_hook_silver',
+  'relic_hook_gold',
+])
+const itemArt = (id) => (ITEM_ART.has(id) ? `/game/items/${id}.png` : null)
 
 /** Словник id → опис предмета (риба, ресурс, реліквія). */
 export function buildItemIndex(catalog) {
   const index = new Map()
   for (const f of catalog.fish) {
-    index.set(f.id, { ...f, kind: 'fish', image: FISH_ART.has(f.id) ? `/game/fish/${f.id}.webp` : null })
+    index.set(f.id, { ...f, kind: 'fish', image: FISH_ART.has(f.id) ? `/game/fish/${f.id}.png` : null })
   }
-  for (const r of catalog.resources) index.set(r.id, { ...r, kind: 'resource' })
-  for (const r of catalog.relics) {
-    index.set(r.id, { ...r, kind: 'relic', image: r.id === 'relic_ring_wanderer' ? '/game/art/relic-ring.webp' : null })
-  }
+  for (const r of catalog.resources) index.set(r.id, { ...r, kind: 'resource', image: itemArt(r.id) })
+  for (const r of catalog.relics) index.set(r.id, { ...r, kind: 'relic', image: itemArt(r.id) })
   return index
 }
 

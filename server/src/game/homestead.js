@@ -1,5 +1,6 @@
 import { addBalance, addResourceToInventory, consumeResources, getBalance, getInventory, getRedis } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
+import { homeOwner } from "./household.js";
 import { homeKey, takeCooldown } from "./keys.js";
 
 /**
@@ -97,10 +98,14 @@ export function accrued(levels, elapsedMs) {
   return out;
 }
 
-/** Стан острова з Redis. Перше відкриття — старт відліку комори. */
+/**
+ * Стан острова з Redis. Перше відкриття — старт відліку комори.
+ * owner — чий це дім (у спільного — його id), shared — чи ділить гравець острів з кимось.
+ */
 export async function getHome(userId) {
   const r = getRedis();
-  const key = homeKey(userId);
+  const { owner, shared } = await homeOwner(userId);
+  const key = homeKey(owner);
   let h = await r.hGetAll(key);
   if (!h.collectedAt) {
     await r.hSetNX(key, "collectedAt", String(Date.now()));
@@ -113,7 +118,7 @@ export async function getHome(userId) {
   } catch {
     /* зіпсований carry — просто почнемо з нуля */
   }
-  return { levels, collectedAt: Number(h.collectedAt), carry };
+  return { levels, collectedAt: Number(h.collectedAt), carry, owner, shared };
 }
 
 /**
@@ -138,13 +143,17 @@ async function harvest(userId, home) {
     if (id === "balance") await addBalance(userId, n);
     else await addResourceToInventory(userId, id, n);
   }
-  await getRedis().hSet(homeKey(userId), { collectedAt: String(now), carry: JSON.stringify(carry) });
+  await getRedis().hSet(homeKey(home.owner), { collectedAt: String(now), carry: JSON.stringify(carry) });
   return got;
 }
 
-/** Одна дія з островом за раз — два швидкі тапи не заберуть врожай двічі. */
+/**
+ * Одна дія з островом за раз — два швидкі тапи не заберуть врожай двічі.
+ * Замок на дім, а не на гравця: у спільному домі двоє не зберуть одну комору одночасно.
+ */
 async function lock(userId) {
-  if (!(await takeCooldown(userId, "home", 800))) {
+  const { owner } = await homeOwner(userId);
+  if (!(await takeCooldown(owner, "home", 800))) {
     throw new GameError(429, "cooldown", "Секунду — острів ще рахує врожай.");
   }
 }
@@ -177,6 +186,6 @@ export async function upgradeBuilding(userId, buildingId) {
   if (!(await consumeResources(userId, resources))) throw conflict("not_enough", "Не вистачає матеріалів.");
   if (price > 0) await addBalance(userId, -price);
   const level = home.levels[b.id] + 1;
-  await getRedis().hSet(homeKey(userId), `lvl:${b.id}`, String(level));
+  await getRedis().hSet(homeKey(home.owner), `lvl:${b.id}`, String(level));
   return { building: b.id, level, got };
 }

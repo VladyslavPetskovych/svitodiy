@@ -146,8 +146,9 @@ export function Counter({ value, className = '' }) {
 
 /** Іконка предмета: арт, якщо є, інакше емодзі. */
 export function ItemIcon({ item, size = 40, className = '' }) {
-  if (item.image && item.kind === 'relic') {
-    return <img src={item.image} alt="" style={{ width: size, height: size }} className={`rounded-full object-cover ${className}`} />
+  // Піксельний спрайт (риба, ресурс, реліквія) — без згладжування.
+  if (item.image) {
+    return <img src={item.image} alt="" style={{ width: size, height: size }} className={`pixelated object-contain ${className}`} />
   }
   return (
     <span style={{ fontSize: size * 0.72, lineHeight: 1 }} className={`inline-block drop-shadow-[0_2px_0_#0003] ${className}`}>
@@ -157,6 +158,23 @@ export function ItemIcon({ item, size = 40, className = '' }) {
 }
 
 /** Комірка рюкзака з кількістю. */
+/**
+ * Піксельна риба на «воді» кольору рідкості — для карток улову й довідника.
+ * Спрайт крихітний (~36×25), тож малюємо його великим і без згладжування.
+ */
+export function FishArt({ item, className = '', style }) {
+  const r = RARITY[item.rarity] ?? RARITY.common
+  return (
+    <div
+      className={`relative flex items-center justify-center overflow-hidden ${className}`}
+      style={{ background: `radial-gradient(circle at 50% 60%, ${r.color}66, #123550 55%, #0a1c2a 100%)`, ...style }}
+    >
+      <div className="water-shimmer pointer-events-none absolute inset-x-0 bottom-0 h-1/3 opacity-40" />
+      <img src={item.image} alt="" className="pixelated relative h-[72%] max-w-[88%] object-contain drop-shadow-[0_4px_0_#0006]" />
+    </div>
+  )
+}
+
 export function ItemSlot({ item, count, onClick, equipped, dim }) {
   const rarity = item.kind === 'fish' ? RARITY[item.rarity] : null
   return (
@@ -294,6 +312,15 @@ export function RewardModal({ spec, onClose }) {
                   {rarity.label}
                 </p>
               )}
+              {spec.fish && (
+                <motion.div initial={{ rotateY: 90 }} animate={{ rotateY: 0 }} transition={{ delay: 0.15, duration: 0.45 }}>
+                  <FishArt
+                    item={spec.fish}
+                    className="mx-auto mt-3 aspect-[16/9] w-full rounded-sm border-4 border-wood-dark"
+                    style={rarity ? { boxShadow: `0 0 0 3px ${rarity.color}, 0 0 24px ${rarity.color}` } : undefined}
+                  />
+                </motion.div>
+              )}
               {spec.image && (
                 <motion.img
                   src={spec.image}
@@ -303,6 +330,16 @@ export function RewardModal({ spec, onClose }) {
                   initial={{ rotateY: 90 }}
                   animate={{ rotateY: 0 }}
                   transition={{ delay: 0.15, duration: 0.45 }}
+                />
+              )}
+              {spec.sprite && (
+                <motion.img
+                  src={spec.sprite}
+                  alt=""
+                  className="pixelated mx-auto my-3 h-28 w-28 object-contain drop-shadow-[0_4px_0_#0005]"
+                  initial={{ scale: 0, rotate: -30 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ delay: 0.1, type: 'spring', stiffness: 300, damping: 12 }}
                 />
               )}
               {spec.icon && (

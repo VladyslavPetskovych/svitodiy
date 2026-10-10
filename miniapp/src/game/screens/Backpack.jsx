@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { RARITY, itemOf, pct, sourceOf } from '../data.js'
 import { useGame } from '../context.js'
 import { haptic } from '../tg.js'
-import { Chip, ItemIcon, ItemSlot, Paper, PxButton, ScreenTitle, Segmented, Sheet } from '../ui.jsx'
+import { Chip, FishArt, ItemIcon, ItemSlot, Paper, PxButton, ScreenTitle, Segmented, Sheet } from '../ui.jsx'
 import { EquipSheet } from './Fishing.jsx'
 
 export default function Backpack({ tab: initialTab = 'items' }) {
@@ -184,11 +184,10 @@ function ItemSheet({ id, onClose, onEquip }) {
     <Sheet open={!!id} onClose={onClose} title={item ? item.name : ''}>
       {item && (
         <div className="flex flex-col gap-3">
-          {item.kind === 'fish' ? (
-            <img
-              src={item.image}
-              alt=""
-              className="w-full rounded-sm border-4 border-wood-dark"
+          {item.kind === 'fish' && item.image ? (
+            <FishArt
+              item={item}
+              className="aspect-[16/9] w-full rounded-sm border-4 border-wood-dark"
               style={{ boxShadow: `0 0 0 2px ${rarity.color}` }}
             />
           ) : (
@@ -278,7 +277,7 @@ function Alchemy() {
     reward({
       title: 'Алхімія вдалася!',
       icon: out.image ? undefined : out.emoji,
-      image: out.image ?? undefined,
+      sprite: out.image ?? undefined,
       subtitle: `${out.name}${res.output.amount > 1 ? ` ×${res.output.amount}` : ''}`,
       lines: [out.fishBonus ? `Вдягни в рюкзаку: +${pct(out.fishBonus)} до шансу риби` : 'Додано в рюкзак'],
       tone: out.kind === 'relic' ? 'epic' : 'good',
@@ -328,7 +327,7 @@ function Alchemy() {
                       }}
                     >
                       <Chip ok={have >= need}>
-                        {it.emoji} {Math.min(have, need)}/{need}
+                        <ItemIcon item={it} size={18} /> {Math.min(have, need)}/{need}
                       </Chip>
                     </button>
                   )

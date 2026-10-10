@@ -2,18 +2,21 @@
  * Генератор текстур і спрайтів для прогулянки рідним островом.
  *   node scripts/gen-island-art.mjs [--preview <dir>]
  *
- * Пише public/game/walk/{ground,foam,water,sprites}.png і src/game/walk/atlas.json.
+ * Пише public/game/walk/{ground,foam,water,home,sprites}.png і src/game/walk/atlas.json.
  * Усе детерміноване (фіксований seed) — повторний запуск дає ті самі файли.
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { deflateSync } from 'node:zlib'
+import { deflateSync, inflateSync } from 'node:zlib'
+import { DOOR, FLOOR, HOME_MAP, WINDOWS, homePlacements } from '../src/game/walk/home.js'
 import { BEDS, BOARDWALK, CELL, DECOR, INTERACT, LAND, MAP, PATH, PIER, PLAZA, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_PUBLIC = join(ROOT, 'public/game/walk')
 const OUT_ATLAS = join(ROOT, 'src/game/walk/atlas.json')
+/** Намальовані вручну/AI спрайти будівель: <назва кадру>.png замінює згенерований кадр з тією ж назвою. */
+const HANDMADE = join(ROOT, 'public/game/buildings')
 
 /* ───────── PNG ───────── */
 
@@ -51,6 +54,55 @@ function encodePng(img) {
     chunk('IDAT', deflateSync(raw, { level: 9 })),
     chunk('IEND', Buffer.alloc(0)),
   ])
+}
+
+/** Читання PNG (8 біт, RGB/RGBA, без черезрядковості — як пише Pillow) у Img. */
+function decodePng(buf) {
+  let off = 8
+  let w = 0
+  let h = 0
+  let ct = 0
+  const idat = []
+  while (off < buf.length) {
+    const len = buf.readUInt32BE(off)
+    const type = buf.toString('ascii', off + 4, off + 8)
+    const data = buf.subarray(off + 8, off + 8 + len)
+    if (type === 'IHDR') {
+      w = data.readUInt32BE(0)
+      h = data.readUInt32BE(4)
+      ct = data[9]
+      if (data[8] !== 8 || data[12] !== 0 || (ct !== 6 && ct !== 2)) throw new Error('PNG: лише 8-бітні RGB/RGBA без interlace')
+    } else if (type === 'IDAT') idat.push(data)
+    else if (type === 'IEND') break
+    off += 12 + len
+  }
+  const raw = inflateSync(Buffer.concat(idat))
+  const bpp = ct === 6 ? 4 : 3
+  const stride = w * bpp
+  const px = Buffer.alloc(h * stride)
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)]
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1))
+    for (let x = 0; x < stride; x++) {
+      const i = y * stride + x
+      const a = x >= bpp ? px[i - bpp] : 0
+      const b = y ? px[i - stride] : 0
+      const c = x >= bpp && y ? px[i - stride - bpp] : 0
+      let v = line[x]
+      if (f === 1) v += a
+      else if (f === 2) v += b
+      else if (f === 3) v += (a + b) >> 1
+      else if (f === 4) {
+        const p0 = a + b - c
+        const pa = Math.abs(p0 - a)
+        const pb = Math.abs(p0 - b)
+        const pc = Math.abs(p0 - c)
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c
+      }
+      px[i] = v & 255
+    }
+  }
+  return { w, h, bpp, px }
 }
 
 /* ───────── Полотно ───────── */
@@ -308,9 +360,8 @@ const WATER = 0
 const SAND = 1
 const GRASS = 2
 const ROCK = 3
-const CLIFF_H = 12
 
-/** Класифікація пікселів, обрив, бруківка, стежки й поля відстаней. */
+/** Класифікація пікселів, бруківка, стежки й поля відстаней. Острів рівний — без обривів і сходів. */
 function terrain() {
   const { w, h } = MAP
   const N = w * h
@@ -323,21 +374,6 @@ function terrain() {
       else if (field(LAND.rocks, x, y, 23, 0.3) > 0) cls[i] = ROCK
       else if (field(LAND.plateau, x, y, 31, 0.14) > 0 && l > 0.07) cls[i] = GRASS
       else cls[i] = SAND
-    }
-  // Обрив під краєм плато (вид 3/4): смуга під травою, якщо під нею не вода.
-  const cliff = new Uint8Array(N)
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x
-      if (cls[i] === GRASS || cls[i] === WATER) continue
-      for (let j = 1; j <= CLIFF_H && y - j >= 0; j++) {
-        const above = cls[(y - j) * w + x]
-        if (above === GRASS) {
-          cliff[i] = j
-          break
-        }
-        if (above === WATER) break
-      }
     }
   const path = new Float32Array(N)
   const trail = new Float32Array(N)
@@ -355,16 +391,13 @@ function terrain() {
   const isWater = cls.map((c) => (c === WATER ? 1 : 0))
   const isLand = cls.map((c) => (c === WATER ? 0 : 1))
   const notGrass = cls.map((c) => (c !== GRASS ? 1 : 0))
-  const isCliff = cliff.map((c) => (c ? 1 : 0))
   return {
     cls,
-    cliff,
     path,
     trail,
     dWater: distanceTo(isWater, w, h), // для суші: як далеко вода
     dLand: distanceTo(isLand, w, h), // для води: як далеко берег
     dEdge: distanceTo(notGrass, w, h), // для трави: як далеко край плато
-    dCliff: distanceTo(isCliff, w, h),
   }
 }
 
@@ -375,7 +408,6 @@ const DRY_PAL = ['#3a5a26', '#4c7029', '#60862e', '#779b35', '#90af3f', '#a9c24e
 const SAND_PAL = ['#c7a06a', '#d4b079', '#dfc088', '#e8cd97', '#f0daa8', '#f7e7bf', '#fcf2d6']
 const WET_PAL = ['#8f7450', '#a3855c', '#b5966a', '#c4a679']
 const DIRT_PAL = ['#4a2f1d', '#5e3d25', '#734d2f', '#89603b', '#9f7449', '#b5895c']
-const CLIFF_PAL = ['#3a2f28', '#54463b', '#6c5b4c', '#86725f', '#9f8a74', '#b8a289', '#d0bba0']
 const STONE_PALS = [
   ['#5b5650', '#77716a', '#948e85', '#b0aa9f', '#cbc5b9', '#e2ddd1'],
   ['#5e5249', '#7c6d60', '#998877', '#b4a28f', '#cdbca6', '#e2d3bd'],
@@ -420,8 +452,7 @@ function cobble(x, y, size, seed) {
 function groundImage(t) {
   const { w, h } = MAP
   const img = new Img(w, h)
-  const { cls, cliff, path, trail, dWater, dLand, dEdge, dCliff } = t
-  const at = (x, y) => (x < 0 || y < 0 || x >= w || y >= h ? WATER : cls[y * w + x])
+  const { cls, path, trail, dWater, dLand, dEdge } = t
   const idx = (x, y) => y * w + x
 
   for (let y = 0; y < h; y++)
@@ -445,52 +476,8 @@ function groundImage(t) {
         continue
       }
 
-      /* Обрив: шари каменю, тінь під козирком трави, темна основа. */
-      if (cliff[i] && path[i] > 0) {
-        const j = cliff[i]
-        if (j === 1) {
-          img.set(x, y, hash(x, 7, 9) < 0.55 ? GRASS_PAL[2] : GRASS_PAL[1])
-          continue
-        }
-        if (j === 2 && hash(x, 8, 9) < 0.4) {
-          img.set(x, y, GRASS_PAL[1])
-          continue
-        }
-        // Широкі горизонтальні брили, світлий верх кожної, тріщини між ними.
-        const sx = x * 0.42
-        const sy = y * 1.25 + fbm(x / 14, 0, 71) * 5
-        const wv = worley(sx, sy, 6, 77)
-        if (wv.d2 - wv.d1 < 0.7) {
-          img.set(x, y, CLIFF_PAL[0])
-          continue
-        }
-        let tone = 0.6 + (wv.id - 0.5) * 0.3 - (j / CLIFF_H) * 0.18 + (fbm(x / 3, y / 2, 72) - 0.5) * 0.12
-        const up = worley(sx, sy - 1.25, 6, 77)
-        const up2 = worley(sx, sy - 2.5, 6, 77)
-        if (up.d2 - up.d1 < 0.7) tone = 0.97
-        else if (up2.d2 - up2.d1 < 0.7) tone += 0.16
-        const dn = worley(sx, sy + 1.25, 6, 77)
-        if (dn.d2 - dn.d1 < 0.7) tone -= 0.3
-        if (j === 3) tone -= 0.22 // тінь під козирком трави
-        img.set(x, y, ramp(CLIFF_PAL, tone, x, y))
-        if (tone > 0.9 && hash(x, y, 33) < 0.3) img.set(x, y, '#7d9a3e') // мох на виступах
-        if (j === CLIFF_H) img.set(x, y, CLIFF_PAL[0])
-        continue
-      }
-
-      /* Бруківка, сходи, кладка на піску. */
+      /* Бруківка й кладка на піску. */
       if (path[i] < 0 && c !== ROCK) {
-        if (cliff[i]) {
-          // Сходи: кожна сходинка — 3 ряди (верх, лице, тінь), по боках — темні щоки.
-          const j = cliff[i] - 1
-          const row = j % 3
-          const blk = (x + (Math.floor(j / 3) % 2) * 4) % 9
-          let tone = row === 0 ? 0.85 : row === 1 ? 0.55 : 0.2
-          if (row === 1 && blk === 0) tone = 0.25
-          if (path[i] > -2.5) tone = 0.1
-          img.set(x, y, ramp(STONE_PALS[0], tone + (n - 0.5) * 0.08, x, y))
-          continue
-        }
         if (c === SAND) {
           // Утоптаний пісок; плити-сходинки домальовуються окремо.
           img.set(x, y, ramp(SAND_PAL, 0.38 + (fbm(x / 6, y / 6, 3) - 0.5) * 0.3, x, y))
@@ -570,13 +557,10 @@ function groundImage(t) {
         else if (n > 0.95) img.set(x, y, '#d8f59a', 0.25)
       }
 
-      // Край плато: світлий обідок над обривом, м'який перехід у пісок на півночі.
+      // Край трави: м'який перехід у пісок з усіх боків — острів рівний.
       const de = dEdge[i]
-      if (de <= 1.5) {
-        if (at(x, y + 1) !== GRASS && at(x, y + 1) !== WATER && cliff[idx(x, Math.min(h - 1, y + 1))]) img.set(x, y, GRASS_PAL[6])
-        else if (at(x, y - 1) === SAND) img.set(x, y, ramp(SAND_PAL, 0.5, x, y), 0.5)
-        else img.set(x, y, GRASS_PAL[2])
-      } else if (de < 3 && at(x, y - 3) === SAND && bayer(x, y) < 0.4) img.set(x, y, SAND_PAL[3])
+      if (de <= 1.5) img.set(x, y, ramp(SAND_PAL, 0.5, x, y), 0.45)
+      else if (de < 3 && bayer(x, y) < 0.3) img.set(x, y, SAND_PAL[3], 0.6)
     }
 
   /* ───── Деталі поверх ───── */
@@ -737,31 +721,7 @@ function groundImage(t) {
     img.set(x + 1, y + 1, '#2f5a2a')
   }
 
-  // Ліани й коріння, що звисають з обриву; тінь на піску під ним.
-  for (let x = 0; x < w; x++)
-    for (let y = 1; y < h; y++) {
-      const i = idx(x, y)
-      if (cliff[i] !== 2 || path[i] < 0) continue
-      if (hash(x, 1, 501) < 0.1) {
-        const len = 3 + Math.floor(hash(x, 2, 501) * (CLIFF_H - 4))
-        for (let s = 0; s < len; s++) {
-          img.set(x, y + s, s % 3 === 2 ? '#5fab42' : '#2f6b2c')
-          if (s % 3 === 1) img.set(x + (s % 2 ? 1 : -1), y + s, '#66b443')
-        }
-      } else if (hash(x, 3, 501) < 0.06) {
-        const len = 2 + Math.floor(hash(x, 4, 501) * 3)
-        for (let s = 0; s < len; s++) img.set(x + (s > 1 ? 1 : 0), y + s, '#6b4426')
-      }
-    }
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      const i = idx(x, y)
-      if (cls[i] === WATER || cliff[i] || cls[i] === GRASS) continue
-      const dc = dCliff[i]
-      if (dc < 4 && cliff[idx(x, Math.max(0, y - Math.ceil(dc)))]) img.set(x, y, '#2a1a10', 0.32 * (1 - dc / 4))
-    }
-
-  // Кам'яні плити від сходів до причалу.
+  // Кам'яні плити по піску до причалу.
   const pts = PATH.points
   const [ax, ay] = pts.at(-2)
   const [bx, by] = pts.at(-1)
@@ -769,7 +729,7 @@ function groundImage(t) {
     const x = ax + (bx - ax) * s
     const y = ay + (by - ay) * s
     const i = idx(Math.round(x), Math.round(y))
-    if (cls[i] !== SAND || dCliff[i] < 3 || y > PIER.y0 - 2) continue
+    if (cls[i] !== SAND || dEdge[i] < 3 || y > PIER.y0 - 2) continue
     const k = Math.round(s * 50)
     if (k % 5) continue
     const ox = Math.round(x + ((k / 5) % 2 ? 4 : -4) + (hash(k, 1, 601) - 0.5) * 2)
@@ -785,7 +745,7 @@ function groundImage(t) {
   }
 
   // Морські дрібнички: мушлі, зірки, корч.
-  const beach = (x, y) => cls[idx(x, y)] === SAND && dWater[idx(x, y)] > 3 && dWater[idx(x, y)] < 16 && dCliff[idx(x, y)] > 5 && path[idx(x, y)] > 3
+  const beach = (x, y) => cls[idx(x, y)] === SAND && dWater[idx(x, y)] > 3 && dWater[idx(x, y)] < 16 && path[idx(x, y)] > 3
   for (let k = 0; k < 70; k++) {
     const x = Math.floor(hash(k, 1, 701) * w)
     const y = Math.floor(hash(k, 2, 701) * h)
@@ -883,7 +843,7 @@ function shoreImage(t) {
   return img
 }
 
-/** Сітка прохідності: клітинка CELL×CELL прохідна, якщо майже вся — суша без обриву (або сходи). */
+/** Сітка прохідності: клітинка CELL×CELL прохідна, якщо майже вся — суша (крім квітників). */
 function walkGrid(t) {
   const { w, h } = MAP
   const cols = Math.ceil(w / CELL)
@@ -898,7 +858,7 @@ function walkGrid(t) {
         for (let x = cx * CELL; x < (cx + 1) * CELL; x++) {
           const i = y * w + x
           if (x >= w || y >= h) continue
-          if (t.cls[i] !== WATER && (!t.cliff[i] || t.path[i] < 0) && !inBed(x, y)) ok++
+          if (t.cls[i] !== WATER && !inBed(x, y)) ok++
         }
       line += ok >= CELL * CELL * 0.7 ? '1' : '0'
     }
@@ -1272,14 +1232,6 @@ function plotGrass() {
   const img = new Img(40, 30)
   img.ellipse(20, 22, 18, 7, '#6b4426', 0.55)
   img.blit(sign(), 13, 4)
-  return img
-}
-
-function rubble() {
-  const img = new Img(34, 30)
-  img.blit(rock(true), 2, 14)
-  img.blit(rock(false), 18, 18)
-  img.blit(sign(), 12, 2)
   return img
 }
 
@@ -1964,6 +1916,342 @@ function decoSprites() {
   }
 }
 
+/* ───────── Хатинка зсередини ───────── */
+
+const WHITE = ['#d9ccb2', '#e6dbc4', '#efe6d3', '#f6f0e2']
+const RED = ['#7e1f1a', '#b8322a', '#d9493a']
+const FLOORWOOD = ['#8a5c36', '#946640', '#a0714a']
+
+/** Фон кімнати: стеля-сволок, біла стіна з вікнами, дощата підлога, двері в нижній стіні. */
+function homeImage() {
+  const { w, h } = HOME_MAP
+  const img = new Img(w, h)
+  img.rect(0, 0, w, h, '#1a120d')
+  // Підлога: дошки по 8 px, стики вразбіг, прожилки, світліший верх кожної дошки.
+  for (let y = FLOOR.y0; y < FLOOR.y1; y++) {
+    const row = Math.floor((y - FLOOR.y0) / 8)
+    const iy = (y - FLOOR.y0) % 8
+    for (let x = FLOOR.x0; x < FLOOR.x1; x++) {
+      const off = (row % 3) * 17
+      const plank = Math.floor((x + off) / 44)
+      let col = FLOORWOOD[Math.floor(hash(plank, row, 5) * 3)]
+      if ((x + off) % 44 === 0) col = '#4e321d'
+      else if (iy === 7) col = '#5a3a22'
+      else if (iy === 0) col = '#b07e52'
+      else if (hash(x >> 2, y, 6) < 0.06) col = '#7a5030'
+      img.set(x, y, col)
+      if (iy === 3 && (x + off) % 44 === 4) img.set(x, y, '#3b2a1f') // цвях
+    }
+  }
+  // Задня стіна: сволок під стелею, побілена стіна, дерев'яний плінтус.
+  for (let y = 0; y < FLOOR.y0; y++)
+    for (let x = 0; x < w; x++) {
+      if (y < 7) img.set(x, y, y === 0 ? '#2b1d16' : y === 1 ? '#7a5232' : y === 6 ? '#3b2a1f' : '#5b3a22')
+      else if (y >= FLOOR.y0 - 6) img.set(x, y, y === FLOOR.y0 - 6 ? '#8b5d3b' : y === FLOOR.y0 - 1 ? '#3b2a1f' : '#6b4426')
+      else img.set(x, y, WHITE[Math.min(3, Math.floor(fbm(x / 9, y / 9, 120) * 3 + hash(x, y, 121) * 0.6))])
+    }
+  // Балки сволока, що виступають.
+  for (const bx of [40, 120, 200]) {
+    img.rect(bx - 4, 0, 8, 9, '#4a2f1d')
+    img.hline(bx - 4, bx + 3, 1, '#7a5232')
+    img.hline(bx - 4, bx + 3, 8, '#2b1d16')
+  }
+  // Вікна з рамою, шибками, підвіконням і фіранками-рушничками.
+  for (const win of WINDOWS) {
+    const { x0, x1 } = win
+    img.rect(x0, 12, x1 - x0, 26, '#5b3a22')
+    for (let y = 14; y < 36; y++)
+      for (let x = x0 + 2; x < x1 - 2; x++) img.set(x, y, y < 22 ? '#a9dcf7' : y < 30 ? '#c4e7fb' : '#9fd08a')
+    for (let k = 0; k < 6; k++) img.set(x0 + 4 + k, 15 + k, '#f2fbff') // відблиск
+    const mid = (x0 + x1) >> 1
+    img.vline(mid, 14, 35, '#5b3a22')
+    img.hline(x0 + 2, x1 - 3, 24, '#5b3a22')
+    img.rect(x0 - 2, 38, x1 - x0 + 4, 3, '#a0714a')
+    img.hline(x0 - 2, x1 + 1, 38, '#c79a62')
+    for (const fx of [x0 - 3, x1]) {
+      img.rect(fx, 10, 3, 24, '#f3eee2')
+      for (let y = 12; y < 34; y += 4) img.set(fx + 1, y, RED[1])
+      img.vline(fx, 10, 33, '#cbc2b0')
+    }
+  }
+  // Бічні стіни — товщина зрубу згори.
+  for (const sx of [0, w - FLOOR.x0]) {
+    img.rect(sx, 0, FLOOR.x0, h, '#3b2a1f')
+    img.vline(sx === 0 ? FLOOR.x0 - 1 : sx, 0, h - 1, '#5b3a22')
+  }
+  // Нижня стіна з дверним прорізом: поріг і світло з двору.
+  img.rect(0, FLOOR.y1, w, h - FLOOR.y1, '#3b2a1f')
+  img.hline(0, w - 1, FLOOR.y1, '#5b3a22')
+  img.rect(DOOR.x0, FLOOR.y1, DOOR.x1 - DOOR.x0, h - FLOOR.y1, '#c79a62')
+  img.rect(DOOR.x0 + 2, FLOOR.y1 + 3, DOOR.x1 - DOOR.x0 - 4, h - FLOOR.y1 - 3, '#7fc34e')
+  img.hline(DOOR.x0, DOOR.x1 - 1, FLOOR.y1, '#8b5d3b')
+  // Тінь від стіни на підлозі й сонячні плями з вікон.
+  for (let y = FLOOR.y0; y < FLOOR.y0 + 4; y++) img.hline(FLOOR.x0, FLOOR.x1 - 1, y, '#000', 0.22 - (y - FLOOR.y0) * 0.05)
+  for (const win of WINDOWS)
+    for (let y = FLOOR.y0; y < FLOOR.y0 + 46; y++) {
+      const shift = Math.round((y - FLOOR.y0) * 0.45)
+      for (let x = win.x0 + 2 + shift; x < win.x1 - 2 + shift; x++) img.set(x, y, '#fff2c0', 0.13 * (1 - (y - FLOOR.y0) / 46))
+    }
+  // Килимок біля дверей.
+  img.rect(DOOR.x0 - 2, FLOOR.y1 - 9, DOOR.x1 - DOOR.x0 + 4, 8, '#8e2a1f')
+  img.rect(DOOR.x0, FLOOR.y1 - 8, DOOR.x1 - DOOR.x0, 6, '#c8372d')
+  for (let x = DOOR.x0 + 1; x < DOOR.x1 - 1; x += 3) img.set(x, FLOOR.y1 - 5, '#ffd23c')
+  return img
+}
+
+function homeWalkGrid() {
+  const cols = HOME_MAP.w / CELL
+  const rows = HOME_MAP.h / CELL
+  const out = []
+  for (let cy = 0; cy < rows; cy++) {
+    let line = ''
+    for (let cx = 0; cx < cols; cx++) {
+      const x = cx * CELL
+      const y = cy * CELL
+      line += x >= FLOOR.x0 && x + CELL <= FLOOR.x1 && y + CELL / 2 >= FLOOR.y0 && y + CELL <= FLOOR.y1 ? '1' : '0'
+    }
+    out.push(line)
+  }
+  return out
+}
+
+/** Вишитий ромбик: червоне з чорним на білому. */
+function embroidery(img, x0, y0, w, h, base = '#f3eee2') {
+  img.rect(x0, y0, w, h, base)
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const d = Math.abs(((x + 2) % 6) - 3) + Math.abs((y % 6) - 3)
+      if (d === 2) img.set(x0 + x, y0 + y, RED[1])
+      else if (d === 0) img.set(x0 + x, y0 + y, '#2b1d16')
+    }
+}
+
+function homeBed() {
+  const img = new Img(36, 50)
+  shadow(img, 18, 47, 17, 3)
+  img.rect(1, 0, 34, 12, C.woodLo)
+  img.hline(1, 34, 0, C.wood)
+  for (const x of [6, 12, 18, 24, 30]) img.set(x, 4, C.woodPale)
+  img.rect(2, 10, 32, 36, C.wood)
+  img.ellipse(18, 15, 13, 4.5, '#f6f0e2')
+  img.hline(7, 29, 18, '#d9ccb2')
+  img.rect(3, 20, 30, 24, RED[1])
+  img.rect(3, 20, 30, 4, '#f3eee2')
+  for (let y = 26; y < 43; y++)
+    for (let x = 4; x < 32; x++) {
+      const d = Math.abs(((x + 1) % 8) - 4) + Math.abs(((y - 26) % 8) - 4)
+      if (d === 3) img.set(x, y, '#ffd23c')
+      else if (d === 1) img.set(x, y, '#f3eee2')
+    }
+  img.vline(32, 20, 43, RED[0])
+  img.hline(3, 32, 43, RED[0])
+  img.rect(2, 44, 32, 3, C.woodLo)
+  return img.outline(C.K)
+}
+
+function homeStove() {
+  const img = new Img(54, 64)
+  shadow(img, 27, 61, 26, 3)
+  // Комин до стелі.
+  img.rect(32, 0, 14, 18, WHITE[2])
+  img.vline(45, 0, 17, WHITE[0])
+  img.hline(32, 45, 0, '#7a6a55')
+  // Тіло печі: побілена глина, тінь праворуч.
+  for (let y = 14; y < 58; y++)
+    for (let x = 2; x < 52; x++) {
+      if ((y < 17 && (x < 4 || x > 49)) || (y < 15 && (x < 5 || x > 48))) continue
+      img.set(x, y, x > 46 ? WHITE[0] : x < 6 ? WHITE[3] : hash(x, y, 130) < 0.05 ? WHITE[1] : WHITE[2])
+    }
+  img.hline(4, 49, 15, '#2f6fd0')
+  img.hline(3, 50, 16, '#2f6fd0')
+  // Чело з жаром.
+  for (let y = 32; y < 52; y++)
+    for (let x = 8; x < 28; x++) {
+      const dx = (x - 17.5) / 10
+      const dy = (y - 41) / 9
+      if (y < 41 && dx * dx + dy * dy > 1) continue
+      img.set(x, y, y > 46 ? (hash(x, y, 131) < 0.5 ? '#ff8a2a' : '#ffd35a') : y > 43 ? '#7a2a14' : '#2a1a12')
+    }
+  img.hline(8, 27, 52, '#8f887c')
+  // Петриківський розпис: квіти й листя.
+  const flower = (x, y, col) => {
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) img.set(x + dx, y + dy, col)
+    img.set(x, y, '#ffd23c')
+  }
+  flower(36, 28, RED[1])
+  flower(43, 34, '#2f6fd0')
+  flower(37, 42, RED[1])
+  flower(44, 46, '#ffd23c')
+  for (const [x, y] of [[39, 31], [40, 32], [40, 38], [41, 39], [34, 36], [35, 37], [41, 44]]) img.set(x, y, '#3f7d27')
+  // Припічок і низ.
+  img.rect(2, 52, 50, 4, WHITE[1])
+  img.hline(2, 51, 52, WHITE[3])
+  img.rect(2, 56, 50, 3, '#6f675c')
+  return img.outline(C.K)
+}
+
+function homeTable(level) {
+  const img = new Img(44, 30)
+  shadow(img, 22, 27, 21, 3)
+  img.rect(1, 3, 42, 16, C.woodPale)
+  img.hline(1, 42, 3, '#ddb67e')
+  embroidery(img, 4, 5, 36, 11)
+  img.rect(7, 7, 30, 7, '#f6f0e2')
+  for (const x of [3, 39]) img.rect(x, 19, 3, 9, C.woodLo)
+  img.rect(1, 18, 42, 2, C.wood)
+  // Коровай.
+  img.ellipse(22, 10, 6, 3.5, '#c98a3a')
+  img.ellipse(21, 9, 4, 2, '#e8b05a')
+  img.set(20, 8, '#f6d08a')
+  if (level >= 3) {
+    // Глечик і свічка.
+    img.rect(8, 4, 5, 7, '#b8621b')
+    img.hline(8, 12, 4, '#e8892d')
+    img.set(13, 6, '#b8621b')
+    img.rect(34, 4, 2, 6, '#f6f0e2')
+    img.set(34, 2, '#ffd35a')
+    img.set(34, 3, '#ff8a2a')
+  }
+  return img.outline(C.K)
+}
+
+function homeStool() {
+  const img = new Img(10, 12)
+  shadow(img, 5, 10, 5, 1.5)
+  img.ellipse(5, 4, 4.5, 2.5, C.woodPale)
+  img.hline(2, 7, 3, '#ddb67e')
+  for (const x of [2, 7]) img.vline(x, 6, 10, C.woodLo)
+  return img.outline(C.K)
+}
+
+function homeShelf() {
+  const img = new Img(30, 36)
+  img.rect(1, 0, 28, 35, C.woodLo)
+  img.rect(3, 2, 24, 31, '#3b2a1f')
+  for (const y of [11, 22, 33]) {
+    img.rect(1, y, 28, 2, C.wood)
+    img.hline(1, 28, y, C.woodPale)
+  }
+  // Книжки, глечики, банки.
+  const books = ['#c8372d', '#2f6fd0', '#3f7d27', '#e9c56a', '#7b4fb8']
+  for (let i = 0; i < 6; i++) img.rect(4 + i * 3, 4 + (i % 2), 2, 7 - (i % 2), books[i % 5])
+  img.rect(22, 5, 4, 6, '#b8621b')
+  img.hline(22, 25, 5, '#e8892d')
+  for (const [x, col] of [[4, '#9fd3f5'], [10, '#e8892d'], [16, '#74bb44']]) {
+    img.rect(x, 15, 5, 7, col)
+    img.hline(x, x + 4, 15, '#f6f0e2')
+  }
+  img.ellipse(24, 19, 3, 3, '#c98a3a')
+  for (let i = 0; i < 4; i++) img.rect(4 + i * 6, 26, 4, 7, i % 2 ? '#c8372d' : '#e9c56a')
+  return img.outline(C.K)
+}
+
+function homeRug() {
+  const img = new Img(68, 38)
+  img.rect(0, 0, 68, 38, '#8e2a1f')
+  img.rect(2, 2, 64, 34, '#f0e6cf')
+  embroidery(img, 4, 4, 60, 6)
+  embroidery(img, 4, 28, 60, 6)
+  // Серединка — великий ромб.
+  for (let y = 11; y < 27; y++)
+    for (let x = 6; x < 62; x++) {
+      const d = Math.abs(x - 34) / 2 + Math.abs(y - 19)
+      if (d < 3) img.set(x, y, '#2b1d16')
+      else if (d < 6) img.set(x, y, RED[1])
+      else if (d < 7) img.set(x, y, '#ffd23c')
+    }
+  for (let x = 0; x < 68; x += 2) {
+    img.set(x, 0, '#f0e6cf')
+    img.set(x, 37, '#f0e6cf')
+  }
+  return img
+}
+
+function homeRushnyk() {
+  const img = new Img(36, 16)
+  img.rect(2, 0, 32, 2, C.woodLo)
+  img.hline(2, 33, 0, C.wood)
+  // Рушник перекинутий через жердинку: кінці звисають по боках.
+  for (const x0 of [3, 25]) {
+    embroidery(img, x0, 2, 8, 12)
+    for (let x = x0; x < x0 + 8; x += 2) img.set(x, 14, RED[1])
+  }
+  img.rect(11, 2, 14, 4, '#f3eee2')
+  for (let x = 12; x < 24; x += 3) img.set(x, 4, RED[1])
+  return img.outline(C.K, 0.7)
+}
+
+function homePlant() {
+  const img = new Img(16, 22)
+  shadow(img, 8, 20, 6, 1.5)
+  img.rect(4, 13, 8, 7, '#b8621b')
+  img.hline(3, 12, 13, '#e8892d')
+  img.vline(11, 14, 19, '#7a3e1e')
+  canopy(img, [[8, 7, 6], [4, 9, 3.5], [12, 9, 3.5]], LEAF, 141)
+  return img.outline('#1e3a12')
+}
+
+function homeArmchair() {
+  const img = new Img(26, 28)
+  shadow(img, 13, 25, 12, 2.5)
+  img.rect(3, 0, 20, 14, RED[0])
+  img.rect(5, 2, 16, 11, RED[1])
+  for (const x of [8, 13, 18]) img.set(x, 6, RED[0])
+  img.rect(1, 10, 6, 12, C.wood)
+  img.rect(19, 10, 6, 12, C.wood)
+  img.hline(1, 6, 10, C.woodPale)
+  img.hline(19, 24, 10, C.woodPale)
+  img.rect(6, 14, 14, 8, RED[2])
+  img.hline(6, 19, 14, '#f07a68')
+  for (const x of [2, 22]) img.rect(x, 22, 2, 4, C.woodLo)
+  return img.outline(C.K)
+}
+
+function homePicture() {
+  const img = new Img(20, 16)
+  img.rect(0, 0, 20, 16, '#c49a12')
+  img.rect(2, 2, 16, 12, '#8fc8f0')
+  img.rect(2, 9, 16, 5, '#3b7fd0')
+  img.ellipse(10, 9, 5, 2, '#5fae3e')
+  img.rect(9, 5, 3, 4, '#efe6d3')
+  img.rect(8, 4, 5, 2, '#b5452d')
+  img.ellipse(15, 4, 1.6, 1.6, '#ffd35a')
+  img.hline(0, 19, 0, '#ffe080')
+  return img.outline(C.K)
+}
+
+function homeCat() {
+  const img = new Img(16, 11)
+  shadow(img, 8, 10, 7, 1.2)
+  img.ellipse(8, 6, 6.5, 3.5, '#e8892d')
+  img.ellipse(7, 5, 4, 2, '#f2a654')
+  for (const x of [5, 8, 11]) img.vline(x, 3, 5, '#b8621b')
+  img.ellipse(13, 5, 3, 2.5, '#e8892d')
+  img.set(12, 2, '#e8892d')
+  img.set(15, 2, '#e8892d')
+  img.set(13, 5, '#2b1d16')
+  img.set(15, 5, '#2b1d16')
+  img.hline(2, 6, 9, '#b8621b')
+  return img.outline(C.K)
+}
+
+function homeSprites() {
+  return {
+    home_bed: homeBed(),
+    home_stove: homeStove(),
+    home_table: homeTable(1),
+    home_table_3: homeTable(3),
+    home_stool: homeStool(),
+    home_shelf: homeShelf(),
+    home_rug: homeRug(),
+    home_rushnyk: homeRushnyk(),
+    home_plant: homePlant(),
+    home_armchair: homeArmchair(),
+    home_picture: homePicture(),
+    home_cat: homeCat(),
+  }
+}
+
 /* ───────── Атлас ───────── */
 
 function buildSprites() {
@@ -1986,7 +2274,6 @@ function buildSprites() {
     clothesline: clothesline(),
     sign: sign(),
     plot_grass: plotGrass(),
-    rubble: rubble(),
     chest: chest(false),
     chest_open: chest(true),
     pier: pier(),
@@ -1996,6 +2283,7 @@ function buildSprites() {
     boat: boat(),
     sailboat: sailboat(),
     ...decoSprites(),
+    ...homeSprites(),
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)
@@ -2003,7 +2291,26 @@ function buildSprites() {
     s[`garden_${l}`] = garden(l)
     s[`workshop_${l}`] = workshop(l)
   }
-  return s
+  return { ...s, ...handmade() }
+}
+
+/** Ручні спрайти з public/game/buildings замінюють згенеровані кадри з тими ж назвами. */
+function handmade() {
+  const out = {}
+  if (!existsSync(HANDMADE)) return out
+  for (const file of readdirSync(HANDMADE)) {
+    if (!file.endsWith('.png')) continue
+    const { w, h, bpp, px } = decodePng(readFileSync(join(HANDMADE, file)))
+    const img = new Img(w, h)
+    for (let i = 0; i < w * h; i++) {
+      img.d[i * 4] = px[i * bpp]
+      img.d[i * 4 + 1] = px[i * bpp + 1]
+      img.d[i * 4 + 2] = px[i * bpp + 2]
+      img.d[i * 4 + 3] = bpp === 4 ? px[i * bpp + 3] : 255
+    }
+    out[file.slice(0, -4)] = img
+  }
+  return out
 }
 
 /** Полиці: спрайти за висотою, 1 px проміжку, ширина атласу 512. */
@@ -2085,8 +2392,10 @@ mkdirSync(OUT_PUBLIC, { recursive: true })
 writeFileSync(join(OUT_PUBLIC, 'ground.png'), encodePng(ground))
 writeFileSync(join(OUT_PUBLIC, 'foam.png'), encodePng(foam))
 writeFileSync(join(OUT_PUBLIC, 'water.png'), encodePng(water))
+const home = homeImage()
+writeFileSync(join(OUT_PUBLIC, 'home.png'), encodePng(home))
 writeFileSync(join(OUT_PUBLIC, 'sprites.png'), encodePng(atlas))
-writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t) }) + '\n')
+writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid() }) + '\n')
 console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів)`)
 
 const pi = process.argv.indexOf('--preview')
@@ -2115,6 +2424,23 @@ if (pi > 0) {
       for (let k = 0; k < 4; k++) hz.d[oi + k] = sheet.d[si + k]
     }
   writeFileSync(join(dir, 'hero-x6.png'), encodePng(hz))
+  // Хатинка зсередини на 3-му рівні з мандрівником біля дверей.
+  const room = new Img(HOME_MAP.w, HOME_MAP.h)
+  room.blit(home, 0, 0)
+  const inside = homePlacements(3)
+  inside.push({ s: 'hero_up_0', x: 120, y: 170, layer: 'obj' })
+  for (const q of [...inside.filter((q) => q.layer === 'floor'), ...inside.filter((q) => q.layer !== 'floor').sort((a, b) => a.y - b.y)]) {
+    const sp = sprites[q.s]
+    room.blit(sp, Math.round(q.x - sp.w / 2), Math.round(q.y - sp.h))
+  }
+  const rz = new Img(room.w * 3, room.h * 3)
+  for (let y = 0; y < rz.h; y++)
+    for (let x = 0; x < rz.w; x++) {
+      const si = (Math.floor(y / 3) * room.w + Math.floor(x / 3)) * 4
+      const oi = (y * rz.w + x) * 4
+      for (let k = 0; k < 4; k++) rz.d[oi + k] = room.d[si + k]
+    }
+  writeFileSync(join(dir, 'preview-home.png'), encodePng(rz))
   const big = new Img(atlas.w * 3, atlas.h * 3)
   for (let y = 0; y < big.h; y++)
     for (let x = 0; x < big.w; x++) {

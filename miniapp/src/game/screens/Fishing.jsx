@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { RARITY, fishChance, itemOf, pct } from '../data.js'
 import { useGame } from '../context.js'
 import { haptic } from '../tg.js'
-import { ItemIcon, Paper, PxButton, ScreenTitle, Sheet } from '../ui.jsx'
+import { FishArt, ItemIcon, Paper, PxButton, ScreenTitle, Sheet } from '../ui.jsx'
 
 /** Де на арті fishing.webp намальований поплавок (у % від розміру картинки). */
 const BOBBER = { x: 70.4, y: 65.8 }
@@ -94,7 +94,7 @@ export default function Fishing() {
       reward({
         title: epic ? 'НЕЙМОВІРНО!' : 'Улов!',
         rarity: item.rarity,
-        image: item.image ?? undefined,
+        fish: item.image ? item : undefined,
         icon: item.image ? undefined : item.emoji,
         subtitle: `${item.emoji} ${item.name}`,
         lines: [`📏 ~${item.size} · 💰 ${item.sellPrice} ✨`, item.flavor, `У рюкзаку: ×${outcome.total}`],
@@ -111,7 +111,8 @@ export default function Fishing() {
     } else if (outcome.kind === 'resource') {
       reward({
         title: 'Щось зачепилось!',
-        icon: item.emoji,
+        sprite: item.image ?? undefined,
+        icon: item.image ? undefined : item.emoji,
         subtitle: item.name,
         lines: ['Ресурс з води — знадобиться в алхімії.', `У рюкзаку: ×${outcome.total}`],
         tone: 'good',
@@ -120,7 +121,7 @@ export default function Fishing() {
     } else {
       reward({
         title: 'РЕЛІКВІЯ!',
-        image: item.image ?? undefined,
+        sprite: item.image ?? undefined,
         icon: item.image ? undefined : item.emoji,
         subtitle: item.name,
         lines: [
@@ -379,7 +380,7 @@ function FishGuide() {
               return (
                 <div key={f.id} className="flex items-center gap-3 rounded-sm bg-parch-dark/50 p-1.5">
                   {image ? (
-                    <img src={image} alt="" className="h-12 w-20 rounded-sm object-cover" style={{ boxShadow: `0 0 0 2px ${r.color}` }} />
+                    <FishArt item={items.get(f.id)} className="h-12 w-20 shrink-0 rounded-sm" style={{ boxShadow: `0 0 0 2px ${r.color}` }} />
                   ) : (
                     // Арту ще немає — емодзі на «воді» кольору рідкості.
                     <span

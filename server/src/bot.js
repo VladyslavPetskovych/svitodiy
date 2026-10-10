@@ -16,7 +16,7 @@ export { ALCHEMY_RECIPES, canCraft, getAlchemyRecipe } from "../../telegram-bot/
 export { FISHING_CHANCES } from "../../telegram-bot/src/data/fishingChances.js";
 export { HOOK_FISH_SHIFT, TALISMAN_FISH_SHIFT } from "../../telegram-bot/src/data/fishingHooks.js";
 export { COOK_DROP_WEIGHTS, rollCookDrops } from "../../telegram-bot/src/data/cookDrops.js";
-export { hasAdminAccess, hasNastiaAccess } from "../../telegram-bot/src/specialAccess.js";
+export { hasAdminAccess, hasNastiaAccess, sharedHomeId } from "../../telegram-bot/src/specialAccess.js";
 export {
   ARC_CATALOG,
   ARC_DURATION_DAYS,

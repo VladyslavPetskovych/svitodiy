@@ -1,57 +1,135 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useGame } from '../context.js'
 import { haptic } from '../tg.js'
 import { Bar, Paper, PxButton, ScreenTitle, Segmented, Toggle } from '../ui.jsx'
+import { BuildExercise, FlashCard, Locked, PairsExercise, Quiz, WriteExercise } from './dumosvit/modes.jsx'
+import { useSpanishVoice } from './dumosvit/speech.js'
 
-/** Думосвіт: практика з картками й тестами + налаштування нагадувань у чат. */
+/**
+ * Думосвіт: кілька режимів поверх одних інтервальних повторень —
+ * усе, що ти робиш у будь-якому режимі, рухає слова по коробках і рахується в ціль дня.
+ */
+const MODES = [
+  { id: 'review', icon: '🔁', label: 'Повтор', about: 'Нові слова й тести — головний режим.' },
+  { id: 'write', icon: '✍️', label: 'Письмо', about: 'Пишеш слово сам — запам’ятовується найміцніше.' },
+  { id: 'listen', icon: '🎧', label: 'Слух', about: 'Чуєш іспанською — обираєш переклад.' },
+  { id: 'build', icon: '🧱', label: 'Речення', about: 'Складаєш фразу зі слів — тренує граматику.' },
+  { id: 'pairs', icon: '🧩', label: 'Пари', about: 'Швидкий раунд: з’єднай слова з перекладами.' },
+]
+const MODE_KEY = 'dumosvit:mode'
+
+function savedMode() {
+  try {
+    const m = localStorage.getItem(MODE_KEY)
+    return MODES.some((x) => x.id === m) ? m : 'review'
+  } catch {
+    return 'review'
+  }
+}
+
 export default function Dumosvit() {
-  const { act, state, catalog } = useGame()
+  const { act, state, catalog, reward } = useGame()
+  const voice = useSpanishVoice()
+  const [mode, setMode] = useState(savedMode)
   const [card, setCard] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [flipped, setFlipped] = useState(false)
-  const [answer, setAnswer] = useState(null)
+  const [result, setResult] = useState(null)
   const [score, setScore] = useState({ right: 0, total: 0 })
+  const [progress, setProgress] = useState(null)
+  const reqId = useRef(0)
 
-  const showCard = useCallback((res) => {
-    setLoading(false)
-    if (!res) return
-    setCard(res.card)
-    setFlipped(false)
-    setAnswer(null)
-  }, [])
+  const needsVoice = mode === 'listen' && !voice
 
-  const next = () => {
+  const load = useCallback(
+    (m) => {
+      const id = ++reqId.current
+      act('POST', '/dumosvit/next', { mode: m }).then((res) => {
+        if (id !== reqId.current) return // користувач уже перемкнув режим
+        setLoading(false)
+        if (!res) return
+        setCard(res.card)
+        setFlipped(false)
+        setResult(null)
+        if (res.progress) setProgress(res.progress)
+      })
+    },
+    [act]
+  )
+
+  useEffect(() => {
+    if (needsVoice) {
+      reqId.current++ // відкинути відповідь, що ще летить, — екран покаже підказку про голос
+      return
+    }
+    load(mode)
+  }, [mode, needsVoice, load])
+
+  const switchMode = (m) => {
+    if (m === mode) return
+    haptic('select')
     setLoading(true)
-    act('POST', '/dumosvit/next').then(showCard)
+    setMode(m)
+    try {
+      localStorage.setItem(MODE_KEY, m)
+    } catch {
+      /* ignore */
+    }
   }
 
-  // Перша картка при відкритті екрана.
-  useEffect(() => {
-    let ignore = false
-    act('POST', '/dumosvit/next').then((res) => !ignore && showCard(res))
-    return () => {
-      ignore = true
+  /** Спільна обробка відповіді будь-якого режиму. */
+  const onResult = (res, extra = {}) => {
+    if (!res) return
+    setResult({ ...res, ...extra })
+    if (res.progress) setProgress(res.progress)
+    if ('correct' in res) {
+      setScore((s) => ({ right: s.right + (res.correct ? 1 : 0), total: s.total + 1 }))
+      haptic(res.correct ? 'success' : 'error')
     }
-  }, [act, showCard])
+    if (res.goal?.reachedNow) {
+      reward({
+        title: 'Ціль дня виконано!',
+        icon: '🎯',
+        subtitle: `+${res.goal.bonus} ✨`,
+        lines: [`🔥 Серія: ${res.goal.streak} дн.`, 'Завтра повертайся — не обривай серію!'],
+        tone: 'epic',
+      })
+    }
+  }
 
   const choose = async (index) => {
-    if (answer) return
+    if (result) return
     const res = await act('POST', '/dumosvit/answer', { token: card.token, index })
-    if (!res) return
-    setAnswer({ picked: index, ...res })
-    setScore((s) => ({ right: s.right + (res.correct ? 1 : 0), total: s.total + 1 }))
-    haptic(res.correct ? 'success' : 'error')
+    onResult(res, { picked: index })
+  }
+  const submitText = async (text) => {
+    if (result) return
+    onResult(await act('POST', '/dumosvit/check', { token: card.token, text }))
+  }
+  const finishPairs = async (results) => {
+    onResult(await act('POST', '/dumosvit/pairs', { token: card.token, results }))
   }
 
+  const answerable = card && !card.locked && card.kind !== 'card'
+  const nextLabel = loading
+    ? 'Гортаю…'
+    : card?.kind === 'pairs'
+      ? 'Новий раунд ›'
+      : answerable && !result
+        ? 'Пропустити ›'
+        : 'Далі ›'
+
+  const goal = state.dumosvit.goal
   const cap = catalog.config.quizDailyCap
   const earned = state.dumosvit.quizRewardsToday
+  const modeInfo = MODES.find((m) => m.id === mode)
 
   return (
     <div className="flex flex-col gap-3">
       <ScreenTitle
         title="Думосвіт"
-        subtitle="Іспанська маленькими кроками"
+        subtitle="Іспанська з інтервальними повтореннями"
         right={
           score.total > 0 && (
             <span className="font-pixel text-[11px] text-gold">
@@ -61,40 +139,95 @@ export default function Dumosvit() {
         }
       />
 
+      {goal && <Goal g={goal} />}
+
+      <div className="px-wood grid grid-cols-5 gap-1 p-0.5">
+        {MODES.map((m) => {
+          const active = m.id === mode
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => switchMode(m.id)}
+              className={`relative flex flex-col items-center rounded-sm py-1.5 transition ${active ? 'text-ink' : 'text-cream/80'}`}
+            >
+              {active && (
+                <motion.span
+                  layoutId="dumosvit-mode"
+                  className="absolute inset-0 rounded-sm bg-parch shadow-[inset_0_-3px_0_#c9ad73]"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+              <span className="relative text-lg leading-none">{m.icon}</span>
+              <span className="relative mt-1 text-[10px] font-extrabold">{m.label}</span>
+            </button>
+          )
+        })}
+      </div>
+      <p className="-mt-1 text-center text-xs text-cream/80">{modeInfo.about}</p>
+
       <div className="relative min-h-[300px]" style={{ perspective: 900 }}>
         <AnimatePresence mode="wait">
-          {card && (
-            <motion.div
-              key={card.token ?? card.es ?? card.title}
-              initial={{ opacity: 0, x: 60, rotate: 4 }}
-              animate={{ opacity: 1, x: 0, rotate: 0 }}
-              exit={{ opacity: 0, x: -60, rotate: -4 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-            >
-              {card.kind === 'quiz' ? (
-                <Quiz card={card} answer={answer} onChoose={choose} />
-              ) : (
-                <FlashCard card={card} flipped={flipped} onFlip={() => setFlipped((f) => !f)} />
-              )}
+          {needsVoice ? (
+            <motion.div key="no-voice" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Locked
+                text="На цьому пристрої немає іспанського голосу для озвучення. Спробуй інший режим або додай іспанський голос у налаштуваннях телефона (Мова → Синтез мовлення)."
+                action="✍️ До письма"
+                onAction={() => switchMode('write')}
+              />
             </motion.div>
+          ) : (
+            card && (
+              <motion.div
+                key={card.token ?? card.es ?? card.title ?? card.mode}
+                initial={{ opacity: 0, x: 60, rotate: 4 }}
+                animate={{ opacity: 1, x: 0, rotate: 0 }}
+                exit={{ opacity: 0, x: -60, rotate: -4 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 26 }}
+              >
+                <CardView
+                  card={card}
+                  result={result}
+                  flipped={flipped}
+                  onFlip={() => setFlipped((f) => !f)}
+                  onChoose={choose}
+                  onSubmit={submitText}
+                  onFinishPairs={finishPairs}
+                  onGoReview={() => switchMode('review')}
+                />
+              </motion.div>
+            )
           )}
         </AnimatePresence>
       </div>
 
-      <PxButton variant="yellow" size="lg" disabled={loading} onClick={next}>
-        {loading ? 'Гортаю…' : card?.kind === 'quiz' && !answer ? 'Пропустити ›' : 'Далі ›'}
-      </PxButton>
+      {!needsVoice && !card?.locked && (
+        <PxButton
+          variant="yellow"
+          size="lg"
+          disabled={loading}
+          onClick={() => {
+            setLoading(true)
+            load(mode)
+          }}
+        >
+          {nextLabel}
+        </PxButton>
+      )}
+
+      {progress && <Progress p={progress} />}
 
       <Paper className="p-2">
         <div className="flex items-center justify-between text-sm">
-          <span className="font-bold">Нагорода за тести сьогодні</span>
+          <span className="font-bold">Нагорода за вправи сьогодні</span>
           <span className="font-pixel text-[11px]">
             {earned}/{cap} ✨
           </span>
         </div>
         <Bar value={earned / cap} tone="gold" className="mt-2" />
         <p className="mt-1 text-xs text-ink-soft">
-          +{catalog.config.quizReward} ✨ за кожну правильну відповідь, до {cap} на день.
+          +{catalog.config.quizReward} ✨ за кожну правильну відповідь (тест, письмо, слух, речення), до {cap} на
+          день. Ціль дня — ще +{goal?.reward} ✨ бонусом.
         </p>
       </Paper>
 
@@ -103,71 +236,65 @@ export default function Dumosvit() {
   )
 }
 
-function FlashCard({ card, flipped, onFlip }) {
-  if (card.type === 'tip') {
-    return (
-      <Paper className="p-3">
-        <p className="font-pixel text-[10px] text-ink-soft">💡 ПОРАДА</p>
-        <p className="mt-2 text-lg font-extrabold">{card.title}</p>
-        <p className="mt-2 text-sm leading-relaxed">{card.body}</p>
-        {card.exampleEs && <p className="mt-3 rounded-sm bg-parch-dark/60 p-2 font-bold">{card.exampleEs}</p>}
-      </Paper>
-    )
+function CardView({ card, result, flipped, onFlip, onChoose, onSubmit, onFinishPairs, onGoReview }) {
+  if (card.locked) return <Locked text={card.message} action="🔁 До повторення" onAction={onGoReview} />
+  switch (card.kind) {
+    case 'quiz':
+    case 'listen':
+      return <Quiz card={card} result={result} onChoose={onChoose} />
+    case 'write':
+      return <WriteExercise card={card} result={result} onSubmit={onSubmit} />
+    case 'build':
+      return <BuildExercise card={card} result={result} onSubmit={onSubmit} />
+    case 'pairs':
+      return <PairsExercise card={card} result={result} onFinish={onFinishPairs} />
+    default:
+      return <FlashCard card={card} flipped={flipped} onFlip={onFlip} />
   }
-  const phrase = card.tag === 'phrase' || (card.tag !== 'word' && /\s/.test(card.es.trim()))
+}
+
+/** Ціль дня й серія — щоб вчитися щодня, а не «залпами». */
+function Goal({ g }) {
   return (
-    <button type="button" onClick={() => { haptic('light'); onFlip() }} className="block w-full">
-      <motion.div animate={{ rotateY: flipped ? 180 : 0 }} transition={{ duration: 0.45 }} style={{ transformStyle: 'preserve-3d' }} className="relative">
-        <Paper className="flex min-h-[260px] flex-col items-center justify-center p-4 text-center" style={{ backfaceVisibility: 'hidden' }}>
-          <p className="font-pixel text-[10px] text-ink-soft">{phrase ? '💬 ФРАЗА' : '🔤 СЛОВО'}</p>
-          <p className="mt-4 text-3xl font-extrabold">{card.es}</p>
-          <p className="mt-6 text-xs text-ink-soft">Торкнись, щоб побачити переклад</p>
-        </Paper>
-        <Paper
-          className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center"
-          style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
-        >
-          <p className="text-lg font-bold text-ink-soft">{card.es}</p>
-          <p className="mt-3 text-3xl font-extrabold">{card.uk}</p>
-        </Paper>
-      </motion.div>
-    </button>
+    <Paper className="p-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-bold">🎯 Ціль дня {g.doneToday && '✅'}</span>
+        <span className="font-pixel text-[11px]">
+          {g.done}/{g.goal}
+        </span>
+      </div>
+      <Bar value={g.done / g.goal} tone="gold" className="mt-2" />
+      <p className="mt-1 flex justify-between text-xs text-ink-soft">
+        <span>
+          🔥 Серія: <b className="text-ink">{g.streak}</b> дн.
+          {g.best > g.streak && ` · рекорд ${g.best}`}
+        </span>
+        <span>{g.doneToday ? 'Виконано — до завтра!' : `ще ${g.goal - g.done} вправ`}</span>
+      </p>
+    </Paper>
   )
 }
 
-function Quiz({ card, answer, onChoose }) {
+function Progress({ p }) {
+  const stats = [
+    { label: 'Вивчено', value: p.learned },
+    { label: 'У процесі', value: p.learning },
+    { label: 'Повторити', value: p.due },
+  ]
   return (
-    <Paper className="p-3">
-      <p className="font-pixel text-[10px] text-ink-soft">🧪 ТЕСТ</p>
-      <p className="mt-3 text-center text-2xl font-extrabold">{card.es}</p>
-      <p className="mt-1 text-center text-xs text-ink-soft">Обери правильний переклад</p>
-      <div className="mt-4 flex flex-col gap-2">
-        {card.options.map((o, i) => {
-          let variant = 'paper'
-          if (answer) {
-            if (i === answer.correctIndex) variant = 'green'
-            else if (i === answer.picked) variant = 'red'
-          }
-          return (
-            <motion.div key={i} animate={answer && i === answer.picked && !answer.correct ? { x: [0, -6, 6, -4, 0] } : {}}>
-              <PxButton variant={variant} className="w-full justify-start! text-left" onClick={() => onChoose(i)}>
-                <span className="font-pixel text-[10px] opacity-60">{i + 1}</span> {o}
-              </PxButton>
-            </motion.div>
-          )
-        })}
+    <Paper className="p-2">
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {stats.map((x) => (
+          <div key={x.label}>
+            <p className="font-pixel text-[13px]">{x.value}</p>
+            <p className="text-xs text-ink-soft">{x.label}</p>
+          </div>
+        ))}
       </div>
-      <AnimatePresence>
-        {answer && (
-          <motion.p
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className={`mt-3 text-center font-extrabold ${answer.correct ? 'text-[#2d6b18]' : 'text-[#9a2f1d]'}`}
-          >
-            {answer.correct ? `✅ Вірно!${answer.reward ? ` +${answer.reward} ✨` : ''}` : '❌ Не цього разу'}
-          </motion.p>
-        )}
-      </AnimatePresence>
+      <Bar value={p.total ? p.learned / p.total : 0} tone="gold" className="mt-2" />
+      <p className="mt-1 text-xs text-ink-soft">
+        Нових сьогодні: {p.newToday}/{p.newPerDay} · у словнику {p.total} слів і фраз
+      </p>
     </Paper>
   )
 }
@@ -189,9 +316,10 @@ function Settings() {
         value={intensity}
         onChange={(v) => act('POST', '/dumosvit/settings', { intensity: v })}
         options={[
-          { value: 1, label: '🐢 Рідко' },
-          { value: 2, label: '🐇 Норма' },
-          { value: 3, label: '⚡ Часто' },
+          { value: 1, label: '🐢' },
+          { value: 2, label: '🐇' },
+          { value: 3, label: '⚡' },
+          { value: 4, label: '🔥' },
         ]}
       />
       <p className="text-xs text-ink-soft">{label}</p>

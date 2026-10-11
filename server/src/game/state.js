@@ -2,6 +2,7 @@ import {
   ARC_CATALOG,
   dumosvitIsScheduled,
   getArcState,
+  getDumosvitGoal,
   getDumosvitIntensity,
   getInventory,
   getRedis,
@@ -71,7 +72,7 @@ async function getJob(userId) {
 /** Усе про гравця одним запитом — після кожної дії клієнт просто замінює стан. */
 export async function getState(userId) {
   const r = getRedis();
-  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, deco] = await Promise.all([
+  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, deco, goal] = await Promise.all([
     r.hGetAll(userKey(userId)),
     getInventory(userId),
     getJob(userId),
@@ -82,6 +83,7 @@ export async function getState(userId) {
     r.get(quizRewardKey(userId, kyivDay())),
     getHome(userId),
     getDecor(userId),
+    getDumosvitGoal(userId),
   ]);
 
   for (const k of Object.keys(inventory)) {
@@ -121,6 +123,7 @@ export async function getState(userId) {
       intensity,
       reminders,
       quizRewardsToday: Math.min(Number(quizCount ?? 0), GAME_CONFIG.quizDailyCap),
+      goal,
     },
     serverTime: Date.now(),
   };

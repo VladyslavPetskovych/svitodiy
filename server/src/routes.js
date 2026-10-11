@@ -17,6 +17,8 @@ import {
   editNote,
   getBoard,
   listTasks,
+  checkDumosvitText,
+  finishDumosvitPairs,
   nextDumosvitCard,
   removeNote,
   removeTask,
@@ -102,8 +104,10 @@ export function buildApiRouter(botToken) {
 
   // Думосвіт
   api.post("/dumosvit/settings", handler((req) => setDumosvitSettings(uid(req), body(req))));
-  api.post("/dumosvit/next", handler((req) => nextDumosvitCard(uid(req)), { withState: false }));
+  api.post("/dumosvit/next", handler((req) => nextDumosvitCard(uid(req), body(req).mode), { withState: false }));
   api.post("/dumosvit/answer", handler((req) => answerQuiz(uid(req), body(req).token, body(req).index)));
+  api.post("/dumosvit/check", handler((req) => checkDumosvitText(uid(req), body(req).token, body(req).text)));
+  api.post("/dumosvit/pairs", handler((req) => finishDumosvitPairs(uid(req), body(req).token, body(req).results)));
 
   // Літописець
   api.get("/tasks", handler((req) => listTasks(uid(req)), { withState: false }));

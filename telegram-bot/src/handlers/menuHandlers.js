@@ -9,8 +9,10 @@ import {
   CB_DV_INT_1,
   CB_DV_INT_2,
   CB_DV_INT_3,
+  CB_DV_INT_4,
   CB_DUMOSVIT_DISABLE,
   CB_DUMOSVIT_ENABLE,
+  CB_DUMOSVIT_NEXT,
   CB_DUMOSVIT_NOW,
   CB_DUMOSVIT_OK,
 } from "../dumosvit/constants.js";
@@ -19,6 +21,11 @@ import {
   intensityLabel,
   setDumosvitIntensity,
 } from "../dumosvit/intensity.js";
+import { formatDumosvitGoal, getDumosvitGoal } from "../dumosvit/goal.js";
+import {
+  formatDumosvitProgress,
+  getDumosvitProgress,
+} from "../dumosvit/pickWord.js";
 import { deliverDumosvitToChat } from "../dumosvit/scheduler.js";
 import {
   dumosvitIsScheduled,
@@ -107,9 +114,13 @@ const MAIN_MENU_INTRO =
 
 const DUMOSVIT_MENU_TEXT =
   "📖 <b>Думосвіт</b>\n\n" +
-  "Іспанська: <b>слова</b>, <b>фрази</b>, <b>тести</b> (обери переклад), іноді — <b>факти й граматика</b>. " +
-  "Нагадування: обери інтенсивність нижче, потім увімкни таймер. " +
-  "Після картки з відповіддю натисни <b>Окей</b>, щоб прибрати її з чату.";
+  "Іспанська за <b>інтервальними повтореннями</b>: нове слово приходить карткою, " +
+  "а потім повертається <b>тестом</b> — щоразу з довшою паузою, якщо відповідаєш правильно. " +
+  "Помилився — слово повториться вже скоро. Знайомі слова питаємо й навпаки: <b>українська → іспанська</b>.\n\n" +
+  "Кожен день — <b>ціль</b> з вправ: виконуй її, щоб тримати <b>серію</b> й отримати бонус ✨. " +
+  "У міні-апці є ще режими: письмо, на слух, речення зі слів і пари.\n\n" +
+  "Обери інтенсивність і увімкни нагадування (вночі, 23:00–08:00, бот мовчить). " +
+  "Кнопка <b>Далі</b> під карткою — наступна одразу, <b>Окей</b> — прибрати повідомлення.";
 
 /**
  * @param {boolean} [withNastia] — додатковий розділ для дозволених номерів
@@ -265,24 +276,23 @@ function alchemyMenuKeyboard(inv) {
   return { inline_keyboard: rows };
 }
 
+const DUMOSVIT_INTENSITY_BUTTONS = [
+  { level: 1, label: "🐢 Рідко", cb: CB_DV_INT_1 },
+  { level: 2, label: "🐇 Норма", cb: CB_DV_INT_2 },
+  { level: 3, label: "⚡ Часто", cb: CB_DV_INT_3 },
+  { level: 4, label: "🔥 Інтенсив", cb: CB_DV_INT_4 },
+];
+
 async function dumosvitMenuKeyboard(chatId) {
   const on = await dumosvitIsScheduled(chatId);
   const int = await getDumosvitIntensity(chatId);
   const rows = [];
-  rows.push([
-    {
-      text: int === 1 ? "✅ 🐢 Рідко" : "🐢 Рідко",
-      callback_data: CB_DV_INT_1,
-    },
-    {
-      text: int === 2 ? "✅ 🐇 Норма" : "🐇 Норма",
-      callback_data: CB_DV_INT_2,
-    },
-    {
-      text: int === 3 ? "✅ ⚡ Часто" : "⚡ Часто",
-      callback_data: CB_DV_INT_3,
-    },
-  ]);
+  const btn = (b) => ({
+    text: int === b.level ? `✅ ${b.label}` : b.label,
+    callback_data: b.cb,
+  });
+  rows.push(DUMOSVIT_INTENSITY_BUTTONS.slice(0, 2).map(btn));
+  rows.push(DUMOSVIT_INTENSITY_BUTTONS.slice(2).map(btn));
   if (on) {
     rows.push([
       { text: "⏹ Вимкнути нагадування", callback_data: CB_DUMOSVIT_DISABLE },
@@ -295,7 +305,7 @@ async function dumosvitMenuKeyboard(chatId) {
       },
     ]);
   }
-  rows.push([{ text: "📩 Картка зараз", callback_data: CB_DUMOSVIT_NOW }]);
+  rows.push([{ text: "📩 Тренуватися зараз", callback_data: CB_DUMOSVIT_NOW }]);
   rows.push([{ text: "⬅ У головне меню", callback_data: CB_MENU_MAIN }]);
   return { inline_keyboard: rows };
 }
@@ -541,9 +551,13 @@ async function tryEditDumosvitMenu(ctx) {
   const uid = ctx.from?.id;
   const bal = uid != null ? await getBalance(uid) : 0;
   const int = await getDumosvitIntensity(chatId);
+  const progress = await getDumosvitProgress(uid ?? chatId);
+  const goal = await getDumosvitGoal(uid ?? chatId);
   const text =
     `${DUMOSVIT_MENU_TEXT}\n\n` +
     `<b>Частота нагадувань:</b> ${intensityLabel(int)}\n\n` +
+    `${formatDumosvitGoal(goal)}\n` +
+    `${formatDumosvitProgress(progress)}\n\n` +
     `На рахунку: ${formatBalanceHtml(bal)}`;
   const kb = await dumosvitMenuKeyboard(chatId);
   try {
@@ -1312,38 +1326,18 @@ export function registerMenuHandlers(bot) {
     if (ok) await showLitopysTaskList(ctx);
   });
 
-  bot.action(CB_DV_INT_1, async (ctx) => {
-    const chatId = ctx.chat?.id;
-    if (chatId == null) {
-      await ctx.answerCbQuery({ text: "Немає чату.", show_alert: true });
-      return;
-    }
-    await setDumosvitIntensity(chatId, 1);
-    await ctx.answerCbQuery({ text: "🐢 Рідко" });
-    await tryEditDumosvitMenu(ctx);
-  });
-
-  bot.action(CB_DV_INT_2, async (ctx) => {
-    const chatId = ctx.chat?.id;
-    if (chatId == null) {
-      await ctx.answerCbQuery({ text: "Немає чату.", show_alert: true });
-      return;
-    }
-    await setDumosvitIntensity(chatId, 2);
-    await ctx.answerCbQuery({ text: "🐇 Норма" });
-    await tryEditDumosvitMenu(ctx);
-  });
-
-  bot.action(CB_DV_INT_3, async (ctx) => {
-    const chatId = ctx.chat?.id;
-    if (chatId == null) {
-      await ctx.answerCbQuery({ text: "Немає чату.", show_alert: true });
-      return;
-    }
-    await setDumosvitIntensity(chatId, 3);
-    await ctx.answerCbQuery({ text: "⚡ Часто" });
-    await tryEditDumosvitMenu(ctx);
-  });
+  for (const b of DUMOSVIT_INTENSITY_BUTTONS) {
+    bot.action(b.cb, async (ctx) => {
+      const chatId = ctx.chat?.id;
+      if (chatId == null) {
+        await ctx.answerCbQuery({ text: "Немає чату.", show_alert: true });
+        return;
+      }
+      await setDumosvitIntensity(chatId, b.level);
+      await ctx.answerCbQuery({ text: b.label });
+      await tryEditDumosvitMenu(ctx);
+    });
+  }
 
   bot.action(CB_DUMOSVIT_ENABLE, async (ctx) => {
     const chatId = ctx.chat?.id;
@@ -1375,6 +1369,21 @@ export function registerMenuHandlers(bot) {
       return;
     }
     await ctx.answerCbQuery({ text: "Надсилаю…" });
+    await deliverDumosvitToChat(ctx.telegram, chatId);
+  });
+
+  bot.action(CB_DUMOSVIT_NEXT, async (ctx) => {
+    const chatId = ctx.chat?.id;
+    if (chatId == null) {
+      await ctx.answerCbQuery({ text: "Немає чату.", show_alert: true });
+      return;
+    }
+    await ctx.answerCbQuery();
+    try {
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    } catch {
+      /* ignore */
+    }
     await deliverDumosvitToChat(ctx.telegram, chatId);
   });
 

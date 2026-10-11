@@ -5,3 +5,5 @@ export const CB_DUMOSVIT_OK = "dumosvit_ok";
 export const CB_DV_INT_1 = "dv_i1";
 export const CB_DV_INT_2 = "dv_i2";
 export const CB_DV_INT_3 = "dv_i3";
+export const CB_DUMOSVIT_NEXT = "dumosvit_next";
+export const CB_DV_INT_4 = "dv_i4";

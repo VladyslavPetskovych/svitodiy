@@ -91,4 +91,87 @@ export const DUMOSVIT_TIPS = [
       "Прикметник часто стоїть після іменника (una casa grande). Перед іменником — коли підкреслюють суб’єктивну оцінку або відтінок значення (un buen día).",
     exampleEs: "un hombre pobre / un pobre hombre (різний відтінок)",
   },
+  {
+    title: "Дієслова на -ar у теперішньому часі",
+    body:
+      "Відкидаємо -ar і додаємо закінчення: -o, -as, -a, -amos, -áis, -an. Так працюють сотні дієслів: hablar, trabajar, estudiar, comprar. Займенник часто не кажуть — закінчення вже показує, хто діє.",
+    exampleEs: "hablo · hablas · habla · hablamos · habláis · hablan",
+  },
+  {
+    title: "Дієслова на -er та -ir",
+    body:
+      "Для -er: -o, -es, -e, -emos, -éis, -en (comer → como, comes, come). Для -ir майже так само, лише «ми» і «ви» на -imos, -ís (vivir → vivimos, vivís).",
+    exampleEs: "como · comes · come · comemos · coméis · comen",
+  },
+  {
+    title: "Ir a + інфінітив — найпростіше майбутнє",
+    body:
+      "Щоб сказати «я збираюся / буду щось робити», бери форму ir (voy, vas, va, vamos, vais, van) + a + інфінітив. У розмові це навіть частіше, ніж справжній майбутній час.",
+    exampleEs: "Voy a comer. · Vamos a viajar en verano.",
+  },
+  {
+    title: "Tener que + інфінітив — «мушу»",
+    body:
+      "Обов’язок: tengo que trabajar — «мені треба працювати». Безособове «треба» — hay que: hay que esperar.",
+    exampleEs: "Tengo que irme. · Hay que estudiar.",
+  },
+  {
+    title: "Gustar працює «навпаки»",
+    body:
+      "Me gusta — дослівно «мені подобається»: підмет — те, що подобається. Тому з множиною дієслово теж у множині: me gustan los gatos. Хто саме — показують me, te, le, nos, os, les.",
+    exampleEs: "Me gusta el café. · Me gustan las películas.",
+  },
+  {
+    title: "Hay — «є, існує»",
+    body:
+      "Hay — одна форма для однини й множини: «є» в сенсі наявності. Для місця конкретної речі — está: ¿Dónde está el banco? Але: ¿Hay un banco cerca?",
+    exampleEs: "Hay un problema. · Hay muchas personas.",
+  },
+  {
+    title: "Por чи para",
+    body:
+      "Para — мета, отримувач, напрямок, дедлайн: para ti, para aprender. Por — причина, через що, обмін, тривалість: por eso, gracias por todo, por la mañana.",
+    exampleEs: "Estudio para trabajar en España. · Gracias por la ayuda.",
+  },
+  {
+    title: "Зворотні дієслова: me, te, se",
+    body:
+      "Дієслова з -se (levantarse, llamarse) у відмінюванні беруть займенник перед собою: me levanto, te levantas, se levanta. Так і з’являється «Me llamo…» — «я називаю себе».",
+    exampleEs: "Me levanto a las siete. · ¿Cómo te llamas?",
+  },
+  {
+    title: "Минулий час: he + причастя",
+    body:
+      "Pretérito perfecto — про те, що сталося сьогодні або «вже колись»: haber (he, has, ha, hemos, habéis, han) + причастя на -ado / -ido. hablar → hablado, comer → comido.",
+    exampleEs: "He comido. · ¿Has estado en México?",
+  },
+  {
+    title: "Acabar de — «щойно»",
+    body:
+      "Acabo de + інфінітив = «я щойно щось зробив». Дуже природна розмовна конструкція замість минулого часу.",
+    exampleEs: "Acabo de llegar. · Acaba de salir.",
+  },
+  {
+    title: "H завжди німа",
+    body:
+      "Літеру h в іспанській не вимовляють: hola звучить як «ола», hora — «ора». А звук «х» дають j і g перед e / i.",
+    exampleEs: "hola · hora · hijo · gente · jamón",
+  },
+  {
+    title: "Ll і y",
+    body:
+      "У більшості регіонів ll і y звучать однаково — як українське «й» (в Аргентині — ближче до «ш»). Calle читається «кайє».",
+    exampleEs: "calle · llamar · yo",
+  },
+  {
+    title: "R і RR",
+    body:
+      "Одна r між голосними — короткий удар язиком (pero — «але»). Rr або r на початку слова — розкотисте «р-р-р» (perro — «собака»). Різниця змінює значення!",
+    exampleEs: "pero / perro · caro / carro",
+  },
+  {
+    title: "Як працюють повторення в Думосвіті",
+    body:
+      "Кожне слово живе в «коробці»: правильна відповідь переносить його далі (повтор через годину, день, тиждень…), помилка — повертає на початок. Тому слова, які ти знаєш, приходять рідше, а складні — частіше.",
+  },
 ];

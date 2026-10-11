@@ -1,12 +1,18 @@
 import {
   ARC_DURATION_DAYS,
+  DUMOSVIT_LEVELS,
   MAX_NOTE_LEN,
   addBalance,
   addNote,
   addTask,
+  answerDumosvitQuiz,
+  buildListenExercise,
+  buildPairsExercise,
+  buildSentenceExercise,
+  buildWriteExercise,
   bumpArcMessageCounter,
+  checkTextExercise,
   deleteNote,
-  deleteQuizSession,
   deleteTask,
   disableArc,
   dumosvitScheduleNext,
@@ -14,7 +20,8 @@ import {
   enableArc,
   getArcById,
   getArcState,
-  getQuizSession,
+  getDumosvitGoal,
+  getDumosvitProgress,
   getRedis,
   getTasks,
   hasNastiaAccess,
@@ -23,6 +30,7 @@ import {
   pickArcMessage,
   pickDumosvitDelivery,
   setDumosvitIntensity,
+  submitPairs,
   updateNote,
 } from "../bot.js";
 import { GAME_CONFIG } from "./catalog.js";
@@ -35,7 +43,7 @@ import { kyivDay, quizRewardKey } from "./keys.js";
 
 export async function setDumosvitSettings(userId, { intensity, reminders }) {
   if (intensity != null) {
-    if (![1, 2, 3].includes(intensity)) throw badRequest("Невідома частота.");
+    if (!DUMOSVIT_LEVELS.includes(intensity)) throw badRequest("Невідома частота.");
     await setDumosvitIntensity(userId, intensity);
   }
   if (reminders === true) await dumosvitScheduleNext(userId);
@@ -43,35 +51,82 @@ export async function setDumosvitSettings(userId, { intensity, reminders }) {
   return {};
 }
 
-/** Наступна картка: слово/фраза/порада або тест — та сама логіка, що в боті. */
-export async function nextDumosvitCard(userId) {
-  const d = await pickDumosvitDelivery(userId);
-  if (d.kind === "quiz") {
-    return { card: { kind: "quiz", token: d.token, es: d.es, options: d.options } };
+const DUMOSVIT_MODES = ["review", "write", "listen", "build", "pairs"];
+const TOKEN_RE = /^[a-f0-9]{8}$/;
+
+async function dumosvitMeta(userId) {
+  const [progress, goal] = await Promise.all([getDumosvitProgress(userId), getDumosvitGoal(userId)]);
+  return { progress, goal };
+}
+
+/** +✨ за правильну перевірену відповідь — спільний денний ліміт для всіх режимів. */
+async function grantQuizReward(userId) {
+  const key = quizRewardKey(userId, kyivDay());
+  const n = await getRedis().incr(key);
+  if (n === 1) await getRedis().expire(key, 2 * 86_400);
+  if (n > GAME_CONFIG.quizDailyCap) return 0;
+  await addBalance(userId, GAME_CONFIG.quizReward);
+  return GAME_CONFIG.quizReward;
+}
+
+/**
+ * Наступна вправа обраного режиму. Правильну відповідь клієнту не віддаємо —
+ * лише після перевірки (окрім «Пар», де пари й так видно на екрані).
+ */
+export async function nextDumosvitCard(userId, mode = "review") {
+  if (!DUMOSVIT_MODES.includes(mode)) throw badRequest("Невідомий режим.");
+  let card;
+  if (mode === "review") {
+    const d = await pickDumosvitDelivery(userId);
+    if (d.kind === "quiz") {
+      const { token, prompt, direction, options, box } = d;
+      card = { kind: "quiz", token, prompt, direction, options, box };
+    } else {
+      card = { kind: "card", ...d.entry };
+    }
+  } else {
+    const build = {
+      write: buildWriteExercise,
+      listen: buildListenExercise,
+      build: buildSentenceExercise,
+      pairs: buildPairsExercise,
+    }[mode];
+    card = { kind: mode, ...(await build(userId)) };
   }
-  return { card: { kind: "card", ...d.entry } };
+  return { card, ...(await dumosvitMeta(userId)) };
 }
 
 export async function answerQuiz(userId, token, index) {
-  if (typeof token !== "string" || !/^[a-f0-9]{8}$/.test(token) || !Number.isInteger(index)) {
+  if (typeof token !== "string" || !TOKEN_RE.test(token) || !Number.isInteger(index)) {
     throw badRequest("Некоректна відповідь.");
   }
-  const session = await getQuizSession(token);
-  if (!session || session.userId !== userId) throw conflict("expired", "Тест застарів — візьми новий.");
-  await deleteQuizSession(token);
+  const res = await answerDumosvitQuiz(userId, token, index);
+  if (!res) throw conflict("expired", "Тест застарів — візьми новий.");
 
-  const correct = index === session.correctIndex;
-  let reward = 0;
-  if (correct) {
-    const key = quizRewardKey(userId, kyivDay());
-    const n = await getRedis().incr(key);
-    if (n === 1) await getRedis().expire(key, 2 * 86_400);
-    if (n <= GAME_CONFIG.quizDailyCap) {
-      reward = GAME_CONFIG.quizReward;
-      await addBalance(userId, reward);
-    }
+  const { correct, correctIndex, es, uk, box, prevBox } = res;
+  const reward = correct ? await grantQuizReward(userId) : 0;
+  return { correct, correctIndex, es, uk, box, prevBox, reward, ...(await dumosvitMeta(userId)), goal: res.goal };
+}
+
+/** Письмо й речення: перевірка введеного тексту. */
+export async function checkDumosvitText(userId, token, text) {
+  if (typeof token !== "string" || !TOKEN_RE.test(token) || typeof text !== "string") {
+    throw badRequest("Некоректна відповідь.");
   }
-  return { correct, correctIndex: session.correctIndex, reward };
+  const res = await checkTextExercise(userId, token, text);
+  if (!res) throw conflict("expired", "Вправа застаріла — візьми нову.");
+  const reward = res.correct ? await grantQuizReward(userId) : 0;
+  return { ...res, reward, ...(await dumosvitMeta(userId)), goal: res.goal };
+}
+
+/** Пари: результати раунду (без ✨ — лише повторення й денна ціль). */
+export async function finishDumosvitPairs(userId, token, results) {
+  if (typeof token !== "string" || !TOKEN_RE.test(token) || !Array.isArray(results)) {
+    throw badRequest("Некоректний результат.");
+  }
+  const res = await submitPairs(userId, token, results.slice(0, 10));
+  if (!res) throw conflict("expired", "Раунд застарів — почни новий.");
+  return { ...res, ...(await dumosvitMeta(userId)), goal: res.goal };
 }
 
 /* ───────── Літописець ───────── */

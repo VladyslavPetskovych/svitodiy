@@ -8,6 +8,7 @@ import {
   HOOK_FISH_SHIFT,
   RELICS,
   RESOURCE_TYPES,
+  DUMOSVIT_LEVELS,
   TALISMAN_FISH_SHIFT,
   intensityLabel,
 } from "../bot.js";
@@ -135,7 +136,7 @@ export function buildCatalog() {
     decorMax: DECOR_MAX,
     arcs: ARC_CATALOG.map((a) => ({ id: a.id, title: a.title, emoji: a.emoji, summary: a.summary })),
     arcDurationDays: ARC_DURATION_DAYS,
-    dumosvitIntensity: [1, 2, 3].map((level) => ({ level, label: intensityLabel(level) })),
+    dumosvitIntensity: DUMOSVIT_LEVELS.map((level) => ({ level, label: intensityLabel(level) })),
     config: {
       dailyRewards: GAME_CONFIG.dailyRewards,
       quizReward: GAME_CONFIG.quizReward,

@@ -30,6 +30,7 @@ export {
   getArcState,
 } from "../../telegram-bot/src/chasodiy/arcStore.js";
 export {
+  DUMOSVIT_LEVELS,
   getDumosvitIntensity,
   intensityLabel,
   setDumosvitIntensity,
@@ -39,8 +40,20 @@ export {
   dumosvitScheduleNext,
   dumosvitUnschedule,
 } from "../../telegram-bot/src/dumosvit/scheduleStore.js";
-export { pickDumosvitDelivery } from "../../telegram-bot/src/dumosvit/pickWord.js";
-export { deleteQuizSession, getQuizSession } from "../../telegram-bot/src/dumosvit/quiz.js";
+export {
+  getDumosvitProgress,
+  pickDumosvitDelivery,
+} from "../../telegram-bot/src/dumosvit/pickWord.js";
+export { answerDumosvitQuiz } from "../../telegram-bot/src/dumosvit/quiz.js";
+export {
+  buildListenExercise,
+  buildPairsExercise,
+  buildSentenceExercise,
+  buildWriteExercise,
+  checkTextExercise,
+  submitPairs,
+} from "../../telegram-bot/src/dumosvit/exercises.js";
+export { getDumosvitGoal } from "../../telegram-bot/src/dumosvit/goal.js";
 export {
   addTask,
   deleteTask,

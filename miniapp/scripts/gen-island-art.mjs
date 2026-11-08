@@ -2235,8 +2235,258 @@ function homeCat() {
   return img.outline(C.K)
 }
 
+/** Зробити піксель прозорим (вирізати форму з уже намальованого). */
+function erase(img, x, y) {
+  if (x >= 0 && y >= 0 && x < img.w && y < img.h) img.d[(y * img.w + x) * 4 + 3] = 0
+}
+
+/** Мисник на стіні: розписні тарілки на рейці, внизу — глечики, кухоль і мед. */
+function homeMysnyk() {
+  const img = new Img(30, 34)
+  img.rect(0, 0, 30, 34, C.woodLo)
+  img.rect(2, 3, 26, 28, '#3b2a1f')
+  // Різьблений карниз і зубчастий низ.
+  img.hline(0, 29, 0, C.wood)
+  for (let x = 1; x < 29; x += 3) img.set(x, 1, C.woodPale)
+  for (let x = 0; x < 30; x++) if (x % 4 >= 2) erase(img, x, 33)
+  // Тарілки: біла полива, кольорове коло, жовте серце й пелюстки.
+  const plate = (cx, cy, ring) => {
+    img.ellipse(cx, cy, 4.2, 4.2, '#f3eee2')
+    for (let a = 0; a < 12; a++) img.set(cx - 0.5 + Math.cos((a / 12) * Math.PI * 2) * 3, cy - 0.5 + Math.sin((a / 12) * Math.PI * 2) * 3, ring)
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) img.set(cx - 0.5 + dx, cy - 0.5 + dy, ring === RED[1] ? '#2f6fd0' : RED[1])
+    img.set(cx - 0.5, cy - 0.5, '#ffd23c')
+    img.set(cx - 2.5, cy - 3.5, '#ffffff')
+  }
+  plate(7, 8, '#2f6fd0')
+  plate(15, 8, RED[1])
+  plate(23, 8, '#2f6fd0')
+  img.hline(2, 27, 12, C.wood) // рейка, що тримає тарілки
+  img.hline(2, 27, 13, C.woodLo)
+  // Середня полиця.
+  img.rect(0, 18, 30, 2, C.wood)
+  img.hline(0, 29, 18, C.woodPale)
+  // Глечик (глина з поливою), кухоль, банка меду, малий глечик.
+  img.ellipse(6.5, 26, 3.5, 4, '#b8621b')
+  img.rect(5, 20, 3, 3, '#b8621b')
+  img.hline(4, 8, 20, '#e8892d')
+  img.set(5, 25, '#e8892d')
+  img.set(5, 26, '#e8892d')
+  img.rect(12, 24, 4, 6, '#2f6fd0')
+  img.hline(12, 15, 24, '#9fd3f5')
+  img.vline(16, 25, 27, '#2f6fd0')
+  img.rect(19, 23, 4, 7, '#e9b23a')
+  img.hline(19, 22, 23, '#f6f0e2')
+  img.set(20, 26, '#ffd35a')
+  img.ellipse(26, 27, 2, 2.6, '#7a3e1e')
+  img.hline(25, 26, 24, '#b8621b')
+  img.rect(0, 30, 30, 2, C.wood)
+  img.hline(0, 29, 30, C.woodPale)
+  return img.outline(C.K)
+}
+
+/** Пучки сушених трав на мотузці під сволоком: м'ята, чебрець, звіробій (гілочки з листям, не суцільні). */
+function homeHerbs() {
+  const img = new Img(28, 21)
+  img.hline(0, 27, 1, '#c79a62')
+  img.set(0, 0, '#8b5d3b')
+  img.set(27, 0, '#8b5d3b')
+  const bundle = (cx, seed, pal, bloom) => {
+    // Гілочки розходяться від перев'язки донизу, кожна трохи інакша.
+    const tips = [-4, -2, 0, 2, 4]
+    tips.forEach((dx, k) => {
+      const len = 12 + Math.floor(hash(k, seed, 7) * 5)
+      for (let i = 0; i <= len; i++) {
+        const t = i / len
+        const x = Math.round(cx + dx * t * t + (dx ? 0 : Math.sin(i * 0.7) * 0.6))
+        const y = 4 + i
+        img.set(x, y, '#5e5a30')
+        // Листочки по черзі з боків стебла; ближче до низу — квіточки.
+        if (i > 2 && i % 2 === k % 2) img.set(x + (i % 4 < 2 ? -1 : 1), y, pick(pal, hash(x, y, seed)))
+        if (i > 3 && hash(x, y, seed + 1) < 0.35) img.set(x + (i % 4 < 2 ? 1 : -1), y, pick(pal, hash(y, x, seed)))
+        if (bloom && i > len - 4 && hash(x, y, seed + 2) < 0.5) img.set(x, y + 1, bloom)
+      }
+    })
+    img.rect(cx - 1, 2, 3, 2, RED[1]) // перев'язка
+    img.set(cx + 1, 2, RED[2])
+  }
+  bundle(5, 11, ['#4d6a2c', '#6a8a45', '#86a35e'], null)
+  bundle(14, 23, ['#6a7a3a', '#7d8f5a', '#94a26a'], '#a77fd0')
+  bundle(23, 37, ['#5a6a30', '#7a8a40', '#98a55a'], '#ffd23c')
+  return img.outline(C.K, 0.75)
+}
+
+/** Вудки на кілочках і низка в'яленої тарані — нагадування про причал. */
+function homeRods() {
+  const img = new Img(26, 38)
+  const line = (x0, y0, x1, y1, col, tip) => {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))
+    for (let i = 0; i <= n; i++) img.set(x0 + ((x1 - x0) * i) / n, y0 + ((y1 - y0) * i) / n, tip && i > n * 0.8 ? tip : col)
+  }
+  // Дві вудки поруч, сперті на кілочки: коркові руків'я внизу, котушка на темній.
+  line(2, 37, 9, 1, C.wood, C.woodPale)
+  line(6, 37, 13, 2, '#5b3a22', '#8b5d3b')
+  line(2, 37, 3, 31, '#d9b07a')
+  line(6, 37, 7, 31, '#d9b07a')
+  img.ellipse(8.5, 29.5, 1.8, 1.8, '#8f887c')
+  img.set(8, 29, '#cfc8bb')
+  img.rect(2, 11, 12, 2, C.woodLo) // поперечка-кілочки
+  img.hline(2, 13, 11, C.wood)
+  // Волосінь з поплавцем звисає з кінчика світлої вудки.
+  for (let y = 2; y < 9; y++) img.set(10, y, '#e6dbc4')
+  img.set(10, 9, RED[1])
+  img.set(10, 10, '#f3eee2')
+  // Низка тарані на мотузці з окремого кілочка.
+  img.rect(19, 2, 3, 2, C.woodLo)
+  img.vline(20, 4, 33, '#c79a62')
+  const fish = (y, right) => {
+    // Рибка головою вгору: срібляста спина, золотаве черевце, хвіст-ластівка внизу.
+    const x0 = right ? 21 : 16
+    img.rect(x0, y, 4, 7, '#9c9488')
+    erase(img, x0, y) // скошена голова
+    img.vline(right ? x0 + 3 : x0, y + 2, y + 5, '#d9b45a')
+    img.vline(right ? x0 : x0 + 3, y + 1, y + 6, '#6f675c')
+    img.set(right ? x0 + 1 : x0 + 2, y + 1, '#2b1d16')
+    img.set(x0, y + 7, '#6f675c')
+    img.set(x0 + 3, y + 7, '#6f675c')
+    img.hline(x0 + 1, x0 + 2, y + 7, '#8f887c')
+  }
+  fish(6, false)
+  fish(14, true)
+  fish(22, false)
+  return img.outline(C.K, 0.8)
+}
+
+/** Діжка з водою й корячком біля печі. */
+function homeWaterBarrel() {
+  const img = new Img(16, 20)
+  shadow(img, 8, 18, 7, 1.6)
+  for (let y = 5; y < 18; y++)
+    for (let x = 2; x < 14; x++) {
+      const bulge = y > 7 && y < 15 ? 0 : 1 // діжка пузата посередині
+      if (x < 2 + bulge || x > 13 - bulge) continue
+      img.set(x, y, x > 11 ? C.woodLo : x % 3 === 0 ? C.wood : x < 5 ? C.woodHi : '#9a6a42')
+    }
+  for (const y of [7, 15]) {
+    img.hline(2, 13, y, '#6f675c')
+    img.set(4, y, '#aaa196')
+  }
+  img.ellipse(8, 5, 6, 2.2, C.woodLo)
+  img.ellipse(8, 5, 4.8, 1.5, '#3270c0')
+  img.set(6, 5, '#6fb2ef')
+  img.set(7, 4, '#6fb2ef')
+  // Корячок: черпачок на краю, руків'я назовні.
+  img.ellipse(11, 5, 1.6, 1.2, C.woodPale)
+  for (let i = 0; i < 4; i++) img.set(12 + i, 4 - i, C.woodPale)
+  return img.outline(C.K)
+}
+
+/** Рогач, кочерга й віник, сперті на піч. */
+function homeOvenTools() {
+  const img = new Img(14, 30)
+  shadow(img, 7, 28, 6, 1.4)
+  // Рогач: держак і залізна «рогатка» вгорі.
+  img.vline(3, 7, 28, C.wood)
+  img.vline(4, 9, 27, C.woodLo)
+  for (const [x, y] of [[0, 1], [0, 2], [0, 3], [1, 4], [2, 5], [3, 6], [4, 5], [5, 4], [6, 3], [6, 2], [6, 1]]) img.set(x, y, '#6f675c')
+  img.set(0, 1, '#aaa196')
+  img.set(6, 1, '#aaa196')
+  // Кочерга.
+  img.vline(8, 4, 28, '#5e574f')
+  img.set(9, 4, '#5e574f')
+  img.set(9, 5, '#6f675c')
+  // Віник: держак, червона перев'язка, віяло соломи.
+  img.vline(11, 10, 18, '#c79a62')
+  img.hline(10, 12, 18, RED[1])
+  for (let y = 19; y < 29; y++) {
+    const half = Math.min(2, Math.floor((y - 18) / 3))
+    for (let x = 11 - half; x <= 11 + half + (y > 24 ? 1 : 0); x++) img.set(x, y, (x + y) % 2 ? '#d9b45a' : '#b08a3a')
+  }
+  return img.outline(C.K)
+}
+
+/** Лава з двома вишитими подушками. */
+function homeBench() {
+  const img = new Img(38, 16)
+  shadow(img, 19, 14, 18, 2)
+  img.rect(0, 5, 38, 5, C.woodPale)
+  img.hline(0, 37, 5, '#ddb67e')
+  img.hline(0, 37, 9, C.wood)
+  for (const x of [11, 25]) img.set(x, 7, C.woodLo)
+  for (const x of [3, 33]) img.rect(x, 10, 2, 5, C.woodLo)
+  img.hline(4, 33, 12, C.woodLo)
+  for (const x0 of [3, 21]) {
+    embroidery(img, x0, 1, 14, 5)
+    img.hline(x0, x0 + 13, 1, '#f6f0e2')
+    erase(img, x0, 1) // заокруглені кути подушки
+    erase(img, x0 + 13, 1)
+  }
+  return img.outline(C.K)
+}
+
+/** Кошик яблук. */
+function homeBasket() {
+  const img = new Img(16, 15)
+  shadow(img, 8, 13, 7, 1.5)
+  // Дужка.
+  for (let x = 3; x <= 12; x++) img.set(x, Math.round(5 - Math.sin(((x - 3) / 9) * Math.PI) * 4.5), '#8a6a2a')
+  // Яблука над краєм.
+  for (const [x, y, col, hi] of [[5, 6, '#c8372d', '#f07a68'], [10, 6, '#c8372d', '#f07a68'], [7.5, 4.8, '#74bb44', '#b6e27a']]) {
+    img.ellipse(x, y, 2.4, 2.2, col)
+    img.set(x - 1, y - 1, hi)
+  }
+  img.set(7, 2, C.woodLo)
+  // Плетіння: шаховий візерунок лози.
+  for (let y = 7; y < 13; y++)
+    for (let x = 2 + (y > 11 ? 1 : 0); x < 14 - (y > 11 ? 1 : 0); x++) img.set(x, y, (Math.floor(x / 2) + y) % 2 ? '#d9b45a' : '#b08a3a')
+  img.hline(1, 14, 7, '#8a6a2a')
+  return img.outline(C.K)
+}
+
+/** Прядка з куделею вовни. */
+function homeSpinningWheel() {
+  const img = new Img(24, 28)
+  shadow(img, 12, 26, 11, 2)
+  // Колесо: обід, шість спиць, маточина.
+  const cx = 9
+  const cy = 11
+  for (let y = 2; y < 21; y++)
+    for (let x = 0; x < 19; x++) {
+      const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy)
+      if (Math.abs(d - 7.4) < 0.75) img.set(x, y, y < cy - 3 ? C.woodHi : C.wood)
+    }
+  for (let a = 0; a < 6; a++) {
+    const ang = (a / 6) * Math.PI * 2 + 0.3
+    for (let r = 1.5; r < 7; r += 0.7) img.set(cx - 0.5 + Math.cos(ang) * r, cy - 0.5 + Math.sin(ang) * r, C.woodLo)
+  }
+  img.ellipse(cx, cy, 1.4, 1.4, C.woodPale)
+  // Стійка колеса й похила основа на трьох ніжках.
+  img.vline(cx, cy + 1, 21, C.woodLo)
+  for (let x = 1; x < 23; x++) {
+    const y = Math.round(22 - (x - 1) * 0.14)
+    img.set(x, y, C.woodPale)
+    img.set(x, y + 1, C.wood)
+  }
+  for (const x of [3, 12, 21]) img.vline(x, 23 - Math.round((x - 1) * 0.14), 25, C.woodLo)
+  // Кужіль: жердина й біла вовна з тінню.
+  img.vline(19, 6, 20, C.wood)
+  img.ellipse(19.5, 6, 3, 4.2, '#f3eee2')
+  img.set(21, 6, '#d9ccb2')
+  img.set(21, 7, '#d9ccb2')
+  img.set(20, 9, '#d9ccb2')
+  for (let k = 0; k < 4; k++) img.set(17 - k * 2, 9 + k, '#e6dbc4') // нитка до колеса
+  return img.outline(C.K)
+}
+
 function homeSprites() {
   return {
+    home_mysnyk: homeMysnyk(),
+    home_herbs: homeHerbs(),
+    home_rods: homeRods(),
+    home_water_barrel: homeWaterBarrel(),
+    home_oven_tools: homeOvenTools(),
+    home_bench: homeBench(),
+    home_basket: homeBasket(),
+    home_spinning_wheel: homeSpinningWheel(),
     home_bed: homeBed(),
     home_stove: homeStove(),
     home_table: homeTable(1),

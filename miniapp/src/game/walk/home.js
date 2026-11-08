@@ -21,8 +21,8 @@ export const WINDOWS = [
 
 /**
  * Меблі хатинки: з кожним рівнем затишніше.
- * Рівень 1 — ліжко, піч, стіл із ослінчиками, скриня; 2 — полиця, рушник, килим, вазон;
- * 3 — крісло, картина, кіт на печі.
+ * Рівень 1 — ліжко, піч, стіл із ослінчиками, скриня, діжка й рогач біля печі, трави й вудки на стінах;
+ * 2 — полиця, рушник, килим, вазон, мисник, лава, кошик яблук; 3 — крісло, картина, кіт на печі, прядка.
  * @returns {{ s: string, x: number, y: number, layer: 'floor'|'obj', blocks?: number[][] }[]}
  */
 export function homePlacements(level) {
@@ -34,7 +34,15 @@ export function homePlacements(level) {
   add('home_stool', 92, 134, [[88, 128, 8, 6]])
   add('home_stool', 148, 134, [[144, 128, 8, 6]])
   add('chest', 40, 124, [[32, 118, 16, 6]])
+  // Куток біля печі: діжка з водою й рогач; на стінах — трави сушаться й вудки чекають ранку.
+  add('home_water_barrel', 160, 100, [[154, 95, 12, 5]])
+  add('home_oven_tools', 170, 96, [[166, 92, 8, 4]])
+  add('home_herbs', 212, 28, [], 'floor')
+  add('home_rods', 148, 48, [], 'floor')
   if (level >= 2) {
+    add('home_mysnyk', 27, 46, [], 'floor')
+    add('home_bench', 180, 182, [[162, 177, 36, 5]])
+    add('home_basket', 64, 130, [[58, 125, 12, 5]])
     add('home_rug', 120, 172, [], 'floor')
     add('home_shelf', 120, 62, [[106, 54, 28, 8]])
     add('home_rushnyk', 120, 24, [], 'floor')
@@ -44,6 +52,7 @@ export function homePlacements(level) {
     add('home_armchair', 38, 168, [[26, 158, 24, 10]])
     add('home_picture', 91, 32, [], 'floor')
     add('home_cat', 188, 112)
+    add('home_spinning_wheel', 72, 170, [[64, 165, 16, 5]])
   }
   return out
 }

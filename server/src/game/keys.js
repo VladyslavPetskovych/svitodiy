@@ -34,3 +34,6 @@ export function previousDay(day) {
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
+
+export const farmKey = (id) => `svitodiy:farm:${id}`; // город: № грядки → JSON { c, g, w }
+export const dogsKey = (id) => `svitodiy:dogs:${id}`; // пси: id пса → JSON { love, fedDay, petDay, mode, sit }

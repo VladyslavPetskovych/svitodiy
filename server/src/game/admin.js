@@ -1,8 +1,11 @@
 import {
   buildContainersReport,
   buildMonitorReport,
+  addResourceToInventory,
   buildProcessesReport,
+  getRedis,
   hasAdminAccess,
+  RESOURCE_TYPES,
   setUserPhone,
   touchUser,
 } from "../bot.js";
@@ -60,3 +63,19 @@ export async function saveContact(userId, signed, botToken) {
   return {};
 }
 
+
+/* ───────── Стартовий запас адміна ─────────
+ * Разово +1000 кожного ресурсу на адмінський номер (ADMIN_PHONES у specialAccess.js).
+ * Прапорець у Redis гарантує, що бонус не нарахується вдруге; щоб видати ще раз —
+ * змінити ADMIN_GRANT_ID. */
+
+const ADMIN_GRANT_ID = "resources-1000-v1";
+const ADMIN_GRANT_AMOUNT = 1000;
+
+export async function grantAdminResources(userId) {
+  if (!(await hasAdminAccess(userId))) return;
+  const r = getRedis();
+  const first = await r.set(`svitodiy:admingrant:${userId}:${ADMIN_GRANT_ID}`, "1", { NX: true });
+  if (first !== "OK") return;
+  await Promise.all(RESOURCE_TYPES.map((res) => addResourceToInventory(userId, res.id, ADMIN_GRANT_AMOUNT)));
+}

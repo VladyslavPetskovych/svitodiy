@@ -5,7 +5,9 @@ import { buildCatalog } from "./game/catalog.js";
 import { cast, cookFish, craft, equip, sellAllFish, sellFish } from "./game/chasodiy.js";
 import { claimDaily } from "./game/daily.js";
 import { moveDecor, placeDecor, removeDecor } from "./game/decor.js";
+import { commandDog, feedDog, petDog } from "./game/dogs.js";
 import { GameError } from "./game/errors.js";
+import { buySeeds, clearPlot, harvestPlot, plantPlot, sellCrops, tillPlot, waterPlot } from "./game/farm.js";
 import { collectHome, upgradeBuilding } from "./game/homestead.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
 import {
@@ -96,6 +98,20 @@ export function buildApiRouter(botToken) {
   api.post("/home/deco", handler((req) => placeDecor(uid(req), body(req).kind, body(req).x, body(req).y)));
   api.post("/home/deco/:id/move", handler((req) => moveDecor(uid(req), req.params.id, body(req).x, body(req).y)));
   api.delete("/home/deco/:id", handler((req) => removeDecor(uid(req), req.params.id)));
+
+  // Город: грядки, насіння, урожай
+  api.post("/farm/:plot/till", handler((req) => tillPlot(uid(req), req.params.plot)));
+  api.post("/farm/:plot/plant", handler((req) => plantPlot(uid(req), req.params.plot, body(req).crop)));
+  api.post("/farm/:plot/water", handler((req) => waterPlot(uid(req), req.params.plot)));
+  api.post("/farm/:plot/harvest", handler((req) => harvestPlot(uid(req), req.params.plot)));
+  api.post("/farm/:plot/clear", handler((req) => clearPlot(uid(req), req.params.plot)));
+  api.post("/farm/seeds", handler((req) => buySeeds(uid(req), body(req).crop, body(req).count)));
+  api.post("/farm/sell", handler((req) => sellCrops(uid(req), body(req).crop, body(req).count)));
+
+  // Пси-компаньйони
+  api.post("/dogs/:id/feed", handler((req) => feedDog(uid(req), req.params.id, body(req).item)));
+  api.post("/dogs/:id/pet", handler((req) => petDog(uid(req), req.params.id)));
+  api.post("/dogs/:id/command", handler((req) => commandDog(uid(req), req.params.id, body(req))));
 
   // Острови
   api.post("/islands/:id/explore", handler((req) => explore(uid(req), req.params.id)));

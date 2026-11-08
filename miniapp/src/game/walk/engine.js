@@ -10,9 +10,9 @@ import sirkoMeta from './sirko.json'
 const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
 import { beamTexture, blobTexture, bubbleTexture, createParticles, dropHeight, glowTexture, popScale, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
-import { HOME_MAP, HOME_START, homeInteract, homePlacements } from './home.js'
+import { DOG_BED, HOME_MAP, HOME_START, homeInteract, homePlacements } from './home.js'
 import { createInput } from './input.js'
-import { CELL, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, walkGrid } from './layout.js'
+import { CELL, FIELD, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotAt, plotCenter, plotRect, walkGrid } from './layout.js'
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
 
 /**
@@ -101,12 +101,36 @@ function homeEffects() {
 /** До якої будівлі / точки належить спрайт — для «попу» при покращенні. */
 function keyOf(p) {
   if (p.uid) return p.uid
+  if (p.plot != null) return `plot:${p.plot}`
   if (p.s === 'plot_grass') return 'garden'
   if (p.s === 'sign') return 'workshop'
   if (p.s.startsWith('chest')) return 'chest'
   const m = /^(house|garden|workshop|lighthouse)_\d$/.exec(p.s)
   return m ? m[1] : null
 }
+
+/** Поле: що лежить і росте на кожній грядці (з fieldView у src/game/farm.js). */
+function farmPlacements(view) {
+  const out = []
+  for (const v of view ?? []) {
+    const [x, y, w, h] = plotRect(v.i)
+    const cx = x + w / 2
+    if (v.locked) {
+      out.push({ s: `weeds_${(v.i * 7 + 3) % 3}`, x: cx, y: y + h - 2, layer: 'obj', plot: v.i })
+      continue
+    }
+    out.push({ s: v.tilled ? (v.wet ? 'soil_wet' : 'soil_dry') : 'plot_mark', x: cx, y: y + h, layer: 'floor', plot: v.i, soil: true })
+    if (v.crop) out.push({ s: `crop_${v.crop.id}_${Math.min(v.stage, v.crop.stages)}`, x: cx, y: y + h - 3, layer: 'obj', plot: v.i, crop: v.crop.id, ready: v.ready })
+  }
+  return out
+}
+
+/** Чи перетинаються прямокутники [x, y, w, h]. */
+const overlaps = (a, b) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+const FIELD_RECT = [FIELD.x, FIELD.y, FIELD.cols * FIELD.tile, FIELD.rows * FIELD.tile]
+
+/** Що показати над мандрівником під час роботи на городі. */
+const TOOL_EMOJI = { till: '⛏️', plant: '🌱', water: '💧', harvest: '🧺', clear: '🧹' }
 
 const SCENES = {
   island: { id: 'island', map: MAP, walk: atlas.walk, bg: 'ground', outdoor: true, spawn: { x: SPOTS.house.x, y: SPOTS.house.y + 12, dir: 'down' } },
@@ -147,8 +171,10 @@ export function createWalk(canvas, assets, cb) {
     if (g) return g
     const f = frames[name]
     if (!f) return null
-    g = new THREE.PlaneGeometry(f.w, f.h)
-    g.translate(0, f.h / 2, 0)
+    // k — дрібний піксель (город, лежанка): кадр удвічі більший за свій розмір у світі.
+    const k = f.k ?? 1
+    g = new THREE.PlaneGeometry(f.w * k, f.h * k)
+    g.translate(0, (f.h * k) / 2, 0)
     const u0 = f.x / AW
     const u1 = (f.x + f.w) / AW
     const v1 = 1 - f.y / AH
@@ -226,6 +252,10 @@ export function createWalk(canvas, assets, cb) {
   let goal = null
   let markerAt = null
   let near = null
+  /** Куди дивиться мандрівник у світі (для грядки «перед собою», як у Stardew). */
+  const face = { x: 0, y: 1 }
+  let farmView = null
+  let farmKey = ''
   let t = 0
   let acc = 0
   let lastRepath = 0
@@ -265,16 +295,80 @@ export function createWalk(canvas, assets, cb) {
       canStand: (x, y) => !!grid && geo.canStand(grid, x, y),
       findPath: (from, to) => (grid ? geo.findPath(grid, from, to) : []),
       player: () => body,
-      others: () => dogs.filter((o) => o.id !== def.id).map((o) => o.body),
+      others: () => dogs.filter((o) => o.id !== def.id && o.sceneId === scene.id && o.visible).map((o) => o.body),
     })
     d.id = def.id
+    d.index = DOGS.indexOf(def)
+    d.sceneId = 'island' // у якій сцені пес зараз живе
+    d.cfg = { mode: 'follow', sit: null } // команда з сервера (state.dogs)
+    d.cfgKey = ''
     return d
   })
   let dogPlaced = false
   const dogDist = (dog) => Math.hypot(dog.body.x - body.x, dog.body.y - body.y)
   const dogById = (id) => dogs.find((d) => d.id === id)
-  /** Розставити псів біля точки: кожен трохи в інший бік. */
-  const placeDogs = (x, y, dy) => dogs.forEach((d, i) => d.place(x + (i ? -14 : 14), y + dy + i * 4))
+  /** Пси, що зараз поруч у цій сцені (решта — в іншій: у хаті чи надворі). */
+  const presentDogs = () => dogs.filter((d) => d.sceneId === scene.id && d.visible)
+  const bedSpot = (dog) => ({ x: DOG_BED.x + (dog.index ? -8 : 6), y: DOG_BED.y - 4 + dog.index * 3 })
+  const doorSpot = () => ({ x: SPOTS.house.x, y: SPOTS.house.y + 10 })
+  const cfgKeyOf = (c) => `${c.mode}|${c.sit ? `${c.sit.scene}:${c.sit.x}:${c.sit.y}` : ''}`
+
+  /**
+   * Поставити пса туди, де йому належить бути за командою, з урахуванням поточної сцени.
+   * fresh — щойно увійшли в сцену (пес з'являється одразу на місці), інакше — іде туди сам.
+   */
+  function applyDog(dog, fresh) {
+    const { mode, sit } = dog.cfg
+    const side = dog.index ? -14 : 14
+    if (mode === 'follow') {
+      if (dog.sceneId !== scene.id || !dog.visible || fresh) {
+        // Прибігає з хати чи з місця, де сидів: з'являється біля дверей або біля тебе.
+        const from =
+          scene.outdoor && dog.sceneId === 'home' && !fresh ? doorSpot() : { x: body.x + side, y: body.y + (scene.outdoor ? 6 : -6) + dog.index * 4 }
+        dog.place(from.x, from.y)
+      }
+      dog.sceneId = scene.id
+      dog.setVisible(true)
+      dog.follow()
+      return
+    }
+    if (mode === 'sit' && sit) {
+      const wasHere = dog.sceneId === scene.id && dog.visible && !fresh
+      dog.sceneId = sit.scene
+      if (sit.scene !== scene.id) {
+        dog.setVisible(false)
+        return
+      }
+      if (!wasHere) dog.place(sit.x, sit.y)
+      dog.setVisible(true)
+      dog.stay(sit.x, sit.y)
+      return
+    }
+    // house: живе в хатинці, на лежанці біля печі.
+    const bed = bedSpot(dog)
+    if (scene.id === 'home') {
+      if (dog.sceneId !== 'home' || !dog.visible || fresh) dog.place(bed.x, bed.y)
+      dog.sceneId = 'home'
+      dog.setVisible(true)
+      dog.stay(bed.x, bed.y, true)
+    } else if (dog.visible && dog.sceneId === scene.id && !fresh) {
+      // Надворі сказали «Додому» — біжить до дверей і зникає в хаті.
+      const door = doorSpot()
+      dog.runTo(door.x, door.y, () => {
+        if (dog.cfg.mode !== 'house' || scene.id !== 'island') return
+        dog.sceneId = 'home'
+        dog.setVisible(false)
+        dog.place(bed.x, bed.y)
+        dog.stay(bed.x, bed.y, true)
+        particles.puff(door.x, door.y - 2, 6)
+      })
+    } else {
+      dog.sceneId = 'home'
+      dog.setVisible(false)
+      dog.place(bed.x, bed.y)
+      dog.stay(bed.x, bed.y, true)
+    }
+  }
 
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.9, depthWrite: false })
   const marker = new THREE.Mesh(new THREE.RingGeometry(3, 4.2, 20).rotateX(-Math.PI / 2), markerMat)
@@ -325,6 +419,15 @@ export function createWalk(canvas, assets, cb) {
   }
   const ghostFoot = makeFootprint()
   const selFoot = makeFootprint()
+  const plotFoot = makeFootprint() // рамка грядки, з якою зараз працюватимеш
+
+  // Над мандрівником — інструмент, яким щойно попрацював (мотика, лійка…).
+  const toolSprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: false }))
+  toolSprite.scale.set(13, 14, 1)
+  toolSprite.renderOrder = 8
+  toolSprite.visible = false
+  scene3.add(toolSprite)
+  let toolAt = -1
   const ghostMesh = new THREE.Mesh(spriteGeo('bush'), ghostMat)
   ghostMesh.visible = false
   scene3.add(ghostMesh)
@@ -423,7 +526,7 @@ export function createWalk(canvas, assets, cb) {
     if (!world) return
     const { levels, chestOpen, deco } = world
     if (scene.outdoor) {
-      list = placements(levels, chestOpen, deco)
+      list = [...placements(levels, chestOpen, deco), ...farmPlacements(farmView)]
       interact = INTERACT
       fx = effectsFor(levels, deco)
     } else {
@@ -484,8 +587,30 @@ export function createWalk(canvas, assets, cb) {
     rebuild()
     if (!dogPlaced) {
       dogPlaced = true
-      placeDogs(body.x, body.y, 6)
+      for (const d of dogs) applyDog(d, true)
     }
+  }
+
+  /** Поле змінилось (скопали, полили, виросло) — перебудувати й «попнути» змінені грядки. */
+  function setFarm(view) {
+    const key = JSON.stringify(view.map((v) => [v.locked, v.tilled, v.wet, v.crop?.id ?? null, v.stage]))
+    if (key === farmKey) return
+    const prev = farmView
+    farmView = view
+    farmKey = key
+    if (prev && scene.outdoor)
+      for (const v of view) {
+        const o = prev[v.i]
+        if (!o) continue
+        const grew = o.crop && v.crop && v.stage > o.stage
+        const planted = !o.crop && v.crop
+        if (grew || planted || o.tilled !== v.tilled || o.locked !== v.locked) juice.set(`plot:${v.i}`, { t0: t, power: grew ? 0.9 : 0.6, drop: 0 })
+        if (grew) {
+          const c = plotCenter(v.i)
+          particles.leaves(c.x, c.y + 3, 4)
+        }
+      }
+    if (world) rebuild()
   }
 
   function applySceneLook() {
@@ -520,8 +645,11 @@ export function createWalk(canvas, assets, cb) {
     applySceneLook()
     rig.snap(body.x, body.y)
     rebuild()
-    // Пес заходить і виходить разом із тобою — стає поруч біля дверей.
-    placeDogs(body.x, body.y, scene.outdoor ? 6 : -6)
+    // Пси, що ходять слідом, заходять і виходять разом із тобою; решта — там, де їм сказали.
+    for (const d of dogs) {
+      if (d.cfg.mode === 'house') d.sceneId = 'home' // біг до дверей, а ти зайшов першим — він уже вдома
+      applyDog(d, true)
+    }
     for (const s of bubbleSprites.values()) s.visible = false
   }
 
@@ -571,12 +699,12 @@ export function createWalk(canvas, assets, cb) {
   function pick(clientX, clientY) {
     rayFrom(clientX, clientY)
     raycaster.camera = camera
-    const out = { bubble: false, dog: null, art: null, ground: null, item: null }
+    const out = { bubble: false, dog: null, art: null, ground: null, item: null, plot: null }
     const visibleBubbles = [...bubbleSprites.values()].filter((s) => s.visible)
     if (visibleBubbles.length && raycaster.intersectObjects(visibleBubbles, false).length) out.bubble = true
     // Пес під пальцем — ближчий до камери, якщо влучили в кількох.
     if (mode === 'walk')
-      out.dog = dogs.filter((d) => d.hit(raycaster)).sort((a, b) => camera.position.distanceToSquared(a.mesh.position) - camera.position.distanceToSquared(b.mesh.position))[0] ?? null
+      out.dog = presentDogs().filter((d) => d.hit(raycaster)).sort((a, b) => camera.position.distanceToSquared(a.mesh.position) - camera.position.distanceToSquared(b.mesh.position))[0] ?? null
     let best = null
     let bestD = Infinity
     for (const h of raycaster.intersectObjects(billboards.filter((m) => m.visible), false)) {
@@ -591,9 +719,15 @@ export function createWalk(canvas, assets, cb) {
     if (best) {
       const it = best.object.userData.item
       const f = frames[it.p.s]
+      const k = f.k ?? 1
       out.item = it
-      out.art = { x: it.p.x - f.w / 2 + (best.uv.x * AW - f.x), y: it.p.y - f.h + ((1 - best.uv.y) * AH - f.y) }
+      out.art = { x: it.p.x - (f.w * k) / 2 + (best.uv.x * AW - f.x) * k, y: it.p.y - f.h * k + ((1 - best.uv.y) * AH - f.y) * k }
+      if (it.p.plot != null) out.plot = it.p.plot
     } else if (out.ground) {
+      if (scene.outdoor) {
+        const i = plotAt(out.ground.x, out.ground.y)
+        if (i >= 0) out.plot = i
+      }
       // Пласкі предмети (настил, плита) — по прямокутнику на землі; спершу ближчі.
       const g = out.ground
       const flat = items
@@ -621,6 +755,7 @@ export function createWalk(canvas, assets, cb) {
     const fp = decoFootprint(kind, x, y)
     const cells = geo.cellsOf(fp)
     if (!scene.outdoor || cells.some((c) => c < 0 || !land[c])) return { ok: false, reason: 'Тут будувати не можна' }
+    if (overlaps(fp, FIELD_RECT)) return { ok: false, reason: 'Тут город' }
     const others = list.filter((p) => !p.uid || p.uid !== ignoreUid)
     const busy = new Uint8Array(geo.cols * geo.rows)
     for (const p of others) {
@@ -675,8 +810,38 @@ export function createWalk(canvas, assets, cb) {
       if (dog && dogDist(dog) <= PET_RANGE + 8) cb.onInteract(g)
       return
     }
+    if (g.startsWith('plot:')) {
+      const c = plotCenter(Number(g.slice(5)))
+      if (Math.hypot(body.x - c.x, body.y - c.y) <= 24) {
+        faceToward(c.x, c.y)
+        near = g
+        cb.onNear(g)
+        cb.onInteract(g)
+      }
+      return
+    }
     const it = interact.find((i) => i.id === g)
     if (it && Math.hypot(body.x - it.near[0], body.y - it.near[1]) <= it.r + 6) cb.onInteract(g)
+  }
+
+  /** Повернутись до точки: і «погляд» для грядки, і спрайт мандрівника (відносно екрана). */
+  function faceToward(x, y) {
+    const dx = x - body.x
+    const dy = y - body.y
+    const d = Math.hypot(dx, dy)
+    if (d < 0.5) return
+    face.x = dx / d
+    face.y = dy / d
+    const sx = dx * rig.right.x + dy * rig.right.y
+    const sy = dx * rig.down.x + dy * rig.down.y
+    hero.dir = Math.abs(sx) > Math.abs(sy) ? (sx > 0 ? 'right' : 'left') : sy > 0 ? 'down' : 'up'
+  }
+
+  /** Куди стати, щоб працювати на грядці: на сусідній клітинці, переважно знизу (як у Stardew). */
+  function plotStand(i) {
+    const c = plotCenter(i)
+    for (const [dx, dy] of [[0, 12], [0, -12], [-12, 0], [12, 0], [0, 0]]) if (geo.canStand(grid, c.x + dx, c.y + dy)) return { x: c.x + dx, y: c.y + dy }
+    return c
   }
 
   const inBox = (p, [x, y, w, h]) => p && p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h
@@ -698,6 +863,19 @@ export function createWalk(canvas, assets, cb) {
         const d = dogDist(dog) || 1
         walkTo({ x: dog.body.x + ((body.x - dog.body.x) / d) * 10, y: dog.body.y + ((body.y - dog.body.y) / d) * 6 }, id)
       }
+      return
+    }
+    if (p.plot != null) {
+      const id = `plot:${p.plot}`
+      const c = plotCenter(p.plot)
+      if (Math.hypot(body.x - c.x, body.y - c.y) <= 20) {
+        path = []
+        goal = null
+        faceToward(c.x, c.y)
+        near = id
+        cb.onNear(id)
+        cb.onInteract(id)
+      } else walkTo(plotStand(p.plot), id)
       return
     }
     const hit = interact.find((it) => inBox(p.art, it.box)) ?? interact.find((it) => inBox(p.ground, it.box))
@@ -822,7 +1000,7 @@ export function createWalk(canvas, assets, cb) {
   function fixedStep(dt) {
     playerStep(dt)
     // Пес живе й у пісочниці: поки будуєш, він собі гуляє.
-    if (dogPlaced) for (const d of dogs) d.fixedStep(dt)
+    if (dogPlaced) for (const d of dogs) if (d.sceneId === scene.id && d.visible) d.fixedStep(dt)
   }
 
   function playerStep(dt) {
@@ -856,6 +1034,11 @@ export function createWalk(canvas, assets, cb) {
     }
     accelerate(body, wx, wy, dt)
     move(body, dt, (x, y) => geo.canStand(grid, x, y))
+    const sp = Math.hypot(body.vx, body.vy)
+    if (sp > 6 && (wx || wy)) {
+      face.x = body.vx / sp
+      face.y = body.vy / sp
+    }
 
     // Застряг на шляху (щось стало на дорозі) — пробуємо раз перерахувати, потім здаємося.
     if (path.length && t - stuck.t > 0.6) {
@@ -922,8 +1105,21 @@ export function createWalk(canvas, assets, cb) {
           bestD = d
         }
       }
+      // Грядка перед тобою (або під ногами) — як курсор клітинки в Stardew.
+      if (scene.outdoor) {
+        let pi = plotAt(body.x + face.x * 10, body.y + face.y * 10)
+        if (pi < 0) pi = plotAt(body.x, body.y)
+        if (pi >= 0) {
+          const c = plotCenter(pi)
+          const d = Math.hypot(body.x - c.x, body.y - c.y) * 0.7
+          if (d < bestD) {
+            found = `plot:${pi}`
+            bestD = d
+          }
+        }
+      }
       // Пес поруч (і не спить) — можна погладити, якщо ближче за будівлю.
-      for (const d of dogs) {
+      for (const d of presentDogs()) {
         const dd = dogDist(d)
         if (dd <= PET_RANGE && dd < bestD && d.state !== 'sleep') {
           found = `dog:${d.id}`
@@ -983,6 +1179,10 @@ export function createWalk(canvas, assets, cb) {
         else m.scale.set(sx, sy, 1)
         m.position.y = (it.flat ? 0.02 : 0) + dropHeight(age, j.drop)
         if (age > 1) juice.delete(it.key)
+      } else if (it.p.crop) {
+        // Рослини ледь гойдаються на вітрі; стиглі — ще й поблискують.
+        m.scale.set(1 + Math.sin(t * 1.7 + it.p.x * 0.3) * 0.025, 1 + Math.sin(t * 2.3 + it.p.y) * 0.015, 1)
+        if (it.p.ready && Math.random() < dt * 0.9) particles.dust(it.p.x + (Math.random() - 0.5) * 8, it.p.y - 2, 2, 0.25, [1, 0.94, 0.55])
       } else if (m.scale.x !== 1 || m.scale.y !== 1 || m.scale.z !== 1) m.scale.set(1, 1, 1)
     }
 
@@ -1033,6 +1233,26 @@ export function createWalk(canvas, assets, cb) {
     const sel = mode === 'build' && selected && !ghost && list.find((p) => p.uid === selected)
     if (sel) selFoot.set(decoFootprint(sel.kind, sel.x, sel.y), 0xffdc5a, 0.25 * blink, 0xffe678, blink)
     else selFoot.group.visible = false
+
+    // Рамка грядки, з якою працюватимеш.
+    if (mode === 'walk' && scene.outdoor && near?.startsWith('plot:')) {
+      const r = plotRect(Number(near.slice(5)))
+      const pulse = 0.65 + Math.sin(t * 5) * 0.2
+      plotFoot.set([r[0] + 0.5, r[1] + 0.5, r[2] - 1, r[3] - 1], 0xfff3b0, 0.1 * pulse, 0xfff7c8, pulse)
+    } else plotFoot.group.visible = false
+
+    // Інструмент над головою — злітає й тане.
+    if (toolAt >= 0) {
+      const age = t - toolAt
+      if (age > 0.8) {
+        toolAt = -1
+        toolSprite.visible = false
+      } else {
+        toolSprite.visible = true
+        anchored({ ax: hero.x, ay: hero.y, dx: 0, h: 30 + age * 8 }, toolSprite.position)
+        toolSprite.material.opacity = age < 0.55 ? 1 : 1 - (age - 0.55) / 0.25
+      }
+    }
     if (ghost && mode === 'build') {
       // Привид ковзає до клітинки (а не стрибає), трохи «висить» над землею й тремтить, коли сюди не можна.
       const k = 1 - Math.exp(-25 * dt)
@@ -1164,9 +1384,72 @@ export function createWalk(canvas, assets, cb) {
     petDog(id) {
       dogById(id)?.pet()
     },
+    /** Нагодували пса: сідає й їсть. */
+    feedDog(id) {
+      dogById(id)?.feed()
+    },
+    /**
+     * Команда псові: 'follow' | 'sit' | 'house'. Виконується одразу, не чекаючи сервера;
+     * повертає, що зберегти на сервері (для «Сидіти» — де саме сидить).
+     */
+    commandDog(id, m) {
+      const dog = dogById(id)
+      if (!dog) return null
+      const sit = m === 'sit' ? { scene: scene.id, x: Math.round(dog.body.x), y: Math.round(dog.body.y) } : null
+      dog.cfg = { mode: m, sit }
+      dog.cfgKey = cfgKeyOf(dog.cfg)
+      applyDog(dog, false)
+      return { mode: m, ...(sit ?? {}) }
+    },
+    /** Команди з сервера (state.dogs): застосувати ті, що змінились. */
+    syncDogs(stateDogs) {
+      for (const d of dogs) {
+        const c = stateDogs?.[d.id]
+        const cfg = { mode: c?.mode ?? 'follow', sit: c?.mode === 'sit' ? c.sit : null }
+        const key = cfgKeyOf(cfg)
+        if (key === d.cfgKey) continue
+        d.cfg = cfg
+        d.cfgKey = key
+        if (dogPlaced) applyDog(d, false)
+      }
+    },
+    /** Поле з fieldView(): грядки, рослини, бур'ян. */
+    setFarm,
+    /** Сік дії на грядці: пил, листя, бризки, інструмент над головою. */
+    farmFx(i, kind) {
+      const c = plotCenter(i)
+      if (kind === 'till') {
+        particles.dust(c.x, c.y + 4, 12, 1.1, [0.45, 0.3, 0.18])
+        rig.addTrauma(0.06)
+      } else if (kind === 'plant') particles.leaves(c.x, c.y + 4, 5)
+      else if (kind === 'water') {
+        particles.dust(c.x, c.y + 3, 14, 0.8, [0.55, 0.78, 0.98])
+        particles.dust(c.x, c.y + 6, 8, 0.45, [0.8, 0.92, 1])
+      } else if (kind === 'harvest') {
+        particles.leaves(c.x, c.y + 2, 8)
+        particles.dust(c.x, c.y + 4, 6, 0.6, [1, 0.94, 0.55])
+        rig.addTrauma(0.05)
+      } else if (kind === 'clear') particles.puff(c.x, c.y + 2, 10)
+      juice.set(`plot:${i}`, { t0: t, power: kind === 'harvest' ? 1.1 : 0.7, drop: 0 })
+      const emoji = TOOL_EMOJI[kind]
+      if (emoji) {
+        if (!bubbleTex.has(emoji)) bubbleTex.set(emoji, bubbleTexture(emoji))
+        toolSprite.material.map = bubbleTex.get(emoji)
+        toolSprite.material.needsUpdate = true
+        toolAt = t
+      }
+    },
+    /** Де на екрані (clientX/Y) точка світу — для тестів і підказок поверх канви. */
+    screenOf(x, y, h = 0) {
+      const v = new THREE.Vector3(x, h, y).project(camera)
+      const r = canvas.getBoundingClientRect()
+      return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height }
+    },
     /** Знімок стану для тестів і налагодження (лише читання). */
     debug() {
-      const dogsInfo = Object.fromEntries(dogs.map((d) => [d.id, { x: d.body.x, y: d.body.y, state: d.state, dist: dogDist(d) }]))
+      const dogsInfo = Object.fromEntries(
+        dogs.map((d) => [d.id, { x: d.body.x, y: d.body.y, state: d.state, mode: d.mode, scene: d.sceneId, visible: d.visible, dist: dogDist(d) }])
+      )
       return { player: { x: body.x, y: body.y }, dogs: dogsInfo, near, mode, scene: scene.id }
     },
     destroy() {

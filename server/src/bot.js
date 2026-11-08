@@ -71,3 +71,4 @@ export {
 export { buildMonitorReport, recordBotError } from "../../telegram-bot/src/admin/monitor.js";
 export { buildContainersReport } from "../../telegram-bot/src/admin/docker.js";
 export { buildProcessesReport } from "../../telegram-bot/src/admin/processes.js";
+export { CROPS, cropKey, farmItemOf, getCrop, seedKey } from "../../telegram-bot/src/data/crops.js";

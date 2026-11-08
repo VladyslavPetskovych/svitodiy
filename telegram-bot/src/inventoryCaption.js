@@ -1,6 +1,7 @@
 import { CATCHES, getFishMeta } from "./data/fishTypes.js";
 import { RESOURCE_TYPES, isResourceId } from "./data/resources.js";
 import { getRelicMeta } from "./data/relics.js";
+import { CROPS, cropKey, farmItemOf, seedKey } from "./data/crops.js";
 
 function escapeHtml(s) {
   return String(s)
@@ -32,6 +33,16 @@ export function formatInventoryCaption(inv, balanceHtml, opts = {}) {
     if (n > 0) resLines.push(`• ${r.emoji} ${escapeHtml(r.name)} — ×${n}`);
   }
   text += resLines.length > 0 ? `${resLines.join("\n")}\n` : `• <i>порожньо</i>\n`;
+
+  // Город (Mini App): урожай і насіння — лише якщо щось є.
+  const farmLines = [];
+  for (const c of CROPS) {
+    const crop = inv[cropKey(c.id)] ?? 0;
+    const seeds = inv[seedKey(c.id)] ?? 0;
+    if (crop > 0) farmLines.push(`• ${c.emoji} ${escapeHtml(c.name)} — ×${crop}`);
+    if (seeds > 0) farmLines.push(`• 🌱 Насіння: ${escapeHtml(c.name)} — ×${seeds}`);
+  }
+  if (farmLines.length > 0) text += `\n<b>🌾 Город</b>\n${farmLines.join("\n")}\n`;
 
   text += `\n<b>🏺 Реліквії</b>\n`;
   const relicLines = [];
@@ -76,7 +87,7 @@ export function formatInventoryCaption(inv, balanceHtml, opts = {}) {
   const unknown = [];
   for (const [k, n] of Object.entries(inv)) {
     if (n < 1) continue;
-    if (getFishMeta(k) || isResourceId(k) || k.startsWith("relic_")) continue;
+    if (getFishMeta(k) || isResourceId(k) || farmItemOf(k) || k.startsWith("relic_")) continue;
     unknown.push(`• <code>${escapeHtml(k)}</code> — ×${n}`);
   }
   if (unknown.length > 0) {

@@ -1,23 +1,29 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { canAfford, formatAmounts, homeStorage, itemOf } from '../data.js'
 import { useGame, useNow } from '../context.js'
+import { fieldView, ownedSeeds, plotSpot, plotView } from '../farm.js'
 import { haptic, useBackButton } from '../tg.js'
 import { ItemIcon, PxButton, ScreenTitle, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
 import { DECO_GEOM, snapDeco } from '../walk/decor.js'
-import { dogById } from '../walk/companion.js'
+import { DOGS, dogById } from '../walk/companion.js'
 import { homeInteract } from '../walk/home.js'
 import { INTERACT } from '../walk/layout.js'
 import { BuildingSheet, DailySheet } from './Home.jsx'
+import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
 
 const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚' }
+const DOG_IDS = DOGS.map((d) => d.id)
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱' }
 /** Що написати на кнопці дії. */
 const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати' }
 /** Пси-компаньйони — не будівлі, тож їхні «точки» для панелі дії мають id «dog:<ім'я>». */
 const dogOf = (id) => (id?.startsWith('dog:') ? dogById(id.slice(4)) : null)
+/** Грядки на полі — «plot:<№>». */
+const plotOf = (id) => (id?.startsWith('plot:') ? Number(id.slice(5)) : null)
+const FEED_TEXT = [(n) => `😋 ${n} уминає за обидві щоки!`, (n) => `😋 Хрум-хрум! ${n} задоволений.`]
 const DOG_PETS = [
   (n) => `🐶 ${n} радісно махає хвостом!`,
   (n) => `🐶 ${n} підставляє вушко — ще, ще!`,
@@ -49,6 +55,12 @@ export default function IslandWalk() {
   const [sel, setSel] = useState(null) // id виділеної прикраси
   const [busy, setBusy] = useState(false)
   const [scene, setScene] = useState('island') // 'island' | 'home'
+  // Город і пси.
+  const [farmTab, setFarmTab] = useState(null) // шторка комори: 'seeds' | 'sell' | 'guide' | null
+  const [seed, setSeed] = useState(null) // яке насіння садити наступним тапом
+  const [dogSheet, setDogSheet] = useState(null) // id пса, чия шторка відкрита
+  const working = useRef(new Set()) // грядки, на яких дія ще в дорозі до сервера
+  const clearArmed = useRef(null) // «викопати» — другий тап підтверджує
   const now = useNow()
   const { home } = state
   const deco = state.deco ?? NO_DECO
@@ -69,14 +81,117 @@ export default function IslandWalk() {
     engine.current?.setScene(id)
     setScene(id)
   }
+  /* ───── Город ───── */
+
+  /** Що посадити: обране насіння, якщо воно ще є, інакше — перше, що є в рюкзаку. */
+  const seedToPlant = () => {
+    const owned = ownedSeeds(catalog, state.inventory)
+    return owned.find((x) => x.crop.id === seed)?.crop ?? owned[0]?.crop ?? null
+  }
+
+  /** Розумна дія на грядці (як у Stardew — інструмент сам за станом): скопати, посадити, полити, зібрати. */
+  const farmAction = async (i) => {
+    if (working.current.has(i)) return
+    const v = plotView(catalog, state.farm, i, now)
+    if (v.action === 'locked') {
+      haptic('warning')
+      toast(`🌿 ${plotSpot(catalog, state.farm, v, now).hint}`, 'error')
+      return
+    }
+    if (v.action === 'wait') {
+      toast(`💧 ${plotSpot(catalog, state.farm, v, now).hint}`)
+      return
+    }
+    let body
+    const kind = v.action
+    if (kind === 'plant') {
+      const crop = seedToPlant()
+      if (!crop) {
+        haptic('warning')
+        toast('Немає насіння — купи в коморі городника 🌱', 'error')
+        setFarmTab('seeds')
+        return
+      }
+      body = { crop: crop.id }
+    }
+    working.current.add(i)
+    engine.current?.farmFx(i, kind)
+    const res = await act('POST', `/farm/${i}/${kind}`, body)
+    working.current.delete(i)
+    if (!res) return
+    haptic(kind === 'harvest' ? 'success' : 'light')
+    if (res.got) toast(`🧺 Зібрано: ${formatAmounts(items, res.got)}`)
+  }
+
+  /** Викопати рослину (подвійний тап — щоб не зробити це випадково). */
+  const clearPlot = async (i) => {
+    if (clearArmed.current?.i !== i || Date.now() - clearArmed.current.at > 2500) {
+      clearArmed.current = { i, at: Date.now() }
+      haptic('warning')
+      toast('Тапни 🗑 ще раз — рослину буде викопано')
+      return
+    }
+    clearArmed.current = null
+    engine.current?.farmFx(i, 'clear')
+    if (await act('POST', `/farm/${i}/clear`)) haptic('success')
+  }
+
+  /* ───── Пси ───── */
+
+  const petDog = (dog) => {
+    engine.current?.petDog(dog.id)
+    haptic('success')
+    toast(DOG_PETS[Math.floor(Math.random() * DOG_PETS.length)](dog.name))
+    // Дружба росте від першого погладжування за день.
+    if (!state.dogs?.[dog.id]?.pettedToday) act('POST', `/dogs/${dog.id}/pet`, {}, { silent: true })
+  }
+
+  const commandDog = async (id, mode) => {
+    const dog = dogById(id)
+    const cmd = engine.current?.commandDog(id, mode)
+    if (!dog || !cmd) return
+    haptic('medium')
+    setDogSheet(null)
+    const text = { follow: `🐾 ${dog.name} біжить до тебе!`, sit: `🪑 ${dog.name} сів і чекає тут.` }[mode] ??
+      (scene === 'home' ? `🏠 ${dog.name} вмостився на лежанці.` : `🏠 ${dog.name} побіг до хатинки.`)
+    toast(text)
+    await act('POST', `/dogs/${id}/command`, cmd)
+  }
+
+  const feedDog = async (id, itemId) => {
+    const dog = dogById(id)
+    const res = await act('POST', `/dogs/${id}/feed`, { item: itemId })
+    if (!res || !dog) return
+    setDogSheet(null)
+    engine.current?.feedDog(id)
+    haptic('success')
+    toast(`${FEED_TEXT[Math.floor(Math.random() * FEED_TEXT.length)](dog.name)}${res.favorite ? ' Улюблене! ⭐' : ''}`)
+    if (res.gift) setTimeout(() => toast(`🐶 ${dog.name} щось відкопав і приніс: ${formatAmounts(items, res.gift)}`), 1900)
+  }
+
+  /** Свисток: усі пси, що сидять чи чекають удома, біжать до тебе. */
+  const whistle = async () => {
+    const away = DOG_IDS.filter((id) => (state.dogs?.[id]?.mode ?? 'follow') !== 'follow')
+    if (!away.length) {
+      toast('🐾 Пси й так поруч.')
+      return
+    }
+    haptic('medium')
+    toast('📯 Фіть-фіть! Пси біжать до тебе.')
+    for (const id of away) {
+      const cmd = engine.current?.commandDog(id, 'follow')
+      if (cmd) await act('POST', `/dogs/${id}/command`, cmd, { silent: true })
+    }
+  }
+
   const interact = (id) => {
     haptic('light')
     const dog = dogOf(id)
-    if (dog) {
-      engine.current?.petDog(dog.id)
-      haptic('success')
-      toast(DOG_PETS[Math.floor(Math.random() * DOG_PETS.length)](dog.name))
-    } else if (id === 'house') goScene('home')
+    const plot = plotOf(id)
+    if (dog) petDog(dog)
+    else if (plot != null) farmAction(plot)
+    else if (id === 'farmshop') setFarmTab('seeds')
+    else if (id === 'house') goScene('home')
     else if (id === 'exit') goScene('island')
     else if (BUILDINGS.has(id)) setSheet(id)
     else if (id === 'chest') setDaily(true)
@@ -199,6 +314,7 @@ export default function IslandWalk() {
           onBuildTap: (p) => handlers.current.buildTap(p),
         })
         engine.current = walk
+        if (import.meta.env.DEV) window.__walk = walk // для ручних перевірок у консолі
         setReady(true)
       },
       (e) => alive && setError(e.message)
@@ -216,6 +332,17 @@ export default function IslandWalk() {
     engine.current?.setWorld(home.levels, chestOpen, deco)
   }, [ready, home.levels, chestOpen, deco])
 
+  // Поле: що де росте (оновлюється й саме — волога грядка дорослішає без запитів).
+  const field = useMemo(() => fieldView(catalog, state.farm, now), [catalog, state.farm, now])
+  useEffect(() => {
+    if (ready) engine.current?.setFarm(field)
+  }, [ready, field])
+
+  // Команди псам, збережені на сервері (сидить там-то, чекає вдома).
+  useEffect(() => {
+    if (ready) engine.current?.syncDogs(state.dogs)
+  }, [ready, state.dogs])
+
   // Бульбашки врожаю над будівлями, де вже є що забрати.
   const storage = homeStorage(catalog, home, now)
   const bubbleKey = JSON.stringify(
@@ -232,9 +359,16 @@ export default function IslandWalk() {
 
   const indoors = scene === 'home'
   const nearDog = dogOf(near)
+  const nearPlot = indoors ? null : plotOf(near)
+  const plotV = nearPlot != null ? field[nearPlot] : null
+  const plotInfo = plotV ? plotSpot(catalog, state.farm, plotV, now) : null
   const spot = nearDog
     ? { id: near, label: `Песик ${nearDog.name}` }
-    : (indoors ? homeInteract(Math.max(1, home.levels.house)) : INTERACT).find((i) => i.id === near)
+    : plotV
+      ? { id: near, label: plotInfo.label }
+      : (indoors ? homeInteract(Math.max(1, home.levels.house)) : INTERACT).find((i) => i.id === near)
+  const showSeeds = !build && !indoors && (plotV ? plotV.action === 'plant' || plotV.action === 'till' : near === 'farmshop')
+  const dogInfo = nearDog ? state.dogs?.[nearDog.id] : null
   const building = catalog.buildings.find((b) => b.id === sheet)
 
   return (
@@ -256,7 +390,7 @@ export default function IslandWalk() {
         }`}
       >
         <canvas ref={canvas} className="block aspect-[5/6] w-full touch-none" />
-        {ready && <CameraControls engine={engine} />}
+        {ready && <CameraControls engine={engine} onWhistle={whistle} />}
         {!ready && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f2a3d]/60 text-center">
             <motion.span
@@ -305,14 +439,45 @@ export default function IslandWalk() {
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.15 }}
                 >
-                  <span className="text-2xl">{nearDog ? '🐶' : spotIcon(catalog, spot.id)}</span>
+                  {plotV ? (
+                    <PlotIcon v={plotV} items={items} />
+                  ) : (
+                    <span className="text-2xl">{nearDog ? '🐶' : spotIcon(catalog, spot.id)}</span>
+                  )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-extrabold">{spot.label}</p>
-                    <p className="truncate text-[11px] text-cream/75">{spotHint(catalog, home.levels, chestOpen, spot.id)}</p>
+                    {dogInfo ? (
+                      <Hearts hearts={dogInfo.hearts} love={dogInfo.love} size={10} />
+                    ) : (
+                      <p className="truncate text-[11px] text-cream/75">{plotInfo ? plotInfo.hint : spotHint(catalog, home.levels, chestOpen, spot.id)}</p>
+                    )}
                   </div>
-                  <PxButton size="sm" variant="green" onClick={() => interact(spot.id)}>
-                    {nearDog ? 'Погладити' : (ACTION[spot.id] ?? 'Відкрити')}
-                  </PxButton>
+                  {plotV ? (
+                    <>
+                      {plotV.crop && !plotV.ready && (
+                        <PxButton size="sm" variant="paper" onClick={() => clearPlot(plotV.i)} aria-label="Викопати">
+                          🗑
+                        </PxButton>
+                      )}
+                      <PxButton
+                        size="sm"
+                        variant={plotV.action === 'harvest' ? 'yellow' : plotV.action === 'water' ? 'blue' : 'green'}
+                        className={plotV.action === 'wait' || plotV.action === 'locked' ? 'opacity-60' : ''}
+                        onClick={() => interact(spot.id)}
+                      >
+                        {plotV.action === 'plant' && seedToPlant() ? `🌱 ${seedToPlant().name}` : plotInfo.button}
+                      </PxButton>
+                    </>
+                  ) : (
+                    <PxButton size="sm" variant="green" onClick={() => interact(spot.id)}>
+                      {nearDog ? 'Погладити' : (ACTION[spot.id] ?? 'Відкрити')}
+                    </PxButton>
+                  )}
+                  {nearDog && (
+                    <PxButton size="sm" variant="paper" onClick={() => setDogSheet(nearDog.id)} aria-label="Нагодувати й команди">
+                      🦴
+                    </PxButton>
+                  )}
                   {spot.id === 'house' && (
                     <PxButton size="sm" variant="paper" onClick={() => setSheet('house')} aria-label="Покращити хатинку">
                       🔨
@@ -330,11 +495,12 @@ export default function IslandWalk() {
                 >
                   {indoors
                     ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.'
-                    : 'Тапни будівлю — мандрівник сам до неї дійде. На ПК — WASD, E — дія, Q/R — поворот, коліщатко — зум.'}
+                    : 'Тапни будівлю чи грядку — мандрівник сам дійде. На ПК — WASD, E — дія, Q/R — поворот, коліщатко — зум.'}
                 </motion.p>
               )}
             </AnimatePresence>
           </div>
+          {showSeeds && <SeedBar seed={seedToPlant()?.id ?? null} setSeed={setSeed} onShop={() => setFarmTab('seeds')} />}
           {indoors ? (
             <PxButton variant="blue" size="lg" className="w-full" onClick={() => goScene('island')}>
               🚪 Вийти надвір
@@ -349,13 +515,15 @@ export default function IslandWalk() {
 
       <BuildingSheet building={building} onClose={() => setSheet(null)} />
       <DailySheet open={daily} onClose={() => setDaily(false)} />
+      <FarmSheet tab={farmTab} setTab={setFarmTab} onClose={() => setFarmTab(null)} />
+      <DogSheet dog={dogSheet ? dogById(dogSheet) : null} onClose={() => setDogSheet(null)} onCommand={commandDog} onFeed={feedDog} />
     </div>
   )
 }
 
 /* ───────── Камера: поворот і зум для тих, хто не користується двома пальцями ───────── */
 
-function CameraControls({ engine }) {
+function CameraControls({ engine, onWhistle }) {
   const btn = (label, title, fn) => (
     <button
       type="button"
@@ -376,6 +544,7 @@ function CameraControls({ engine }) {
       {btn('⟳', 'Повернути праворуч', (e) => e?.rotate(1))}
       {btn('+', 'Наблизити', (e) => e?.zoom(0.8))}
       {btn('−', 'Віддалити', (e) => e?.zoom(1.25))}
+      {btn('📯', 'Покликати псів', () => onWhistle())}
     </div>
   )
 }
@@ -516,6 +685,12 @@ function costText(items, cost, inventory) {
   return parts.length ? parts.join(' · ') : 'безкоштовно'
 }
 
+/** Іконка грядки: що на ній росте (арт урожаю) або земля/бур'ян. */
+function PlotIcon({ v, items }) {
+  if (v.crop) return <ItemIcon item={itemOf(items, `crop_${v.crop.id}`)} size={30} className={v.ready ? '' : 'opacity-80 grayscale-[35%]'} />
+  return <span className="text-2xl">{v.locked ? '🌿' : v.tilled ? (v.wet ? '💧' : '🟫') : '🌾'}</span>
+}
+
 function spotIcon(catalog, id) {
   return catalog.buildings.find((b) => b.id === id)?.emoji ?? ICONS[id] ?? '❔'
 }
@@ -523,6 +698,7 @@ function spotIcon(catalog, id) {
 function spotHint(catalog, levels, chestOpen, id) {
   if (id.startsWith('dog:')) return 'Вірний пес — ходить за тобою слідом'
   if (id === 'exit') return 'Повернутися на острів'
+  if (id === 'farmshop') return 'Насіння, продаж урожаю й поради'
   if (id === 'bed') return 'Перина й вишита ковдра'
   if (id === 'stove') return 'Готують рибу — у рюкзаку'
   if (id === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'

@@ -59,6 +59,13 @@ export function buildItemIndex(catalog) {
   }
   for (const r of catalog.resources) index.set(r.id, { ...r, kind: 'resource', image: itemArt(r.id) })
   for (const r of catalog.relics) index.set(r.id, { ...r, kind: 'relic', image: itemArt(r.id) })
+  // Город: урожай і пакетики насіння (арт — scripts/farm-art.mjs).
+  for (const c of catalog.farm?.crops ?? []) {
+    const crop = `crop_${c.id}`
+    const seed = `seed_${c.id}`
+    index.set(crop, { id: crop, cropId: c.id, kind: 'crop', emoji: c.emoji, name: c.name, sellPrice: c.sellPrice, dogFood: !!c.dogFood, image: `/game/items/${crop}.png` })
+    index.set(seed, { id: seed, cropId: c.id, kind: 'seed', emoji: '🌱', name: `Насіння: ${c.name}`, image: `/game/items/${seed}.png` })
+  }
   return index
 }
 

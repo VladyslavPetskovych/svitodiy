@@ -65,6 +65,37 @@ export const LIGHTHOUSE_LAMP = { 1: [3, -60], 2: [-3, -80], 3: [0, -97] }
 /** Місток із берега до майстерні на палях. */
 export const BOARDWALK = { x0: 404, x1: 442, y: 281, h: 14 }
 
+/**
+ * Город (поле грядок) на захід від бруківки: 5×3 грядки по 16 px.
+ * Нумерація — стовпцями (0–2 — перший стовпець, 3–5 — другий…): «Город» вищого рівня
+ * розчищає поле стовпець за стовпцем. Сервер знає лише номери (server/src/game/farm.js).
+ */
+export const FIELD = { x: 152, y: 236, cols: 5, rows: 3, tile: 16 }
+export const FIELD_PLOTS = FIELD.cols * FIELD.rows
+
+/** Прямокутник грядки [x, y, w, h]. */
+export function plotRect(i) {
+  const t = FIELD.tile
+  return [FIELD.x + Math.floor(i / FIELD.rows) * t, FIELD.y + (i % FIELD.rows) * t, t, t]
+}
+
+/** Центр грядки. */
+export function plotCenter(i) {
+  const [x, y, w, h] = plotRect(i)
+  return { x: x + w / 2, y: y + h / 2 }
+}
+
+/** Яка грядка під точкою (або -1). */
+export function plotAt(x, y) {
+  const cx = Math.floor((x - FIELD.x) / FIELD.tile)
+  const cy = Math.floor((y - FIELD.y) / FIELD.tile)
+  if (cx < 0 || cy < 0 || cx >= FIELD.cols || cy >= FIELD.rows) return -1
+  return cx * FIELD.rows + cy
+}
+
+/** Комора городника — ятка з насінням ліворуч від поля. */
+export const SEED_STAND = { x: 134, y: 258 }
+
 export const CHEST = { x: 200, y: 336 }
 export const BOAT = { x: 300, y: 392 }
 export const START = { x: 256, y: 186 }
@@ -82,7 +113,6 @@ export const DECOR = [
   { s: 'clothesline', x: 322, y: 160, blocks: [[-24, -4, 4, 4], [20, -4, 4, 4]] },
   { s: 'bush', x: 206, y: 160, block: [14, 6] },
   { s: 'bush_berry', x: 308, y: 172, block: [14, 6] },
-  { s: 'bush', x: 196, y: 250, block: [14, 6] },
   { s: 'bush_berry', x: 420, y: 186, block: [14, 6] },
   { s: 'bush', x: 230, y: 96, block: [14, 6] },
   { s: 'stump', x: 210, y: 210, block: [10, 6] },
@@ -98,7 +128,7 @@ export const DECOR = [
   { s: 'flowers_w', x: 182, y: 226 },
   { s: 'flowers', x: 330, y: 260 },
   { s: 'flowers_w', x: 268, y: 236 },
-  { s: 'flowers_p', x: 160, y: 254 },
+  { s: 'flowers_p', x: 128, y: 290 },
   { s: 'flowers_p', x: 380, y: 160 },
   { s: 'tuft', x: 240, y: 230 },
   { s: 'tuft', x: 340, y: 186 },
@@ -159,6 +189,10 @@ export function placements(levels, chestOpen, deco = []) {
 
   add(chestOpen ? 'chest_open' : 'chest', CHEST.x, CHEST.y, { blocks: [[CHEST.x - 7, CHEST.y - 6, 14, 6]] })
 
+  // Комора городника; на 3-му рівні «Городу» над полем — дощувач.
+  add('seed_stand', SEED_STAND.x, SEED_STAND.y, { blocks: [[SEED_STAND.x - 10, SEED_STAND.y - 6, 20, 6]] })
+  if (levels.garden >= 3) add('sprinkler', FIELD.x + (FIELD.cols * FIELD.tile) / 2, FIELD.y - 1, { blocks: [] })
+
   // Декор гравця з пісочниці. Підлога не заважає ходити, решта — так.
   for (const d of deco) {
     const g = DECO_GEOM[d.k]
@@ -199,6 +233,7 @@ export const INTERACT = [
   { id: 'garden', label: 'Город', near: [372, 234], r: 20, box: [340, 176, 64, 50] },
   { id: 'workshop', label: 'Майстерня', near: [468, 282], r: 20, box: [436, 212, 64, 80] },
   { id: 'lighthouse', label: 'Маяк', near: [84, 284], r: 20, box: [50, 140, 68, 132] },
+  { id: 'farmshop', label: 'Комора городника', near: [134, 268], r: 14, box: [122, 232, 24, 27] },
   { id: 'chest', label: 'Скриня', near: [200, 324], r: 16, box: [188, 318, 24, 22] },
   { id: 'pier', label: 'Причал', near: [256, 352], r: 14, box: [240, 344, 32, 30] },
   { id: 'fishing', label: 'Рибалити', near: [256, 418], r: 14, box: [240, 396, 32, 34] },

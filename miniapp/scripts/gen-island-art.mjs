@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { deflateSync, inflateSync } from 'node:zlib'
 import { DOOR, FLOOR, HOME_MAP, WINDOWS, homePlacements } from '../src/game/walk/home.js'
+import { farmArt } from './farm-art.mjs'
 import { BEDS, BOARDWALK, CELL, DECOR, INTERACT, LAND, MAP, PATH, PIER, PLAZA, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -3034,7 +3035,7 @@ function dogSheet(anims, cell, image, scale = 1) {
 
 /* ───────── Атлас ───────── */
 
-function buildSprites() {
+function buildSprites(farm) {
   const s = {
     ...heroFrames(),
     oak: oak(),
@@ -3064,6 +3065,7 @@ function buildSprites() {
     sailboat: sailboat(),
     ...decoSprites(),
     ...homeSprites(),
+    ...farm.sprites,
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)
@@ -3107,7 +3109,7 @@ function pack(sprites) {
       y += shelf + 1
       shelf = 0
     }
-    frames[name] = { x, y, w: img.w, h: img.h }
+    frames[name] = img.k ? { x, y, w: img.w, h: img.h, k: img.k } : { x, y, w: img.w, h: img.h }
     x += img.w + 1
     shelf = Math.max(shelf, img.h)
   }
@@ -3165,7 +3167,8 @@ const t = terrain()
 const ground = groundImage(t)
 const foam = shoreImage(t)
 const water = waterImage()
-const sprites = buildSprites()
+const farm = farmArt({ Img, hash, bayer, clamp01 })
+const sprites = buildSprites(farm)
 const { atlas, frames } = pack(sprites)
 
 mkdirSync(OUT_PUBLIC, { recursive: true })
@@ -3177,6 +3180,10 @@ writeFileSync(join(OUT_PUBLIC, 'home.png'), encodePng(home))
 writeFileSync(join(OUT_PUBLIC, 'sprites.png'), encodePng(atlas))
 writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid() }) + '\n')
 console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів)`)
+// Іконки врожаю й насіння для рюкзака (public/game/items/<id>.png).
+const OUT_ITEMS = join(ROOT, 'public/game/items')
+for (const [id, img] of Object.entries(farm.items)) writeFileSync(join(OUT_ITEMS, `${id}.png`), encodePng(img))
+console.log(`город: ${Object.keys(farm.items).length} іконок, культури ${JSON.stringify(farm.meta)}`)
 for (const [name, anims, cell, scale] of [
   ['dog', dogAnims(), DOG_CELL, 1],
   ['sirko', sirkoAnims(), SIRKO_CELL, SIRKO_SCALE],
@@ -3238,5 +3245,32 @@ if (pi > 0) {
       for (let k = 0; k < 4; k++) big.d[oi + k] = atlas.d[si + k]
     }
   writeFileSync(join(dir, 'atlas-x3.png'), encodePng(big))
+  // Город: усі стадії культур і грядки, ×4.
+  {
+    const names = Object.keys(farm.sprites)
+    const cellW = 42
+    const cellH = 80
+    const perRow = 8
+    const sheet = new Img(perRow * cellW, Math.ceil(names.length / perRow) * cellH)
+    sheet.rect(0, 0, sheet.w, sheet.h, '#5aa13c')
+    names.forEach((n, i) => {
+      const sp = farm.sprites[n]
+      sheet.blit(sp, (i % perRow) * cellW + Math.floor((cellW - sp.w) / 2), Math.floor(i / perRow) * cellH + cellH - sp.h - 2)
+    })
+    const items = Object.values(farm.items)
+    const strip = new Img(items.length * 34, 34)
+    strip.rect(0, 0, strip.w, strip.h, '#e8dcc0')
+    items.forEach((it, i) => strip.blit(it, i * 34 + 1, 1))
+    for (const [file, img, z] of [['farm-x4.png', sheet, 4], ['farm-items-x4.png', strip, 4]]) {
+      const big = new Img(img.w * z, img.h * z)
+      for (let y = 0; y < big.h; y++)
+        for (let x = 0; x < big.w; x++) {
+          const si = (Math.floor(y / z) * img.w + Math.floor(x / z)) * 4
+          const oi = (y * big.w + x) * 4
+          for (let k = 0; k < 4; k++) big.d[oi + k] = img.d[si + k]
+        }
+      writeFileSync(join(dir, file), encodePng(big))
+    }
+  }
   console.log(`прев'ю → ${dir}`)
 }

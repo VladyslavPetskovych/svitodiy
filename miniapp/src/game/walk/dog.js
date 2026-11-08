@@ -16,7 +16,14 @@ import { accelerate, createBody, followPath, move, teleport } from './physics.js
  *   sit     — сидить, метляє хвостом, часом висолоплює язика;
  *   sleep   — спить калачиком (зетки над головою); прокидається, коли підходиш;
  *   wait    — ти покликав (тап по псові): завмирає й чекає;
- *   happy   — погладили або розбудили: підстрибує, сердечка.
+ *   happy   — погладили або розбудили: підстрибує, сердечка;
+ *   eat     — їсть смаколик (кісточки над головою), потім радіє;
+ *   stay    — команда «Сидіти» / «Додому»: іде на своє місце (anchor) і сидить там, хоч куди
+ *             ти підеш; на лежанці (anchor.lie) з часом засинає. Гладити й годувати — можна;
+ *   run     — біжить до точки (наприклад, до дверей хатинки) і повідомляє, що добіг.
+ *
+ * Режим (mode) — що пес робить, коли нічим не зайнятий: 'follow' — ходить за тобою,
+ * 'stay' — тримається свого місця.
  */
 
 export { PET_RANGE } from './companion.js'
@@ -51,6 +58,7 @@ function emoteTexture(rows, pal) {
 }
 const HEART = ['.KK.KK.', 'KRRKRRK', 'KRrRRRK', 'KRRRRRK', '.KRRRK.', '..KRK..', '...K...']
 const ZED = ['KKKKK', 'KWWWK', 'KKWKK', 'KWKKK', 'KWWWK', 'KKKKK']
+const BONE = ['.KK.....KK.', 'KWWK...KWWK', 'KWWWKKKKWWK', '.KWWWWWWWK.', 'KWWKKKKWWWK', 'KWWK...KWWK', '.KK.....KK.']
 const EMOTE_PAL = { K: '#2b1d16', R: '#e0483a', r: '#ffb0a0', W: '#f6f0e2' }
 
 /**
@@ -73,6 +81,12 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
   let stillT = 0
   const stuck = { x: 0, y: 0, t: 0 }
   let simT = 0
+  let mode = 'follow'
+  /** Місце, де пес сидить у режимі stay: { x, y, lie } (lie — лежанка: можна заснути). */
+  let anchor = null
+  /** Куди біжить у стані run і що зробити, добігши. */
+  let run = null
+  let visible = true
   // Анімація.
   let dir = 'down'
   let anim = 'idle_down'
@@ -105,6 +119,7 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
   // Емоції: невеликий пул спрайтів, що злітають і тануть.
   const heartTex = emoteTexture(HEART, EMOTE_PAL)
   const zedTex = emoteTexture(ZED, EMOTE_PAL)
+  const boneTex = emoteTexture(BONE, EMOTE_PAL)
   const emotes = Array.from({ length: 6 }, () => {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: heartTex, transparent: true, depthWrite: false }))
     s.visible = false
@@ -175,18 +190,62 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
     stillT = playerMoving ? 0 : stillT + dt
     timer -= dt
 
+    const staying = mode === 'stay' && anchor
     switch (state) {
       case 'sleep':
         // Ти підійшов — прокидається радісно; інакше спить, поки ти не підеш далеко.
+        // Хто «на місці» — спить, поки не набридне, і лишається там само.
         if (d < 26 && playerMoving) enter('happy', 1.1)
-        else if (d > FAR * 1.6 && timer <= 0) enter('follow')
+        else if (staying) {
+          if (timer <= 0) enter('stay', rand(5, 9))
+        } else if (d > FAR * 1.6 && timer <= 0) enter('follow')
         break
       case 'happy':
-        if (timer <= 0) enter('sit', rand(2.5, 4.5))
+        if (timer <= 0 && staying) enter('stay', rand(4, 8))
+        else if (timer <= 0) enter('sit', rand(2.5, 4.5))
         break
       case 'wait':
-        if (timer <= 0) enter('idle', 0.8)
+        if (timer <= 0) enter(staying ? 'stay' : 'idle', staying ? rand(4, 8) : 0.8)
         break
+      case 'eat':
+        if (timer <= 0) {
+          enter('happy', 1.2)
+          emoteAcc = 1
+        }
+        break
+      case 'stay': {
+        if (!anchor) {
+          enter('idle', 0.5)
+          break
+        }
+        const ad = Math.hypot(anchor.x - body.x, anchor.y - body.y)
+        if (ad > 5) {
+          if (simT >= repathAt) {
+            repathAt = simT + 0.5
+            goTo(anchor, ad > 60 ? TROT : WALK * 1.6)
+            if (!path.length) teleport(body, anchor.x, anchor.y) // місце недосяжне — просто опиняється там
+          }
+        } else {
+          path = []
+          if (timer <= 0 && anchor.lie) enter('sleep', rand(10, 20))
+          else if (timer <= 0) timer = rand(4, 8)
+        }
+        break
+      }
+      case 'run': {
+        const rd = Math.hypot(run.x - body.x, run.y - body.y)
+        if (rd < 7 || (!path.length && simT >= repathAt)) {
+          const done = run.done
+          run = null
+          enter(mode === 'stay' && anchor ? 'stay' : 'idle', 1)
+          done?.()
+        } else if (simT >= repathAt) {
+          repathAt = simT + 0.4
+          goTo(run, TROT)
+          if (!path.length) repathAt = simT - 1 // недосяжно — наступний крок завершить біг
+        }
+        break
+      }
       case 'follow':
         if (d < NEAR + 2) enter(stillT > 1 ? 'sit' : 'idle', rand(0.8, 2))
         else if (simT >= repathAt) {
@@ -224,13 +283,13 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
     // Рух уздовж шляху (у станах, що рухаються), гальмування — в решті.
     let wx = 0
     let wy = 0
-    if ((state === 'follow' || state === 'wander') && path.length) {
+    if ((state === 'follow' || state === 'wander' || state === 'stay' || state === 'run') && path.length) {
       const r = followPath(body, path, speed)
       wx = r.wx
       wy = r.wy
     }
     // Розділення: інший пес надто близько — відступаємо (лежачи/сидячи — ні, хай інший обходить).
-    if (state !== 'sleep' && state !== 'sit')
+    if (state !== 'sleep' && state !== 'sit' && state !== 'stay' && state !== 'eat')
       for (const o of others()) {
         const ox = body.x - o.x
         const oy = body.y - o.y
@@ -276,7 +335,8 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
       const sy = fx * basis.down.x + fy * basis.down.y
       dir = Math.abs(sx) > Math.abs(sy) ? (sx > 0 ? 'right' : 'left') : sy > 0 ? 'down' : 'up'
     }
-    const next = state === 'sleep' || state === 'sit' || state === 'happy' ? state : `${moving ? 'walk' : 'idle'}_${dir}`
+    const pose = state === 'stay' || state === 'eat' ? 'sit' : state
+    const next = !moving && (pose === 'sleep' || pose === 'sit' || pose === 'happy') ? pose : `${moving ? 'walk' : 'idle'}_${dir}`
     if (next !== anim) {
       anim = next
       animT = 0
@@ -297,9 +357,14 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
     } else if (state === 'happy' && emoteAcc > 0.28) {
       emoteAcc = 0
       emote(heartTex, 6, 1)
+    } else if (state === 'eat' && emoteAcc > 0.45) {
+      emoteAcc = 0
+      emote(boneTex, 6, 0.9)
     }
     const up = UP.set(0, 1, 0).applyQuaternion(camera.quaternion)
+    mesh.visible = visible
     for (const e of emotes) {
+      if (!visible) e.s.visible = false
       if (!e.s.visible) continue
       e.age += dt
       if (e.age >= e.life) {
@@ -320,18 +385,57 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
     get state() {
       return state
     },
+    get mode() {
+      return mode
+    },
+    get visible() {
+      return visible
+    },
+    /** Показати/сховати (пес в іншій сцені: на острові, поки ти в хаті, чи навпаки). */
+    setVisible(v) {
+      visible = v
+      mesh.visible = v
+      if (!v) for (const e of emotes) e.s.visible = false
+    },
+    /** «Сидіти» / «Додому»: тримати місце (x, y); lie — на лежанці, можна спати. */
+    stay(x, y, lie = false) {
+      mode = 'stay'
+      anchor = { x, y, lie }
+      run = null
+      enter('stay', rand(5, 9))
+    },
+    /** «До мене»: знову ходить слідом. */
+    follow() {
+      mode = 'follow'
+      anchor = null
+      run = null
+      enter('follow')
+    },
+    /** Добігти до точки й викликати done (без шляху — одразу). */
+    runTo(x, y, done) {
+      run = { x, y, done }
+      repathAt = simT
+      enter('run')
+    },
+    /** Нагодували: сідає, їсть (кісточки), потім радіє. */
+    feed() {
+      enter('eat', 1.6)
+      emoteAcc = 1
+      body.vx = body.vy = 0
+    },
     /** Поставити пса поруч із точкою (вхід у сцену). */
     place(x, y) {
       teleport(body, x, y)
       vis.x = x
       vis.y = y
       stillT = 0 // перехід між сценами — це рух: не засинати одразу на порозі
-      enter('idle', 0.6)
+      if (mode === 'stay' && anchor) enter('stay', rand(3, 6))
+      else enter('idle', 0.6)
       unstick()
     },
     /** Тебе покликали тапом: завмирає й чекає, поки підійдеш. */
     notice() {
-      if (state !== 'sleep' && state !== 'happy') enter('wait', 3)
+      if (state !== 'sleep' && state !== 'happy' && state !== 'eat' && state !== 'run') enter('wait', 3)
     },
     /** Погладили: радісний підскок і сердечка. */
     pet() {
@@ -357,6 +461,7 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
       }
       heartTex.dispose()
       zedTex.dispose()
+      boneTex.dispose()
     },
   }
 }

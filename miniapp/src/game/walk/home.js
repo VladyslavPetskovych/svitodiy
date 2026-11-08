@@ -14,6 +14,9 @@ export const DOOR = { x0: 108, x1: 132 }
 export const HOME_START = { x: 120, y: 174 }
 
 /** Вікна в задній стіні (x0..x1), спільні для фону кімнати й світла на підлозі. */
+/** Лежанка для псів біля печі: тут вони чекають, коли їм сказали «Додому». */
+export const DOG_BED = { x: 198, y: 152 }
+
 export const WINDOWS = [
   { x0: 50, x1: 76 },
   { x0: 164, x1: 190 },
@@ -28,6 +31,7 @@ export const WINDOWS = [
 export function homePlacements(level) {
   const out = []
   const add = (s, x, y, blocks = [], layer = 'obj') => out.push({ s, x, y, layer, blocks })
+  add('home_dog_bed', DOG_BED.x, DOG_BED.y, [], 'floor')
   add('home_bed', 40, 104, [[24, 60, 32, 42]])
   add('home_stove', 200, 110, [[176, 66, 48, 42]])
   add(level >= 3 ? 'home_table_3' : 'home_table', 120, 128, [[102, 114, 36, 14]])

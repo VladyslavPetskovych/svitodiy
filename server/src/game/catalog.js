@@ -13,6 +13,8 @@ import {
   intensityLabel,
 } from "../bot.js";
 import { DECOR, DECOR_MAX } from "./decor.js";
+import { dogsCatalog } from "./dogs.js";
+import { farmCatalog } from "./farm.js";
 import { BUILDINGS } from "./homestead.js";
 
 /**
@@ -134,6 +136,8 @@ export function buildCatalog() {
     buildings: BUILDINGS,
     decor: DECOR,
     decorMax: DECOR_MAX,
+    farm: farmCatalog(),
+    pets: dogsCatalog(),
     arcs: ARC_CATALOG.map((a) => ({ id: a.id, title: a.title, emoji: a.emoji, summary: a.summary })),
     arcDurationDays: ARC_DURATION_DAYS,
     dumosvitIntensity: DUMOSVIT_LEVELS.map((level) => ({ level, label: intensityLabel(level) })),

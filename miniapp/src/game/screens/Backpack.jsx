@@ -41,7 +41,9 @@ const FILTERS = [
   { value: 'fish', label: 'Риба' },
   { value: 'resource', label: 'Ресурси' },
   { value: 'relic', label: 'Реліквії' },
+  { value: 'farm', label: 'Город' },
 ]
+const FARM_KINDS = new Set(['crop', 'seed'])
 
 function Items() {
   const { state, items, catalog, act, reward, switchTab } = useGame()
@@ -50,11 +52,12 @@ function Items() {
   const [slot, setSlot] = useState(null)
   const [confirmSell, setConfirmSell] = useState(false)
 
-  const order = [...catalog.fish, ...catalog.resources, ...catalog.relics].map((x) => x.id)
+  const farmIds = (catalog.farm?.crops ?? []).flatMap((c) => [`crop_${c.id}`, `seed_${c.id}`])
+  const order = [...[...catalog.fish, ...catalog.resources, ...catalog.relics].map((x) => x.id), ...farmIds]
   const owned = Object.entries(state.inventory)
     .map(([id, count]) => ({ item: itemOf(items, id), count }))
     .sort((a, b) => order.indexOf(a.item.id) - order.indexOf(b.item.id))
-  const shown = owned.filter((x) => filter === 'all' || x.item.kind === filter)
+  const shown = owned.filter((x) => filter === 'all' || x.item.kind === filter || (filter === 'farm' && FARM_KINDS.has(x.item.kind)))
   const fishValue = owned.filter((x) => x.item.kind === 'fish').reduce((s, x) => s + x.item.sellPrice * x.count, 0)
   const equippedIds = new Set([state.equipped.hook, state.equipped.talisman])
 
@@ -164,6 +167,10 @@ function ItemSheet({ id, onClose, onEquip }) {
     const res = await act('POST', '/fish/sell', { fishId: item.id, count: n })
     if (res) haptic('success')
   }
+  const sellCrop = async (n) => {
+    const res = await act('POST', '/farm/sell', { crop: item.cropId, count: n })
+    if (res) haptic('success')
+  }
   const cook = async () => {
     const res = await act('POST', '/fish/cook', { fishId: item.id })
     if (!res) return
@@ -205,6 +212,8 @@ function ItemSheet({ id, onClose, onEquip }) {
               {item.kind === 'fish' && `📏 ~${item.size} · ${item.flavor}`}
               {item.kind === 'relic' && (item.fishBonus ? `Спорядження: +${pct(item.fishBonus)} до шансу риби` : 'Рідкісна реліквія з глибин')}
               {item.kind === 'resource' && (source ? `Де взяти: ${source}` : 'Ресурс для алхімії')}
+              {item.kind === 'crop' && `Урожай з городу${item.dogFood ? ' · пси теж люблять' : ''}`}
+              {item.kind === 'seed' && 'Посади на городі рідного острова: скопай, посади й полий'}
             </p>
             <p className="mt-1 font-pixel text-[11px]">У рюкзаку: ×{count}</p>
           </div>
@@ -226,6 +235,19 @@ function ItemSheet({ id, onClose, onEquip }) {
           )}
           {item.kind === 'fish' && (
             <p className="text-center text-xs text-ink-soft">Готування дає 1–3 інгредієнти для алхімії.</p>
+          )}
+
+          {item.kind === 'crop' && (
+            <div className="grid grid-cols-2 gap-2">
+              <PxButton variant="yellow" className={count > 1 ? '' : 'col-span-2'} onClick={() => sellCrop(1)}>
+                💰 Продати +{item.sellPrice}
+              </PxButton>
+              {count > 1 && (
+                <PxButton variant="paper" onClick={() => sellCrop('all')}>
+                  Усі {count} · +{item.sellPrice * count} ✨
+                </PxButton>
+              )}
+            </div>
           )}
 
           {item.kind === 'relic' && item.slot && (

@@ -2502,6 +2502,242 @@ function homeSprites() {
   }
 }
 
+/* ───────── Пес Рудько: окремий аркуш анімацій ───────── */
+
+/**
+ * Рудий сільський пес із білими грудьми й «шкарпетками», висячими темними вухами,
+ * червоним нашийником і латунною біркою. Клітинка 24×20, лапи стоять на рядку 18,
+ * якір — низ по центру (як у мандрівника). Кадри малюються тими самими примітивами,
+ * тож пес однаковий у кожному кадрі, а рух задається параметрами пози.
+ */
+const DOG = {
+  O: '#d07a36', // руда шерсть
+  o: '#a85a26', // тінь шерсті / дальні лапи
+  L: '#eda25a', // відблиск на спині
+  W: '#f6f0e2', // біле
+  w: '#d9ccb2', // тінь білого
+  E: '#8a4a1e', // вуха
+  R: C.red, // нашийник
+  Y: '#ffd23c', // бірка
+  T: '#e86a6a', // язик
+}
+const DOG_CELL = { w: 24, h: 20 }
+
+/** Лапа 2 px: верх нерухомий, низ зміщується на dx (крок), лапка — іншим кольором. */
+function dogLeg(img, x, top, bottom, dx, col, paw) {
+  for (let y = top; y <= bottom; y++) {
+    const off = y > (top + bottom) / 2 ? dx : 0
+    img.set(x + off, y, col)
+    img.set(x + 1 + off, y, col)
+  }
+  img.set(x + dx, bottom, paw)
+  img.set(x + 1 + dx, bottom, paw)
+}
+
+/** Хвіст-бублик: точки від основи до кінчика, кінчик білий. */
+function dogTail(img, pts) {
+  pts.forEach(([x, y], i) => img.set(x, y, i === pts.length - 1 ? DOG.W : DOG.O))
+}
+
+/**
+ * Профіль праворуч. legs/lift — [ближня задня, дальня задня, ближня передня, дальня передня];
+ * bob — зсув тулуба (−1 угору); tail — −1/0/1 (мах хвостом).
+ */
+function dogSide({ legs = [0, 0, 0, 0], lift = [0, 0, 0, 0], bob = 0, tail = 0, tongue = false } = {}) {
+  const img = new Img(DOG_CELL.w, DOG_CELL.h)
+  const b = bob
+  shadow(img, 12, 18.5, 9, 1.6)
+  // Дальні лапи — темніші, під тулубом.
+  dogLeg(img, 5, 14 + b, 18 - lift[1], legs[1], DOG.o, DOG.o)
+  dogLeg(img, 13, 14 + b, 18 - lift[3], legs[3], DOG.o, DOG.o)
+  // Хвіст за тулубом.
+  const TAILS = {
+    [-1]: [[5, 10], [4, 9], [3, 8], [3, 7], [4, 6]],
+    0: [[5, 10], [4, 9], [4, 8], [4, 7], [5, 6]],
+    1: [[5, 10], [5, 9], [5, 8], [6, 7], [7, 7]],
+  }
+  dogTail(img, TAILS[tail].map(([x, y]) => [x, y + b]))
+  // Тулуб, біле черевце й груди, відблиск на спині.
+  img.ellipse(11, 12 + b, 6.5, 3.4, DOG.O)
+  img.ellipse(12, 14.3 + b, 4.5, 1.2, DOG.W)
+  img.ellipse(16, 12.5 + b, 1.8, 2.4, DOG.W)
+  img.hline(7, 13, 9 + b, DOG.L)
+  // Ближні лапи — поверх тулуба, у білих «шкарпетках».
+  dogLeg(img, 7, 14 + b, 18 - lift[0], legs[0], DOG.O, DOG.W)
+  dogLeg(img, 15, 14 + b, 18 - lift[2], legs[2], DOG.O, DOG.W)
+  // Голова: шерсть, відблиск, біла морда, ніс, око, вухо, нашийник із біркою.
+  img.ellipse(18, 7.5 + b, 3.6, 3.4, DOG.O)
+  img.hline(17, 19, 5 + b, DOG.L)
+  img.rect(20, 8 + b, 3, 2, DOG.W)
+  img.set(22, 8 + b, C.K)
+  img.set(19, 6 + b, C.K)
+  if (tongue) {
+    img.set(21, 10 + b, DOG.T)
+    img.set(22, 10 + b, DOG.T)
+  }
+  img.rect(15, 5 + b, 2, 5, DOG.E)
+  img.rect(15, 9 + b, 2, 3, DOG.R)
+  img.set(16, 12 + b, DOG.Y)
+  return img.outline(C.K)
+}
+
+/** Анфас (до глядача). lift — [ліва, права] передні лапи; tail — кінчик хвоста визирає збоку. */
+function dogFront({ lift = [0, 0], bob = 0, tail = 0, tongue = false } = {}) {
+  const img = new Img(DOG_CELL.w, DOG_CELL.h)
+  const b = bob
+  shadow(img, 12, 18.5, 6.5, 1.5)
+  // Задні лапи визирають з боків.
+  dogLeg(img, 7, 15 + b, 18, 0, DOG.o, DOG.o)
+  dogLeg(img, 15, 15 + b, 18, 0, DOG.o, DOG.o)
+  if (tail) dogTail(img, tail > 0 ? [[16, 12 + b], [17, 11 + b], [18, 10 + b]] : [[7, 12 + b], [6, 11 + b], [5, 10 + b]])
+  img.ellipse(12, 13.5 + b, 4.6, 3.2, DOG.O)
+  img.ellipse(12, 13.8 + b, 2.2, 2.6, DOG.W)
+  dogLeg(img, 9, 14 + b, 18 - lift[0], 0, DOG.O, DOG.W)
+  dogLeg(img, 13, 14 + b, 18 - lift[1], 0, DOG.O, DOG.W)
+  dogHead(img, 8 + b, tongue)
+  img.hline(9, 14, 12 + b, DOG.R)
+  img.set(12, 13 + b, DOG.Y)
+  return img.outline(C.K)
+}
+
+/** Голова анфас із центром між пікселями 11 і 12 (симетрично). */
+function dogHead(img, cy, tongue) {
+  img.ellipse(12, cy, 4.2, 3.8, DOG.O)
+  img.hline(10, 13, cy - 3, DOG.L)
+  img.rect(7, cy - 2, 2, 5, DOG.E)
+  img.rect(15, cy - 2, 2, 5, DOG.E)
+  img.set(10, cy - 1, C.K)
+  img.set(13, cy - 1, C.K)
+  img.ellipse(12, cy + 2, 2.2, 1.5, DOG.W)
+  img.set(11, cy + 1, C.K)
+  img.set(12, cy + 1, C.K)
+  if (tongue) {
+    img.set(11, cy + 3, DOG.T)
+    img.set(12, cy + 3, DOG.T)
+  }
+}
+
+/** Зі спини: хвіст-бублик над спиною махає вліво-вправо. */
+function dogBack({ lift = [0, 0], bob = 0, tail = 0 } = {}) {
+  const img = new Img(DOG_CELL.w, DOG_CELL.h)
+  const b = bob
+  shadow(img, 12, 18.5, 6.5, 1.5)
+  dogLeg(img, 9, 14 + b, 18 - lift[0], 0, DOG.O, DOG.W)
+  dogLeg(img, 13, 14 + b, 18 - lift[1], 0, DOG.O, DOG.W)
+  img.ellipse(12, 13.5 + b, 4.6, 3.2, DOG.O)
+  img.hline(10, 13, 11 + b, DOG.L)
+  img.ellipse(12, 8 + b, 4.2, 3.8, DOG.O)
+  img.hline(10, 13, 5 + b, DOG.L)
+  img.rect(7, 6 + b, 2, 5, DOG.E)
+  img.rect(15, 6 + b, 2, 5, DOG.E)
+  img.hline(9, 14, 11 + b, DOG.R)
+  // Хвіст-бублик на крижах — найближче до глядача: тінь з одного боку, білий кінчик.
+  const t = tail
+  for (const [x, y, c] of [
+    [11 + t, 16, DOG.o], [12 + t, 16, DOG.O],
+    [11 + t, 15, DOG.o], [12 + t, 15, DOG.O], [13 + t, 15, DOG.O],
+    [12 + t, 14, DOG.o], [13 + t, 14, DOG.O], [14 + t, 14, DOG.O],
+    [13 + t, 13, DOG.o], [14 + t, 13, DOG.W], [15 + t, 13, DOG.W],
+  ])
+    img.set(x, y + b, c)
+  return img.outline(C.K)
+}
+
+/** Сидить анфас: лапи рівно, хвіст на землі метляє, часом висолоплює язика. */
+function dogSit({ tail = 0, tongue = false } = {}) {
+  const img = new Img(DOG_CELL.w, DOG_CELL.h)
+  shadow(img, 12, 18.5, 7, 1.5)
+  dogTail(img, tail ? [[16, 17], [17, 17], [18, 17], [19, 16]] : [[16, 17], [17, 17], [18, 17], [19, 17]])
+  img.ellipse(12, 16, 5.2, 2.6, DOG.O) // стегна
+  img.set(7, 18, DOG.W)
+  img.set(16, 18, DOG.W)
+  img.ellipse(12, 12.5, 3.6, 3.6, DOG.O)
+  img.ellipse(12, 13, 2, 2.8, DOG.W)
+  dogLeg(img, 9, 13, 18, 0, DOG.O, DOG.W)
+  dogLeg(img, 13, 13, 18, 0, DOG.O, DOG.W)
+  dogHead(img, 6.5, tongue)
+  img.hline(9, 14, 10, DOG.R)
+  img.set(12, 11, DOG.Y)
+  return img.outline(C.K)
+}
+
+/** Спить калачиком: голова на лапах, хвіст обвитий довкола, дихає. */
+function dogSleep(breath) {
+  const img = new Img(DOG_CELL.w, DOG_CELL.h)
+  shadow(img, 12, 18.5, 9, 1.6)
+  // Тулуб калачиком (дихає), відблиск на спині, хвіст обвиває низ білим кінчиком.
+  img.ellipse(10, 14.5 - breath * 0.4, 6.5, 3.6 + breath * 0.4, DOG.O)
+  img.hline(5, 12, 11 - breath, DOG.L)
+  img.hline(4, 12, 17, DOG.o)
+  img.set(13, 17, DOG.W)
+  img.set(14, 17, DOG.W)
+  // Передні лапки під мордою.
+  img.rect(15, 17, 5, 1, DOG.W)
+  // Голова лежить на лапах: окремий контур-складка відділяє її від тулуба.
+  img.ellipse(17.5, 14.5, 3.4, 2.7, DOG.O)
+  for (let y = 12; y <= 16; y++) img.set(14, y, DOG.o)
+  img.hline(16, 18, 12, DOG.L)
+  img.rect(15, 13, 2, 3, DOG.E) // вухо
+  img.hline(18, 19, 14, C.K) // заплющене око
+  img.rect(20, 15, 2, 2, DOG.W)
+  img.set(21, 15, C.K)
+  return img.outline(C.K)
+}
+
+/** Кадри: рядок = анімація (fps — швидкість за замовчуванням), стовпчик = кадр. */
+function dogAnims() {
+  const walkSide = [
+    { legs: [1, -1, -1, 1], tail: 0 },
+    { lift: [0, 1, 1, 0], bob: -1, tail: 1 },
+    { legs: [-1, 1, 1, -1], tail: 0 },
+    { lift: [1, 0, 0, 1], bob: -1, tail: -1 },
+  ]
+  const walkFB = [{}, { lift: [1, 0], bob: -1 }, {}, { lift: [0, 1], bob: -1 }]
+  const flip = (img) => {
+    const out = new Img(img.w, img.h)
+    out.blit(img, 0, 0, true)
+    return out
+  }
+  const side = (poses) => poses.map((p) => dogSide(p))
+  const rightIdle = side([{ tail: 0 }, { tail: 1 }, { tail: 0 }, { tail: -1 }])
+  const rightWalk = side(walkSide)
+  return [
+    ['idle_down', 4, [0, 1, 0, -1].map((tail) => dogFront({ tail }))],
+    ['idle_up', 4, [0, 1, 0, -1].map((tail) => dogBack({ tail }))],
+    ['idle_right', 4, rightIdle],
+    ['idle_left', 4, rightIdle.map(flip)],
+    ['walk_down', 8, walkFB.map((p, i) => dogFront({ ...p, tail: i % 2 ? (i === 1 ? 1 : -1) : 0 }))],
+    ['walk_up', 8, walkFB.map((p, i) => dogBack({ ...p, tail: i % 2 ? (i === 1 ? 1 : -1) : 0 }))],
+    ['walk_right', 8, rightWalk],
+    ['walk_left', 8, rightWalk.map(flip)],
+    ['sit', 5, [{ tail: 0 }, { tail: 1, tongue: true }, { tail: 0, tongue: true }, { tail: 1 }].map(dogSit)],
+    ['sleep', 1.5, [dogSleep(0), dogSleep(1)]],
+    [
+      'happy',
+      9,
+      [
+        { bob: 1, tongue: true },
+        { bob: -3, lift: [2, 2], tail: 1, tongue: true },
+        { bob: -2, lift: [1, 1], tail: -1, tongue: true },
+        { bob: 0, tail: 1, tongue: true },
+      ].map(dogFront),
+    ],
+  ]
+}
+
+/** Аркуш dog.png (рядки — анімації) і опис dog.json для рушія. */
+function dogSheet() {
+  const anims = dogAnims()
+  const cols = Math.max(...anims.map(([, , f]) => f.length))
+  const sheet = new Img(cols * DOG_CELL.w, anims.length * DOG_CELL.h)
+  const meta = { image: '/game/walk/dog.png', cell: DOG_CELL, size: { w: sheet.w, h: sheet.h }, anims: {} }
+  anims.forEach(([name, fps, frames], row) => {
+    frames.forEach((img, i) => sheet.blit(img, i * DOG_CELL.w, row * DOG_CELL.h))
+    meta.anims[name] = { row, frames: frames.length, fps }
+  })
+  return { sheet, meta }
+}
+
 /* ───────── Атлас ───────── */
 
 function buildSprites() {
@@ -2647,6 +2883,10 @@ writeFileSync(join(OUT_PUBLIC, 'home.png'), encodePng(home))
 writeFileSync(join(OUT_PUBLIC, 'sprites.png'), encodePng(atlas))
 writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid() }) + '\n')
 console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів)`)
+const dog = dogSheet()
+writeFileSync(join(OUT_PUBLIC, 'dog.png'), encodePng(dog.sheet))
+writeFileSync(join(ROOT, 'src/game/walk/dog.json'), JSON.stringify(dog.meta, null, 2) + '\n')
+console.log(`dog ${dog.sheet.w}×${dog.sheet.h} (${Object.keys(dog.meta.anims).length} анімацій)`)
 
 const pi = process.argv.indexOf('--preview')
 if (pi > 0) {

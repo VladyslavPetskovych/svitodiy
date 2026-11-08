@@ -1,0 +1,23 @@
+{
+  "asset": "public/game/buildings/home_stove.png",
+  "replaces": "frame home_stove (scripts/gen-island-art.mjs, homeStove())",
+  "size": "54x64, anchor bottom-center",
+  "generator": {
+    "tool": "stable-diffusion.cpp master-1056-9234ad8 (Vulkan, AMD RX 7600S), run locally",
+    "model": "stabilityai/stable-diffusion-xl-base-1.0 (gpustack GGUF Q4_0), license CreativeML Open RAIL++-M",
+    "lora": "nerijs/pixel-art-xl, weight 1.0",
+    "vae": "madebyollin/sdxl-vae-fp16-fix",
+    "mode": "img2img from the code-drawn stove scaled x8 on white 1024x1024",
+    "strength": 0.72,
+    "steps": 30,
+    "cfg_scale": 6.5,
+    "sampler": "euler_a",
+    "seed": 41,
+    "batch_index": 1,
+    "prompt": "<lora:pixel-art-xl:1> detailed pixel art, game sprite of a traditional Ukrainian clay oven covered in smooth bright white lime plaster, soft warm shading, rounded corners, white plaster chimney, colorful Petrykivka folk ornament painted on the white front: red and blue flowers, yellow berries, curling green leaves, blue painted stripe along the top edge, fire burning inside the arched firebox with bright orange flames and glowing embers, cozy village cottage interior prop, three-quarter top-down view, crisp dark outline, light from top left, single centered object, plain white background",
+    "negative": "stone, stone blocks, brick, bricks, grey rock, cobblestone, fireplace mantel, pot, vase, plant, blurry, photo, realistic, 3d render, text, watermark, signature, multiple objects, frame, border, cropped, gradient background, noisy, people"
+  },
+  "cleanup": "python scripts/pixelize.py home_stove.raw.png <out> --size 54x64 --grid --outline --shadow (AI grid detected at 8.00 px)",
+  "hand_edits": "home_stove.fix.py: removed knobs/legs/specks, rebuilt plastered ledge and stone plinth, painted Petrykivka branch in game palette, re-outlined",
+  "status": "style anchor, awaiting approval (2026-11-08)"
+}

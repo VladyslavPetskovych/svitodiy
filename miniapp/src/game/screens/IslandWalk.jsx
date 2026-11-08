@@ -6,15 +6,24 @@ import { haptic, useBackButton } from '../tg.js'
 import { ItemIcon, PxButton, ScreenTitle, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
 import { DECO_GEOM, snapDeco } from '../walk/decor.js'
+import { DOG_NAME } from '../walk/companion.js'
 import { homeInteract } from '../walk/home.js'
 import { INTERACT } from '../walk/layout.js'
 import { BuildingSheet, DailySheet } from './Home.jsx'
 
 const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', dog: '🐶' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', dog: 'Погладити' }
+/** Пес-компаньйон — не будівля, тож своя «точка» для панелі дії. */
+const DOG_SPOT = { id: 'dog', label: `Песик ${DOG_NAME}` }
+const DOG_PETS = [
+  `🐶 ${DOG_NAME} радісно махає хвостом!`,
+  `🐶 ${DOG_NAME} підставляє вушко — ще, ще!`,
+  `🐶 Гав! ${DOG_NAME} задоволений.`,
+  `🐶 ${DOG_NAME} лизнув тобі руку.`,
+]
 const CATS = [
   { value: 'plants', label: '🌿 Рослини' },
   { value: 'stone', label: '🪨 Камінь' },
@@ -62,7 +71,11 @@ export default function IslandWalk() {
   }
   const interact = (id) => {
     haptic('light')
-    if (id === 'house') goScene('home')
+    if (id === 'dog') {
+      engine.current?.petDog()
+      haptic('success')
+      toast(DOG_PETS[Math.floor(Math.random() * DOG_PETS.length)])
+    } else if (id === 'house') goScene('home')
     else if (id === 'exit') goScene('island')
     else if (BUILDINGS.has(id)) setSheet(id)
     else if (id === 'chest') setDaily(true)
@@ -217,7 +230,7 @@ export default function IslandWalk() {
   }, [ready, bubbleKey, build])
 
   const indoors = scene === 'home'
-  const spot = (indoors ? homeInteract(Math.max(1, home.levels.house)) : INTERACT).find((i) => i.id === near)
+  const spot = near === 'dog' ? DOG_SPOT : (indoors ? homeInteract(Math.max(1, home.levels.house)) : INTERACT).find((i) => i.id === near)
   const building = catalog.buildings.find((b) => b.id === sheet)
 
   return (
@@ -504,6 +517,7 @@ function spotIcon(catalog, id) {
 }
 
 function spotHint(catalog, levels, chestOpen, id) {
+  if (id === 'dog') return 'Вірний пес — ходить за тобою слідом'
   if (id === 'exit') return 'Повернутися на острів'
   if (id === 'bed') return 'Перина й вишита ковдра'
   if (id === 'stove') return 'Готують рибу — у рюкзаку'

@@ -39,15 +39,18 @@ export function teleport(body, x, y) {
   body.vx = body.vy = 0
 }
 
-/** Наблизити швидкість до бажаної (wx, wy) з обмеженим прискоренням. */
-export function accelerate(body, wx, wy, dt) {
+/**
+ * Наблизити швидкість до бажаної (wx, wy) з обмеженим прискоренням.
+ * tune — свої розгін/гальмування для іншого тіла (пес), за замовчуванням — мандрівника.
+ */
+export function accelerate(body, wx, wy, dt, tune = PHYS) {
   const dvx = wx - body.vx
   const dvy = wy - body.vy
   const d = Math.hypot(dvx, dvy)
   if (d < 1e-6) return
   const want = Math.hypot(wx, wy)
-  let rate = want < 1e-3 ? PHYS.decel : PHYS.accel
-  if (want > 0 && body.vx * wx + body.vy * wy < 0) rate *= PHYS.reverseBoost
+  let rate = want < 1e-3 ? tune.decel : tune.accel
+  if (want > 0 && body.vx * wx + body.vy * wy < 0) rate *= tune.reverseBoost
   const k = Math.min(1, (rate * dt) / d)
   body.vx += dvx * k
   body.vy += dvy * k
@@ -94,7 +97,7 @@ function assist(body, dx, dy, canStand) {
  * (плавне гальмування). Пройдені точки знімає з path.
  * @returns {{ wx: number, wy: number, done: boolean }}
  */
-export function followPath(body, path) {
+export function followPath(body, path, maxSpeed = PHYS.maxSpeed) {
   while (path.length) {
     const wp = path[0]
     const dx = wp.x - body.x
@@ -112,7 +115,7 @@ export function followPath(body, path) {
       path.shift()
       return { wx: 0, wy: 0, done: true }
     }
-    const speed = last ? Math.max(10, PHYS.maxSpeed * Math.min(1, d / PHYS.arrive)) : PHYS.maxSpeed
+    const speed = last ? Math.max(Math.min(10, maxSpeed), maxSpeed * Math.min(1, d / PHYS.arrive)) : maxSpeed
     return { wx: (dx / d) * speed, wy: (dy / d) * speed, done: false }
   }
   return { wx: 0, wy: 0, done: true }

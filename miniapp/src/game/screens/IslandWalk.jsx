@@ -6,7 +6,6 @@ import { haptic, useBackButton } from '../tg.js'
 import { ItemIcon, PxButton, ScreenTitle, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
 import { DECO_GEOM, snapDeco } from '../walk/decor.js'
-import { createWalk, loadAssets } from '../walk/engine.js'
 import { homeInteract } from '../walk/home.js'
 import { INTERACT } from '../walk/layout.js'
 import { BuildingSheet, DailySheet } from './Home.jsx'
@@ -172,8 +171,9 @@ export default function IslandWalk() {
   useEffect(() => {
     let alive = true
     let walk = null
-    loadAssets().then(
-      (assets) => {
+    // three.js вантажимо лише тут: решта гри не платить за 3D-рушій.
+    import('../walk/engine.js').then(({ createWalk, loadAssets }) => loadAssets().then((assets) => ({ createWalk, assets }))).then(
+      ({ createWalk, assets }) => {
         if (!alive || !canvas.current) return
         walk = createWalk(canvas.current, assets, {
           onNear: (id) => {
@@ -226,10 +226,10 @@ export default function IslandWalk() {
         title={build ? '🔨 Будуємо острів' : indoors ? '🏠 Хатинка' : `🏝️ ${home.shared ? 'Спільний острів' : `Острів ${name}`}`}
         subtitle={
           build
-            ? 'Тягни пальцем, щоб роззирнутися. Обери предмет і торкнись місця.'
+            ? 'Тягни пальцем, щоб роззирнутися. Обери предмет, торкнись місця — і перетягни привид, куди треба.'
             : indoors
               ? 'Тепло біля печі. Двері внизу ведуть надвір.'
-              : 'Торкнись землі — підеш туди. Тапни хатинку, щоб зайти всередину.'
+              : 'Торкнись землі — підеш туди. Двома пальцями — поворот і наближення.'
         }
       />
 
@@ -239,6 +239,7 @@ export default function IslandWalk() {
         }`}
       >
         <canvas ref={canvas} className="block aspect-[5/6] w-full touch-none" />
+        {ready && <CameraControls engine={engine} />}
         {!ready && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f2a3d]/60 text-center">
             <motion.span
@@ -310,7 +311,9 @@ export default function IslandWalk() {
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.15 }}
                 >
-                  {indoors ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.' : 'Тапни будівлю — мандрівник сам до неї дійде. На ПК — стрілки/WASD і E.'}
+                  {indoors
+                    ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.'
+                    : 'Тапни будівлю — мандрівник сам до неї дійде. На ПК — WASD, E — дія, Q/R — поворот, коліщатко — зум.'}
                 </motion.p>
               )}
             </AnimatePresence>
@@ -329,6 +332,33 @@ export default function IslandWalk() {
 
       <BuildingSheet building={building} onClose={() => setSheet(null)} />
       <DailySheet open={daily} onClose={() => setDaily(false)} />
+    </div>
+  )
+}
+
+/* ───────── Камера: поворот і зум для тих, хто не користується двома пальцями ───────── */
+
+function CameraControls({ engine }) {
+  const btn = (label, title, fn) => (
+    <button
+      type="button"
+      aria-label={title}
+      title={title}
+      onClick={() => {
+        haptic('light')
+        fn(engine.current)
+      }}
+      className="flex h-8 w-8 items-center justify-center rounded-sm bg-black/35 font-pixel text-[13px] text-cream drop-shadow active:bg-black/55"
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div className="absolute top-2 right-2 flex gap-1">
+      {btn('⟲', 'Повернути ліворуч', (e) => e?.rotate(-1))}
+      {btn('⟳', 'Повернути праворуч', (e) => e?.rotate(1))}
+      {btn('+', 'Наблизити', (e) => e?.zoom(0.8))}
+      {btn('−', 'Віддалити', (e) => e?.zoom(1.25))}
     </div>
   )
 }

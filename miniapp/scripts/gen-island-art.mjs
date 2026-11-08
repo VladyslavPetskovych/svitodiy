@@ -5,6 +5,7 @@
  * Пише public/game/walk/{ground,foam,water,home,sprites}.png і src/game/walk/atlas.json.
  * Усе детерміноване (фіксований seed) — повторний запуск дає ті самі файли.
  */
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -3109,7 +3110,7 @@ function pack(sprites) {
       y += shelf + 1
       shelf = 0
     }
-    frames[name] = img.k ? { x, y, w: img.w, h: img.h, k: img.k } : { x, y, w: img.w, h: img.h }
+    frames[name] = { x, y, w: img.w, h: img.h }
     x += img.w + 1
     shelf = Math.max(shelf, img.h)
   }
@@ -3167,7 +3168,7 @@ const t = terrain()
 const ground = groundImage(t)
 const foam = shoreImage(t)
 const water = waterImage()
-const farm = farmArt({ Img, hash, bayer, clamp01 })
+const farm = farmArt({ Img })
 const sprites = buildSprites(farm)
 const { atlas, frames } = pack(sprites)
 
@@ -3192,6 +3193,19 @@ for (const [name, anims, cell, scale] of [
   writeFileSync(join(OUT_PUBLIC, `${name}.png`), encodePng(d.sheet))
   writeFileSync(join(ROOT, `src/game/walk/${name}.json`), JSON.stringify(d.meta, null, 2) + '\n')
   console.log(`${name} ${d.sheet.w}×${d.sheet.h} (${Object.keys(d.meta.anims).length} анімацій, ×${scale})`)
+}
+
+// Версія арту: Netlify дозволяє кешувати /game/* тиждень, а координати кадрів їдуть у JS-бандлі.
+// Без ?v=<хеш> телефон зі старим sprites.png вирізав би спрайти з чужих місць. Хеш міняється
+// лише разом із самими картинками, тож довгий кеш і далі працює.
+{
+  const h = createHash('sha1')
+  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'dog', 'sirko'].map((n) => join(OUT_PUBLIC, `${n}.png`))
+  for (const id of Object.keys(farm.items).sort()) pngs.push(join(OUT_ITEMS, `${id}.png`))
+  for (const f of pngs) h.update(readFileSync(f))
+  const v = h.digest('hex').slice(0, 10)
+  writeFileSync(join(ROOT, 'src/game/walk/version.json'), JSON.stringify({ v }) + '\n')
+  console.log(`версія арту ${v}`)
 }
 
 const pi = process.argv.indexOf('--preview')
@@ -3248,8 +3262,8 @@ if (pi > 0) {
   // Город: усі стадії культур і грядки, ×4.
   {
     const names = Object.keys(farm.sprites)
-    const cellW = 42
-    const cellH = 80
+    const cellW = 22
+    const cellH = 38
     const perRow = 8
     const sheet = new Img(perRow * cellW, Math.ceil(names.length / perRow) * cellH)
     sheet.rect(0, 0, sheet.w, sheet.h, '#5aa13c')
@@ -3258,10 +3272,10 @@ if (pi > 0) {
       sheet.blit(sp, (i % perRow) * cellW + Math.floor((cellW - sp.w) / 2), Math.floor(i / perRow) * cellH + cellH - sp.h - 2)
     })
     const items = Object.values(farm.items)
-    const strip = new Img(items.length * 34, 34)
+    const strip = new Img(items.length * 24, 24)
     strip.rect(0, 0, strip.w, strip.h, '#e8dcc0')
-    items.forEach((it, i) => strip.blit(it, i * 34 + 1, 1))
-    for (const [file, img, z] of [['farm-x4.png', sheet, 4], ['farm-items-x4.png', strip, 4]]) {
+    items.forEach((it, i) => strip.blit(it, i * 24 + 1, 1))
+    for (const [file, img, z] of [['farm-x4.png', sheet, 6], ['farm-items-x4.png', strip, 6]]) {
       const big = new Img(img.w * z, img.h * z)
       for (let y = 0; y < big.h; y++)
         for (let x = 0; x < big.w; x++) {

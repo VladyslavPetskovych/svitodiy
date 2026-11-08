@@ -6,6 +6,7 @@ import { fieldView, ownedSeeds, plotSpot, plotView } from '../farm.js'
 import { haptic, useBackButton } from '../tg.js'
 import { ItemIcon, PxButton, ScreenTitle, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
+import artVersion from '../walk/version.json'
 import { DECO_GEOM, snapDeco } from '../walk/decor.js'
 import { DOGS, dogById } from '../walk/companion.js'
 import { homeInteract } from '../walk/home.js'
@@ -667,7 +668,7 @@ function DecoIcon({ kind, box }) {
       style={{
         width: f.w * s,
         height: f.h * s,
-        backgroundImage: 'url(/game/walk/sprites.png)',
+        backgroundImage: `url(/game/walk/sprites.png?v=${artVersion.v})`,
         backgroundSize: `${atlas.size.w * s}px ${atlas.size.h * s}px`,
         backgroundPosition: `-${f.x * s}px -${f.y * s}px`,
       }}

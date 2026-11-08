@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import atlas from './atlas.json'
+import artVersion from './version.json'
 import { createCameraRig } from './camera.js'
 import { DECO_GEOM, decoFootprint, snapDeco } from './decor.js'
 import { DOGS, PET_RANGE } from './companion.js'
@@ -36,7 +37,7 @@ export function loadAssets() {
   const loader = new THREE.TextureLoader()
   return Promise.all(
     ASSETS.map((name) =>
-      loader.loadAsync(`/game/walk/${name}.png`).then(
+      loader.loadAsync(`/game/walk/${name}.png?v=${artVersion.v}`).then(
         (tex) => [name, tex],
         () => {
           throw new Error(`Не вдалося завантажити ${name}.png`)
@@ -171,10 +172,8 @@ export function createWalk(canvas, assets, cb) {
     if (g) return g
     const f = frames[name]
     if (!f) return null
-    // k — дрібний піксель (город, лежанка): кадр удвічі більший за свій розмір у світі.
-    const k = f.k ?? 1
-    g = new THREE.PlaneGeometry(f.w * k, f.h * k)
-    g.translate(0, (f.h * k) / 2, 0)
+    g = new THREE.PlaneGeometry(f.w, f.h)
+    g.translate(0, f.h / 2, 0)
     const u0 = f.x / AW
     const u1 = (f.x + f.w) / AW
     const v1 = 1 - f.y / AH
@@ -719,9 +718,8 @@ export function createWalk(canvas, assets, cb) {
     if (best) {
       const it = best.object.userData.item
       const f = frames[it.p.s]
-      const k = f.k ?? 1
       out.item = it
-      out.art = { x: it.p.x - (f.w * k) / 2 + (best.uv.x * AW - f.x) * k, y: it.p.y - f.h * k + ((1 - best.uv.y) * AH - f.y) * k }
+      out.art = { x: it.p.x - f.w / 2 + (best.uv.x * AW - f.x), y: it.p.y - f.h + ((1 - best.uv.y) * AH - f.y) }
       if (it.p.plot != null) out.plot = it.p.plot
     } else if (out.ground) {
       if (scene.outdoor) {

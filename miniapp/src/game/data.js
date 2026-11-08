@@ -1,5 +1,7 @@
 /** Допоміжні функції над каталогом із сервера (/api/catalog). */
 
+import artVersion from './walk/version.json'
+
 export const RARITY = {
   common: { label: 'Звичайна', color: '#8d7b58' },
   rare: { label: 'Рідкісна', color: '#4aa3ff' },
@@ -63,8 +65,8 @@ export function buildItemIndex(catalog) {
   for (const c of catalog.farm?.crops ?? []) {
     const crop = `crop_${c.id}`
     const seed = `seed_${c.id}`
-    index.set(crop, { id: crop, cropId: c.id, kind: 'crop', emoji: c.emoji, name: c.name, sellPrice: c.sellPrice, dogFood: !!c.dogFood, image: `/game/items/${crop}.png` })
-    index.set(seed, { id: seed, cropId: c.id, kind: 'seed', emoji: '🌱', name: `Насіння: ${c.name}`, image: `/game/items/${seed}.png` })
+    index.set(crop, { id: crop, cropId: c.id, kind: 'crop', emoji: c.emoji, name: c.name, sellPrice: c.sellPrice, dogFood: !!c.dogFood, image: `/game/items/${crop}.png?v=${artVersion.v}` })
+    index.set(seed, { id: seed, cropId: c.id, kind: 'seed', emoji: '🌱', name: `Насіння: ${c.name}`, image: `/game/items/${seed}.png?v=${artVersion.v}` })
   }
   return index
 }

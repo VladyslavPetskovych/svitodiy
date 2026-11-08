@@ -2725,14 +2725,308 @@ function dogAnims() {
   ]
 }
 
-/** Аркуш dog.png (рядки — анімації) і опис dog.json для рушія. */
-function dogSheet() {
-  const anims = dogAnims()
+/* ───────── Пес Сірко: дрібніший піксель (48×40), справжнє світло й шерсть ───────── */
+
+/**
+ * Сірий пухнастий вівчар із білою проточиною, грудьми й «шкарпетками» та вишитим нашийником.
+ * Намальований удвічі дрібнішим пікселем за решту світу й показується в масштабі SIRKO_SCALE:
+ * у грі він трохи більший за Рудька, а деталі (шерсть, блиск очей, стібки) видно при наближенні.
+ * Об'єми — затінені «кульки»: світло зверху-зліва, 5–6 тонів, впорядкований дизер, нерівний пухнастий край.
+ */
+const SIRKO = {
+  fur: ['#2b2d33', '#3f4249', '#575b63', '#737780', '#91959d', '#b4b8be'],
+  farFur: ['#24262b', '#33363c', '#454850', '#5a5e66'],
+  saddle: ['#33363c', '#43464d', '#53565e', '#666a72'],
+  white: ['#8f949b', '#b5b9bf', '#d5d8dc', '#eceeee', '#fbfaf6'],
+  farWhite: ['#7d8289', '#9da2a8', '#bcc0c5'],
+  ear: ['#1f2024', '#2e3035', '#41444b'],
+  earIn: ['#9c5a62', '#c9848b'],
+  nose: ['#121115', '#26242a', '#6a6872'],
+  eye: '#1a1418',
+  collar: ['#6e1a16', '#a82c25', '#d24538'],
+  stitch: '#f3eee2',
+  brass: ['#7a5a18', '#c2922a', '#ffd860'],
+  tongue: ['#b8444f', '#e77a83'],
+  mouth: '#3a3036',
+}
+const SIRKO_CELL = { w: 48, h: 40 }
+const SIRKO_SCALE = 0.55
+const SIRKO_LIGHT = [-0.55, -0.83]
+
+/**
+ * Затінена пухнаста «кулька»: тон — від нормалі псевдосфери до світла, дизер Баєра між тонами,
+ * штрихи шерсті (вертикальні рисочки на тон темніші), край тремтить шумом (fluff, px).
+ * clip — малювати лише там, де вже є непрозоре (плями на тулубі не вилазять за контур).
+ */
+function shadedBlob(img, cx, cy, rx, ry, ramp, { seed = 1, fluff = 0, clip = false, strands = true, bias = 0 } = {}) {
+  const n = ramp.length
+  const pad = Math.ceil(fluff) + 1
+  for (let y = Math.floor(cy - ry - pad); y <= Math.ceil(cy + ry + pad); y++)
+    for (let x = Math.floor(cx - rx - pad); x <= Math.ceil(cx + rx + pad); x++) {
+      if (clip && !img.alpha(x, y)) continue
+      const dx = (x + 0.5 - cx) / rx
+      const dy = (y + 0.5 - cy) / ry
+      const r = Math.hypot(dx, dy)
+      const edge = 1 + (fluff ? ((vnoise(Math.atan2(dy, dx) * 2.2 + 10, seed, seed) - 0.5) * 2 * fluff) / Math.max(rx, ry) : 0)
+      if (r > edge) continue
+      const nz = Math.sqrt(Math.max(0, 1 - Math.min(1, r) ** 2))
+      const lum = (dx * SIRKO_LIGHT[0] + dy * SIRKO_LIGHT[1]) * 0.5 + nz * 0.55 + bias
+      let i = Math.floor(clamp01(lum) * (n - 1) + bayer(x, y) - 0.25)
+      if (strands && hash(x, Math.floor(y / 3), seed) < 0.14) i -= 1 // пасма шерсті
+      img.set(x, y, ramp[Math.max(0, Math.min(n - 1, i))])
+    }
+}
+
+/** Лапа: звужена донизу, освітлена зліва, нижня частина — біла «шкарпетка», внизу — пальці. */
+function shadedLeg(img, x, top, bottom, dx, w, ramp, sock) {
+  const len = bottom - top
+  for (let y = top; y <= bottom; y++) {
+    const t = (y - top) / Math.max(1, len)
+    const off = Math.round(dx * t)
+    const width = Math.max(2, Math.round(w - t * 1.2))
+    const isSock = t > 0.62
+    const pal = isSock ? sock : ramp
+    for (let i = 0; i < width; i++) {
+      const k = pal.length - 1 - Math.floor((i / width) * pal.length * 0.9) - (y % 2 && i === width - 1 ? 1 : 0)
+      img.set(x + off + i, y, pal[Math.max(0, Math.min(pal.length - 1, k))])
+    }
+  }
+  // Пальці на лапі.
+  const bx = x + Math.round(dx)
+  img.set(bx + 1, bottom, sock[0])
+  if (w > 3) img.set(bx + 2, bottom, sock[0])
+}
+
+/** Пухнастий хвіст-султан: ланцюжок затінених кульок, що тоншають до білого кінчика. */
+function plume(img, pts, seed, whiteFrom = 0.72) {
+  pts.forEach(([x, y], i) => {
+    const k = i / (pts.length - 1)
+    const r = 3.4 - k * 1.5
+    shadedBlob(img, x, y, r, r, k >= whiteFrom ? SIRKO.white : SIRKO.fur, { seed: seed + i, fluff: 0.8 })
+  })
+}
+
+/** Трикутник (вухо) з затіненням зліва-направо. */
+function tri(img, [ax, ay], [bx, by], [cx, cy], ramp) {
+  const x0 = Math.floor(Math.min(ax, bx, cx))
+  const x1 = Math.ceil(Math.max(ax, bx, cx))
+  const y0 = Math.floor(Math.min(ay, by, cy))
+  const y1 = Math.ceil(Math.max(ay, by, cy))
+  const side = (px, py, qx, qy, rx, ry) => (px - rx) * (qy - ry) - (qx - rx) * (py - ry)
+  for (let y = y0; y <= y1; y++)
+    for (let x = x0; x <= x1; x++) {
+      const px = x + 0.5
+      const py = y + 0.5
+      const d1 = side(px, py, ax, ay, bx, by)
+      const d2 = side(px, py, bx, by, cx, cy)
+      const d3 = side(px, py, cx, cy, ax, ay)
+      if ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0)) continue
+      const t = (x - x0) / Math.max(1, x1 - x0)
+      img.set(x, y, ramp[Math.min(ramp.length - 1, Math.floor((1 - t) * ramp.length * 0.99 + bayer(x, y) * 0.6))])
+    }
+}
+
+/** Вишитий нашийник: червона стрічка зі стібками-хрестиками й латунна бірка. */
+function collarBand(img, pts, tag) {
+  pts.forEach(([x, y], i) => {
+    img.set(x, y, SIRKO.collar[1 + (y % 2)] ?? SIRKO.collar[1])
+    if (i % 3 === 1) img.set(x, y, SIRKO.stitch)
+  })
+  if (tag) {
+    const [tx, ty] = tag
+    img.set(tx, ty, SIRKO.brass[2])
+    img.set(tx + 1, ty, SIRKO.brass[1])
+    img.set(tx, ty + 1, SIRKO.brass[1])
+    img.set(tx + 1, ty + 1, SIRKO.brass[0])
+  }
+}
+
+/** Профіль праворуч (параметри пози — як у Рудька, але в пікселях Сірка). */
+function sirkoSide({ legs = [0, 0, 0, 0], lift = [0, 0, 0, 0], bob = 0, tail = 0, tongue = false } = {}) {
+  const img = new Img(SIRKO_CELL.w, SIRKO_CELL.h)
+  const b = bob
+  shadow(img, 24, 37.5, 17, 2.2)
+  shadedLeg(img, 11, 27 + b, 36 - lift[1], legs[1], 4, SIRKO.farFur, SIRKO.farWhite)
+  shadedLeg(img, 29, 27 + b, 36 - lift[3], legs[3], 4, SIRKO.farFur, SIRKO.farWhite)
+  const TAIL = {
+    [-1]: [[9, 22], [6, 19], [4, 15], [4, 11], [6, 8]],
+    0: [[9, 22], [6, 18], [6, 14], [8, 10], [11, 9]],
+    1: [[9, 22], [8, 18], [9, 14], [12, 11], [15, 10]],
+  }
+  plume(img, TAIL[tail].map(([x, y]) => [x, y + b]), 70)
+  shadedBlob(img, 22, 24 + b, 13, 7.5, SIRKO.fur, { seed: 3, fluff: 1.4 })
+  shadedBlob(img, 18, 20 + b, 9, 4, SIRKO.saddle, { seed: 5, fluff: 1, clip: true, bias: 0.15 })
+  shadedBlob(img, 23, 29.5 + b, 9, 2.6, SIRKO.white, { seed: 6, clip: true, bias: 0.15 })
+  shadedBlob(img, 31.5, 25 + b, 4.6, 6.4, SIRKO.white, { seed: 7, fluff: 1, bias: 0.1 })
+  shadedLeg(img, 14, 27 + b, 36 - lift[0], legs[0], 4, SIRKO.fur, SIRKO.white)
+  shadedLeg(img, 31, 27 + b, 36 - lift[2], legs[2], 4, SIRKO.fur, SIRKO.white)
+  // Голова.
+  tri(img, [30, 11 + b], [35, 9 + b], [31, 2 + b], SIRKO.ear)
+  tri(img, [31.5, 9.5 + b], [33.5, 9 + b], [31.8, 5 + b], SIRKO.earIn)
+  shadedBlob(img, 37, 15 + b, 7.5, 6.8, SIRKO.fur, { seed: 9, fluff: 0.9 })
+  shadedBlob(img, 40, 13 + b, 1.6, 4, SIRKO.white, { seed: 10, clip: true, strands: false, bias: 0.2 })
+  shadedBlob(img, 42.5, 18 + b, 4.3, 3.2, SIRKO.white, { seed: 11, strands: false, bias: 0.1 })
+  img.rect(45, 15 + b, 3, 2, SIRKO.nose[0])
+  img.set(45, 15 + b, SIRKO.nose[2])
+  img.set(46, 15 + b, SIRKO.nose[1])
+  img.hline(41, 45, 20 + b, SIRKO.mouth)
+  if (tongue) {
+    img.rect(43, 21 + b, 2, 2, SIRKO.tongue[1])
+    img.set(44, 22 + b, SIRKO.tongue[0])
+  }
+  img.hline(36, 38, 10 + b, SIRKO.fur[5]) // світла брова
+  img.rect(37, 12 + b, 2, 2, SIRKO.eye)
+  img.set(37, 12 + b, '#ffffff')
+  collarBand(img, [[29, 17 + b], [29, 18 + b], [29, 19 + b], [30, 20 + b], [30, 21 + b], [30, 22 + b], [31, 23 + b], [30, 17 + b], [30, 18 + b], [30, 19 + b], [31, 20 + b], [31, 21 + b], [31, 22 + b]], [31, 24 + b])
+  return img.outline(C.K)
+}
+
+/** Голова анфас (центр між пікселями 23 і 24). */
+function sirkoHead(img, cy, tongue) {
+  tri(img, [16, cy - 4], [21, cy - 6], [15, cy - 13], SIRKO.ear)
+  tri(img, [32, cy - 4], [27, cy - 6], [33, cy - 13], SIRKO.ear)
+  tri(img, [17, cy - 5], [20, cy - 6], [16.5, cy - 10], SIRKO.earIn)
+  tri(img, [31, cy - 5], [28, cy - 6], [31.5, cy - 10], SIRKO.earIn)
+  shadedBlob(img, 24, cy, 8, 7.4, SIRKO.fur, { seed: 21, fluff: 1 })
+  shadedBlob(img, 24, cy - 3, 1.8, 4.5, SIRKO.white, { seed: 22, clip: true, strands: false, bias: 0.2 })
+  shadedBlob(img, 24, cy + 4.5, 4.6, 3.4, SIRKO.white, { seed: 23, strands: false, bias: 0.1 })
+  for (const ex of [19, 27]) {
+    img.rect(ex, cy - 1, 2, 2, SIRKO.eye)
+    img.set(ex, cy - 1, '#ffffff')
+    img.hline(ex - 1, ex + 2, cy - 3, SIRKO.fur[5])
+  }
+  img.rect(22, cy + 2, 4, 2, SIRKO.nose[0])
+  img.set(22, cy + 2, SIRKO.nose[2])
+  img.set(23, cy + 2, SIRKO.nose[1])
+  img.hline(23, 24, cy + 5, SIRKO.mouth)
+  if (tongue) {
+    img.rect(23, cy + 6, 2, 2, SIRKO.tongue[1])
+    img.set(24, cy + 7, SIRKO.tongue[0])
+  }
+}
+
+function sirkoFront({ lift = [0, 0], bob = 0, tail = 0, tongue = false } = {}) {
+  const img = new Img(SIRKO_CELL.w, SIRKO_CELL.h)
+  const b = bob
+  shadow(img, 24, 37.5, 12, 2)
+  shadedLeg(img, 13, 30 + b, 36, 0, 4, SIRKO.farFur, SIRKO.farWhite)
+  shadedLeg(img, 31, 30 + b, 36, 0, 4, SIRKO.farFur, SIRKO.farWhite)
+  if (tail) plume(img, tail > 0 ? [[32, 27 + b], [35, 24 + b], [37, 21 + b], [38, 18 + b]] : [[16, 27 + b], [13, 24 + b], [11, 21 + b], [10, 18 + b]], 80)
+  shadedBlob(img, 24, 27 + b, 9.5, 7, SIRKO.fur, { seed: 31, fluff: 1.4 })
+  shadedBlob(img, 24, 27.5 + b, 5, 6.5, SIRKO.white, { seed: 32, fluff: 1, bias: 0.12 })
+  shadedLeg(img, 18, 28 + b, 36 - lift[0], 0, 4, SIRKO.fur, SIRKO.white)
+  shadedLeg(img, 26, 28 + b, 36 - lift[1], 0, 4, SIRKO.fur, SIRKO.white)
+  sirkoHead(img, 15 + b, tongue)
+  const band = []
+  for (let x = 17; x <= 30; x++) band.push([x, 22 + b + (x > 18 && x < 29 ? 1 : 0)])
+  collarBand(img, band, [23, 24 + b])
+  return img.outline(C.K)
+}
+
+function sirkoBack({ lift = [0, 0], bob = 0, tail = 0 } = {}) {
+  const img = new Img(SIRKO_CELL.w, SIRKO_CELL.h)
+  const b = bob
+  shadow(img, 24, 37.5, 12, 2)
+  shadedLeg(img, 18, 28 + b, 36 - lift[0], 0, 4, SIRKO.fur, SIRKO.white)
+  shadedLeg(img, 26, 28 + b, 36 - lift[1], 0, 4, SIRKO.fur, SIRKO.white)
+  shadedBlob(img, 24, 27 + b, 9.5, 7, SIRKO.fur, { seed: 41, fluff: 1.4 })
+  shadedBlob(img, 24, 24 + b, 6.5, 4.5, SIRKO.saddle, { seed: 42, clip: true, bias: 0.15 })
+  tri(img, [16, 11 + b], [21, 9 + b], [15, 2 + b], SIRKO.ear)
+  tri(img, [32, 11 + b], [27, 9 + b], [33, 2 + b], SIRKO.ear)
+  shadedBlob(img, 24, 15 + b, 8, 7.4, SIRKO.fur, { seed: 43, fluff: 1 })
+  const band = []
+  for (let x = 18; x <= 29; x++) band.push([x, 21 + b])
+  collarBand(img, band)
+  // Хвіст-бублик над крижами: біла спідня сторона видно на сірій спині.
+  plume(img, [[24 + tail, 33 + b], [24 + tail * 2, 29 + b], [25 + tail * 3, 26 + b], [27 + tail * 4, 23 + b], [29 + tail * 5, 21 + b]], 90, 0.3)
+  return img.outline(C.K)
+}
+
+function sirkoSit({ tail = 0, tongue = false } = {}) {
+  const img = new Img(SIRKO_CELL.w, SIRKO_CELL.h)
+  shadow(img, 24, 37.5, 14, 2)
+  plume(img, tail ? [[32, 35], [36, 34], [40, 32], [43, 30]] : [[32, 35], [36, 35], [40, 35], [44, 34]], 100)
+  shadedBlob(img, 24, 31.5, 10.5, 5.2, SIRKO.fur, { seed: 51, fluff: 1.4 }) // стегна
+  shadedBlob(img, 14.5, 35.5, 3, 1.5, SIRKO.white, { seed: 52, strands: false })
+  shadedBlob(img, 33.5, 35.5, 3, 1.5, SIRKO.white, { seed: 53, strands: false })
+  shadedBlob(img, 24, 24.5, 7, 7, SIRKO.fur, { seed: 54, fluff: 1.2 })
+  shadedBlob(img, 24, 25.5, 4.4, 6.2, SIRKO.white, { seed: 55, fluff: 1, bias: 0.12 })
+  shadedLeg(img, 19, 25, 36, 0, 4, SIRKO.fur, SIRKO.white)
+  shadedLeg(img, 25, 25, 36, 0, 4, SIRKO.fur, SIRKO.white)
+  sirkoHead(img, 12, tongue)
+  const band = []
+  for (let x = 17; x <= 30; x++) band.push([x, 19 + (x > 18 && x < 29 ? 1 : 0)])
+  collarBand(img, band, [23, 21])
+  return img.outline(C.K)
+}
+
+function sirkoSleep(breath) {
+  const img = new Img(SIRKO_CELL.w, SIRKO_CELL.h)
+  shadow(img, 24, 37.5, 19, 2.2)
+  shadedBlob(img, 20, 29.5 - breath * 0.6, 13.5, 6.8 + breath * 0.6, SIRKO.fur, { seed: 61, fluff: 1.5, bias: 0.08 })
+  for (let y = 25; y <= 34; y++) img.tint(29, y, '#1f2024', 0.45) // складка між тулубом і головою
+  plume(img, [[9, 35], [14, 36], [20, 36], [25, 36], [29, 35.5]], 110)
+  shadedBlob(img, 35, 34, 5, 2, SIRKO.white, { seed: 63, strands: false }) // лапи під мордою
+  tri(img, [30, 27], [34, 26], [30, 21], SIRKO.ear)
+  shadedBlob(img, 35, 29.5, 6.2, 5, SIRKO.fur, { seed: 64, fluff: 0.8 })
+  shadedBlob(img, 39.5, 31, 3.6, 2.6, SIRKO.white, { seed: 65, strands: false, bias: 0.1 })
+  img.rect(42, 30, 2, 2, SIRKO.nose[0])
+  img.set(42, 30, SIRKO.nose[2])
+  img.hline(35, 37, 28, SIRKO.eye) // заплющене око
+  return img.outline(C.K)
+}
+
+/** Ті самі 11 анімацій, що й у Рудька, — рушій вибирає їх за тими ж назвами. */
+function sirkoAnims() {
+  const walkSide = [
+    { legs: [2, -2, -2, 2], tail: 0 },
+    { lift: [0, 2, 2, 0], bob: -1, tail: 1 },
+    { legs: [-2, 2, 2, -2], tail: 0 },
+    { lift: [2, 0, 0, 2], bob: -1, tail: -1 },
+  ]
+  const walkFB = [{}, { lift: [2, 0], bob: -1 }, {}, { lift: [0, 2], bob: -1 }]
+  const flip = (img) => {
+    const out = new Img(img.w, img.h)
+    out.blit(img, 0, 0, true)
+    return out
+  }
+  const rightIdle = [{ tail: 0 }, { tail: 1 }, { tail: 0 }, { tail: -1 }].map(sirkoSide)
+  const rightWalk = walkSide.map(sirkoSide)
+  const wag = (i) => (i % 2 ? (i === 1 ? 1 : -1) : 0)
+  return [
+    ['idle_down', 4, [0, 1, 0, -1].map((tail) => sirkoFront({ tail }))],
+    ['idle_up', 4, [0, 1, 0, -1].map((tail) => sirkoBack({ tail }))],
+    ['idle_right', 4, rightIdle],
+    ['idle_left', 4, rightIdle.map(flip)],
+    ['walk_down', 8, walkFB.map((p, i) => sirkoFront({ ...p, tail: wag(i) }))],
+    ['walk_up', 8, walkFB.map((p, i) => sirkoBack({ ...p, tail: wag(i) }))],
+    ['walk_right', 8, rightWalk],
+    ['walk_left', 8, rightWalk.map(flip)],
+    ['sit', 4, [{ tail: 0 }, { tail: 1, tongue: true }, { tail: 0, tongue: true }, { tail: 1 }].map(sirkoSit)],
+    ['sleep', 1.2, [sirkoSleep(0), sirkoSleep(1)]],
+    [
+      'happy',
+      9,
+      [
+        { bob: 2, tongue: true },
+        { bob: -6, lift: [4, 4], tail: 1, tongue: true },
+        { bob: -4, lift: [2, 2], tail: -1, tongue: true },
+        { bob: 0, tail: 1, tongue: true },
+      ].map(sirkoFront),
+    ],
+  ]
+}
+
+/**
+ * Аркуш анімацій (рядки — анімації, стовпчики — кадри) і його опис для рушія.
+ * scale — у скільки разів менше показувати в світі (для псів, намальованих дрібнішим пікселем).
+ */
+function dogSheet(anims, cell, image, scale = 1) {
   const cols = Math.max(...anims.map(([, , f]) => f.length))
-  const sheet = new Img(cols * DOG_CELL.w, anims.length * DOG_CELL.h)
-  const meta = { image: '/game/walk/dog.png', cell: DOG_CELL, size: { w: sheet.w, h: sheet.h }, anims: {} }
+  const sheet = new Img(cols * cell.w, anims.length * cell.h)
+  const meta = { image, cell, scale, size: { w: sheet.w, h: sheet.h }, anims: {} }
   anims.forEach(([name, fps, frames], row) => {
-    frames.forEach((img, i) => sheet.blit(img, i * DOG_CELL.w, row * DOG_CELL.h))
+    frames.forEach((img, i) => sheet.blit(img, i * cell.w, row * cell.h))
     meta.anims[name] = { row, frames: frames.length, fps }
   })
   return { sheet, meta }
@@ -2883,10 +3177,15 @@ writeFileSync(join(OUT_PUBLIC, 'home.png'), encodePng(home))
 writeFileSync(join(OUT_PUBLIC, 'sprites.png'), encodePng(atlas))
 writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid() }) + '\n')
 console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів)`)
-const dog = dogSheet()
-writeFileSync(join(OUT_PUBLIC, 'dog.png'), encodePng(dog.sheet))
-writeFileSync(join(ROOT, 'src/game/walk/dog.json'), JSON.stringify(dog.meta, null, 2) + '\n')
-console.log(`dog ${dog.sheet.w}×${dog.sheet.h} (${Object.keys(dog.meta.anims).length} анімацій)`)
+for (const [name, anims, cell, scale] of [
+  ['dog', dogAnims(), DOG_CELL, 1],
+  ['sirko', sirkoAnims(), SIRKO_CELL, SIRKO_SCALE],
+]) {
+  const d = dogSheet(anims, cell, `/game/walk/${name}.png`, scale)
+  writeFileSync(join(OUT_PUBLIC, `${name}.png`), encodePng(d.sheet))
+  writeFileSync(join(ROOT, `src/game/walk/${name}.json`), JSON.stringify(d.meta, null, 2) + '\n')
+  console.log(`${name} ${d.sheet.w}×${d.sheet.h} (${Object.keys(d.meta.anims).length} анімацій, ×${scale})`)
+}
 
 const pi = process.argv.indexOf('--preview')
 if (pi > 0) {

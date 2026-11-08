@@ -1,9 +1,9 @@
 import * as THREE from 'three'
-import meta from './dog.json'
 import { accelerate, createBody, followPath, move, teleport } from './physics.js'
 
 /**
- * Пес Рудько — домашній улюбленець, що живе на острові й заходить із тобою в хату.
+ * Пес-компаньйон (Рудько, Сірко…) — живе на острові й заходить із тобою в хату.
+ * Вигляд — аркуш анімацій (meta), характер — trait із companion.js.
  *
  * Три шари, як у game-ai: рішення (скінченний автомат станів нижче) → шлях (той самий BFS,
  * що й у мандрівника) → рух (та сама кінематична фізика, лише свої швидкості).
@@ -19,15 +19,11 @@ import { accelerate, createBody, followPath, move, teleport } from './physics.js
  *   happy   — погладили або розбудили: підстрибує, сердечка.
  */
 
-export { DOG_NAME, PET_RANGE } from './companion.js'
+export { PET_RANGE } from './companion.js'
 
 const TUNE = { accel: 420, decel: 600, reverseBoost: 1.6 }
-const TROT = 74 // трохи швидше за мандрівника (64) — щоб наздоганяв
-const WALK = 30
-const FAR = 46 // далі — біжить слідом
-const NEAR = 20 // ближче — досить, стає поруч
-const SLEEPY = 22 // стільки секунд ти не рухаєшся — пес лягає спати
-const CELL = meta.cell
+/** Два пси не налазять один на одного: ближче за це — розштовхуються (px арту). */
+const PERSONAL_SPACE = 14
 
 const rand = (a, b) => a + Math.random() * (b - a)
 const UP = new THREE.Vector3() // без алокацій у кадрі
@@ -58,11 +54,16 @@ const ZED = ['KKKKK', 'KWWWK', 'KKWKK', 'KWKKK', 'KWWWK', 'KKKKK']
 const EMOTE_PAL = { K: '#2b1d16', R: '#e0483a', r: '#ffb0a0', W: '#f6f0e2' }
 
 /**
- * @param {{ texture: THREE.Texture, alpha: Uint8ClampedArray, scene: THREE.Scene,
+ * @param {{ meta: object, trait: object, texture: THREE.Texture, alpha: Uint8ClampedArray, scene: THREE.Scene,
  *   canStand: (x: number, y: number) => boolean, findPath: (from: object, to: object) => object[],
- *   player: () => { x: number, y: number, vx: number, vy: number } }} o
+ *   player: () => { x: number, y: number, vx: number, vy: number }, others: () => object[] }} o
  */
-export function createDog({ texture, alpha, scene, canStand, findPath, player }) {
+export function createDog({ meta, trait, texture, alpha, scene, canStand, findPath, player, others }) {
+  const { trot: TROT, walk: WALK, far: FAR, near: NEAR, sleepy: SLEEPY } = trait
+  const CELL = meta.cell
+  const SCALE = meta.scale ?? 1
+  /** Висота над землею для емоцій — трохи нижче за верх кадру, у px світу. */
+  const EMOTE_Y = CELL.h * SCALE - 3
   const body = createBody(0, 0)
   let state = 'idle'
   let timer = 1
@@ -98,6 +99,7 @@ export function createDog({ texture, alpha, scene, canStand, findPath, player })
   }
   const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, alphaTest: 0.5, depthWrite: false })
   const mesh = new THREE.Mesh(frameGeo(0, 0), mat)
+  mesh.scale.setScalar(SCALE) // дрібніший піксель (Сірко) — показуємо меншим
   scene.add(mesh)
 
   // Емоції: невеликий пул спрайтів, що злітають і тануть.
@@ -136,14 +138,14 @@ export function createDog({ texture, alpha, scene, canStand, findPath, player })
     stuck.t = simT
   }
 
-  /** Точка поруч із тобою — з того боку, де пес уже є (не перебігає через тебе). */
+  /**
+   * Точка поруч із тобою — з того боку, де пес уже є (не перебігає через тебе),
+   * злегка повернута на trait.side, щоб два пси не цілились в одне місце.
+   */
   function besidePlayer(p) {
-    let dx = body.x - p.x
-    let dy = body.y - p.y
-    const d = Math.hypot(dx, dy) || 1
-    dx /= d
-    dy /= d
-    return { x: p.x + dx * 14, y: p.y + dy * 10 }
+    const a = Math.atan2(body.y - p.y, body.x - p.x) + trait.side * 0.5
+    const r = NEAR - 4
+    return { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r * 0.75 }
   }
 
   /** Якщо на місці пса з'явилась перешкода (поставили декор) — переносимо його поруч із тобою. */
@@ -208,13 +210,13 @@ export function createDog({ texture, alpha, scene, canStand, findPath, player })
         else if (timer <= 0) {
           const r = Math.random()
           if (stillT > SLEEPY) enter('sleep', rand(10, 20))
-          else if (r < 0.45) {
+          else if (r < trait.wander) {
             // Прогулянка: випадкова точка неподалік, але не далі ~40 px від тебе.
             const a = Math.random() * Math.PI * 2
             const t = { x: p.x + Math.cos(a) * rand(16, 40), y: p.y + Math.sin(a) * rand(12, 30) }
             enter('wander')
             goTo(t, WALK)
-          } else if (r < 0.8) enter('sit', rand(3, 7))
+          } else if (r < trait.wander + trait.sit) enter('sit', rand(3, 7))
           else enter('idle', rand(1, 2.5))
         }
     }
@@ -227,6 +229,18 @@ export function createDog({ texture, alpha, scene, canStand, findPath, player })
       wx = r.wx
       wy = r.wy
     }
+    // Розділення: інший пес надто близько — відступаємо (лежачи/сидячи — ні, хай інший обходить).
+    if (state !== 'sleep' && state !== 'sit')
+      for (const o of others()) {
+        const ox = body.x - o.x
+        const oy = body.y - o.y
+        const od = Math.hypot(ox, oy)
+        if (od > 0.01 && od < PERSONAL_SPACE) {
+          const push = ((PERSONAL_SPACE - od) / PERSONAL_SPACE) * 40
+          wx += (ox / od) * push
+          wy += (oy / od) * push
+        }
+      }
     accelerate(body, wx, wy, dt, TUNE)
     move(body, dt, canStand)
 
@@ -293,7 +307,7 @@ export function createDog({ texture, alpha, scene, canStand, findPath, player })
         continue
       }
       const k = e.age / e.life
-      e.s.position.set(vis.x + e.dx * k, 0, vis.y).addScaledVector(up, 17 + k * 10)
+      e.s.position.set(vis.x + e.dx * k, 0, vis.y).addScaledVector(up, EMOTE_Y + k * 10)
       e.s.material.opacity = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3
     }
   }
@@ -311,6 +325,7 @@ export function createDog({ texture, alpha, scene, canStand, findPath, player })
       teleport(body, x, y)
       vis.x = x
       vis.y = y
+      stillT = 0 // перехід між сценами — це рух: не засинати одразу на порозі
       enter('idle', 0.6)
       unstick()
     },

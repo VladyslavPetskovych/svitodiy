@@ -1,0 +1,69 @@
+{
+  "image": "/game/walk/sirko.png",
+  "cell": {
+    "w": 48,
+    "h": 40
+  },
+  "scale": 0.55,
+  "size": {
+    "w": 192,
+    "h": 440
+  },
+  "anims": {
+    "idle_down": {
+      "row": 0,
+      "frames": 4,
+      "fps": 4
+    },
+    "idle_up": {
+      "row": 1,
+      "frames": 4,
+      "fps": 4
+    },
+    "idle_right": {
+      "row": 2,
+      "frames": 4,
+      "fps": 4
+    },
+    "idle_left": {
+      "row": 3,
+      "frames": 4,
+      "fps": 4
+    },
+    "walk_down": {
+      "row": 4,
+      "frames": 4,
+      "fps": 8
+    },
+    "walk_up": {
+      "row": 5,
+      "frames": 4,
+      "fps": 8
+    },
+    "walk_right": {
+      "row": 6,
+      "frames": 4,
+      "fps": 8
+    },
+    "walk_left": {
+      "row": 7,
+      "frames": 4,
+      "fps": 8
+    },
+    "sit": {
+      "row": 8,
+      "frames": 4,
+      "fps": 4
+    },
+    "sleep": {
+      "row": 9,
+      "frames": 2,
+      "fps": 1.2
+    },
+    "happy": {
+      "row": 10,
+      "frames": 4,
+      "fps": 9
+    }
+  }
+}

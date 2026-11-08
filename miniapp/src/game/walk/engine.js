@@ -2,7 +2,12 @@ import * as THREE from 'three'
 import atlas from './atlas.json'
 import { createCameraRig } from './camera.js'
 import { DECO_GEOM, decoFootprint, snapDeco } from './decor.js'
-import { PET_RANGE, createDog } from './dog.js'
+import { DOGS, PET_RANGE } from './companion.js'
+import { createDog } from './dog.js'
+import rudkoMeta from './dog.json'
+import sirkoMeta from './sirko.json'
+
+const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
 import { beamTexture, blobTexture, bubbleTexture, createParticles, dropHeight, glowTexture, popScale, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
 import { HOME_MAP, HOME_START, homeInteract, homePlacements } from './home.js'
@@ -23,7 +28,7 @@ import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } fr
  * Сцени: «island» (острів надворі) і «home» (кімната хатинки).
  */
 
-const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', 'dog']
+const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', ...Object.keys(DOG_SHEETS)]
 const AW = atlas.size.w
 const AH = atlas.size.h
 
@@ -48,7 +53,7 @@ export function loadAssets() {
     }
     // Альфа атласів — щоб тап по спрайту влучав лише в непрозорі пікселі.
     a.alpha = alphaOf(a.sprites.image)
-    a.dogAlpha = alphaOf(a.dog.image)
+    a.sheetAlpha = Object.fromEntries(Object.keys(DOG_SHEETS).map((k) => [k, alphaOf(a[k].image)]))
     a.foamFrames = Math.round(a.foam.image.height / MAP.h)
     return a
   })
@@ -249,16 +254,27 @@ export function createWalk(canvas, assets, cb) {
   scene3.add(heroBlob)
 
   // Пес-компаньйон: свій автомат станів, але та сама сітка, шляхи й фізика.
-  const dog = createDog({
-    texture: assets.dog,
-    alpha: assets.dogAlpha,
-    scene: scene3,
-    canStand: (x, y) => !!grid && geo.canStand(grid, x, y),
-    findPath: (from, to) => (grid ? geo.findPath(grid, from, to) : []),
-    player: () => body,
+  // Пси-компаньйони: у кожного свій аркуш і характер, але спільні сітка, шляхи й фізика.
+  const dogs = DOGS.map((def) => {
+    const d = createDog({
+      meta: DOG_SHEETS[def.sheet],
+      trait: def.trait,
+      texture: assets[def.sheet],
+      alpha: assets.sheetAlpha[def.sheet],
+      scene: scene3,
+      canStand: (x, y) => !!grid && geo.canStand(grid, x, y),
+      findPath: (from, to) => (grid ? geo.findPath(grid, from, to) : []),
+      player: () => body,
+      others: () => dogs.filter((o) => o.id !== def.id).map((o) => o.body),
+    })
+    d.id = def.id
+    return d
   })
   let dogPlaced = false
-  const dogDist = () => Math.hypot(dog.body.x - body.x, dog.body.y - body.y)
+  const dogDist = (dog) => Math.hypot(dog.body.x - body.x, dog.body.y - body.y)
+  const dogById = (id) => dogs.find((d) => d.id === id)
+  /** Розставити псів біля точки: кожен трохи в інший бік. */
+  const placeDogs = (x, y, dy) => dogs.forEach((d, i) => d.place(x + (i ? -14 : 14), y + dy + i * 4))
 
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.9, depthWrite: false })
   const marker = new THREE.Mesh(new THREE.RingGeometry(3, 4.2, 20).rotateX(-Math.PI / 2), markerMat)
@@ -468,7 +484,7 @@ export function createWalk(canvas, assets, cb) {
     rebuild()
     if (!dogPlaced) {
       dogPlaced = true
-      dog.place(body.x + 16, body.y + 6)
+      placeDogs(body.x, body.y, 6)
     }
   }
 
@@ -505,7 +521,7 @@ export function createWalk(canvas, assets, cb) {
     rig.snap(body.x, body.y)
     rebuild()
     // Пес заходить і виходить разом із тобою — стає поруч біля дверей.
-    dog.place(body.x + 12, body.y + (scene.outdoor ? 6 : -6))
+    placeDogs(body.x, body.y, scene.outdoor ? 6 : -6)
     for (const s of bubbleSprites.values()) s.visible = false
   }
 
@@ -555,10 +571,12 @@ export function createWalk(canvas, assets, cb) {
   function pick(clientX, clientY) {
     rayFrom(clientX, clientY)
     raycaster.camera = camera
-    const out = { bubble: false, dog: false, art: null, ground: null, item: null }
+    const out = { bubble: false, dog: null, art: null, ground: null, item: null }
     const visibleBubbles = [...bubbleSprites.values()].filter((s) => s.visible)
     if (visibleBubbles.length && raycaster.intersectObjects(visibleBubbles, false).length) out.bubble = true
-    out.dog = mode === 'walk' && dog.hit(raycaster)
+    // Пес під пальцем — ближчий до камери, якщо влучили в кількох.
+    if (mode === 'walk')
+      out.dog = dogs.filter((d) => d.hit(raycaster)).sort((a, b) => camera.position.distanceToSquared(a.mesh.position) - camera.position.distanceToSquared(b.mesh.position))[0] ?? null
     let best = null
     let bestD = Infinity
     for (const h of raycaster.intersectObjects(billboards.filter((m) => m.visible), false)) {
@@ -652,8 +670,9 @@ export function createWalk(canvas, assets, cb) {
     if (!goal) return
     const g = goal
     goal = null
-    if (g === 'dog') {
-      if (dogDist() <= PET_RANGE + 8) cb.onInteract('dog')
+    if (g.startsWith('dog:')) {
+      const dog = dogById(g.slice(4))
+      if (dog && dogDist(dog) <= PET_RANGE + 8) cb.onInteract(g)
       return
     }
     const it = interact.find((i) => i.id === g)
@@ -669,13 +688,15 @@ export function createWalk(canvas, assets, cb) {
     }
     if (p.dog) {
       // Покликав пса: він завмирає, а мандрівник підходить і гладить.
+      const dog = p.dog
+      const id = `dog:${dog.id}`
       dog.notice()
-      if (dogDist() <= PET_RANGE + 4) {
+      if (dogDist(dog) <= PET_RANGE + 4) {
         path = []
-        cb.onInteract('dog')
+        cb.onInteract(id)
       } else {
-        const d = dogDist() || 1
-        walkTo({ x: dog.body.x + ((body.x - dog.body.x) / d) * 10, y: dog.body.y + ((body.y - dog.body.y) / d) * 6 }, 'dog')
+        const d = dogDist(dog) || 1
+        walkTo({ x: dog.body.x + ((body.x - dog.body.x) / d) * 10, y: dog.body.y + ((body.y - dog.body.y) / d) * 6 }, id)
       }
       return
     }
@@ -801,7 +822,7 @@ export function createWalk(canvas, assets, cb) {
   function fixedStep(dt) {
     playerStep(dt)
     // Пес живе й у пісочниці: поки будуєш, він собі гуляє.
-    if (dogPlaced) dog.fixedStep(dt)
+    if (dogPlaced) for (const d of dogs) d.fixedStep(dt)
   }
 
   function playerStep(dt) {
@@ -902,8 +923,13 @@ export function createWalk(canvas, assets, cb) {
         }
       }
       // Пес поруч (і не спить) — можна погладити, якщо ближче за будівлю.
-      const dd = dogDist()
-      if (dd <= PET_RANGE && dd < bestD && dog.state !== 'sleep') found = 'dog'
+      for (const d of dogs) {
+        const dd = dogDist(d)
+        if (dd <= PET_RANGE && dd < bestD && d.state !== 'sleep') {
+          found = `dog:${d.id}`
+          bestD = dd
+        }
+      }
       if (found !== near) {
         near = found
         cb.onNear(near)
@@ -942,7 +968,7 @@ export function createWalk(canvas, assets, cb) {
     heroMesh.quaternion.copy(camera.quaternion)
     heroMesh.visible = true
     heroBlob.position.set(hero.x, 0.2, hero.y)
-    dog.frame(dt, a, camera, rig)
+    for (const d of dogs) d.frame(dt, a, camera, rig)
 
     // Спрайти дивляться в камеру; «поп» і падіння новеньких.
     for (const it of items) {
@@ -1134,13 +1160,14 @@ export function createWalk(canvas, assets, cb) {
     zoom(f) {
       rig.zoomBy(f)
     },
-    /** Погладити пса (кнопка «Погладити» чи E поруч). */
-    petDog() {
-      dog.pet()
+    /** Погладити пса за id (кнопка «Погладити» чи E поруч). */
+    petDog(id) {
+      dogById(id)?.pet()
     },
     /** Знімок стану для тестів і налагодження (лише читання). */
     debug() {
-      return { player: { x: body.x, y: body.y }, dog: { x: dog.body.x, y: dog.body.y, state: dog.state, dist: dogDist() }, near, mode, scene: scene.id }
+      const dogsInfo = Object.fromEntries(dogs.map((d) => [d.id, { x: d.body.x, y: d.body.y, state: d.state, dist: dogDist(d) }]))
+      return { player: { x: body.x, y: body.y }, dogs: dogsInfo, near, mode, scene: scene.id }
     },
     destroy() {
       renderer.setAnimationLoop(null)
@@ -1153,7 +1180,7 @@ export function createWalk(canvas, assets, cb) {
       canvas.removeEventListener('wheel', onWheel)
       input.destroy()
       clearItems()
-      dog.dispose()
+      for (const d of dogs) d.dispose()
       for (const s of bubbleSprites.values()) s.material.dispose()
       for (const tex of bubbleTex.values()) tex.dispose()
       for (const g of geoCache.values()) g.dispose()

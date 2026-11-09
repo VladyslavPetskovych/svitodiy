@@ -14,6 +14,7 @@ import { GAME_CONFIG } from "./catalog.js";
 import { getDecor } from "./decor.js";
 import { getDogs } from "./dogs.js";
 import { getFarm } from "./farm.js";
+import { getInterior } from "./interior.js";
 import { grantAdminResources } from "./admin.js";
 import { getHome } from "./homestead.js";
 import { dailyClaimKey, jobKey, kyivDay, previousDay, quizRewardKey, userKey } from "./keys.js";
@@ -76,7 +77,7 @@ async function getJob(userId) {
 export async function getState(userId) {
   await grantAdminResources(userId);
   const r = getRedis();
-  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, deco, goal, farm, dogs] = await Promise.all([
+  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, deco, goal, farm, dogs, interior] = await Promise.all([
     r.hGetAll(userKey(userId)),
     getInventory(userId),
     getJob(userId),
@@ -90,6 +91,7 @@ export async function getState(userId) {
     getDumosvitGoal(userId),
     getFarm(userId),
     getDogs(userId),
+    getInterior(userId),
   ]);
 
   for (const k of Object.keys(inventory)) {
@@ -121,6 +123,7 @@ export async function getState(userId) {
     deco,
     farm,
     dogs,
+    interior,
     // phone — чи є номер узагалі: без нього персональні розділи не відкрити.
     access: { nastia: access[0], admin: access[1], phone: access[2] != null },
     daily: await getDailyState(userId, h),

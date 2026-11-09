@@ -22,41 +22,42 @@ export const WINDOWS = [
   { x0: 164, x1: 190 },
 ]
 
+/** Висота стін (px світу) = висота задньої стіни в 2D-арті, тож речі на ній висять там само. */
+export const WALL_H = FLOOR.y0
+
 /**
- * Меблі хатинки: з кожним рівнем затишніше.
- * Рівень 1 — ліжко, піч, стіл із ослінчиками, скриня, діжка й рогач біля печі, трави й вудки на стінах;
- * 2 — полиця, рушник, килим, вазон, мисник, лава, кошик яблук; 3 — крісло, картина, кіт на печі, прядка.
- * @returns {{ s: string, x: number, y: number, layer: 'floor'|'obj', blocks?: number[][] }[]}
+ * Що стоїть у хатинці. Постійні меблі (з ними пов'язані дії й світло): ліжко, піч, стіл з ослінчиками
+ * (з 3-го рівня — з гасовою лампою), полиця з книжками (з 2-го) і лежанка псів. Решту гравець
+ * розставляє сам — interior з сервера (state.interior), геометрія — у interior.js.
+ *
+ * layer: 'floor' — лежить на підлозі, 'obj' — стоїть (білборд), 'wall' — висить на стіні:
+ * wall — 'back' | 'left' | 'right', at — де вздовж стіни (x для задньої, y для бічних),
+ * h — висота низу над підлогою. x, y — та сама точка в 2D-координатах (для прев'ю й сортування).
+ * uid і kind — у речей гравця (їх можна вибрати, пересунути, прибрати).
+ * @returns {{ s: string, x: number, y: number, layer: 'floor'|'obj'|'wall', blocks?: number[][],
+ *   wall?: 'back'|'left'|'right', at?: number, h?: number, uid?: string, kind?: string }[]}
  */
-export function homePlacements(level) {
+export function homePlacements(level, interior = [], geom = {}, footprint = null) {
   const out = []
-  const add = (s, x, y, blocks = [], layer = 'obj') => out.push({ s, x, y, layer, blocks })
+  const add = (s, x, y, blocks = [], layer = 'obj', extra = {}) => out.push({ s, x, y, layer, blocks, ...extra })
+
   add('home_dog_bed', DOG_BED.x, DOG_BED.y, [], 'floor')
   add('home_bed', 40, 104, [[24, 60, 32, 42]])
   add('home_stove', 200, 110, [[176, 66, 48, 42]])
   add(level >= 3 ? 'home_table_3' : 'home_table', 120, 128, [[102, 114, 36, 14]])
   add('home_stool', 92, 134, [[88, 128, 8, 6]])
   add('home_stool', 148, 134, [[144, 128, 8, 6]])
-  add('chest', 40, 124, [[32, 118, 16, 6]])
-  // Куток біля печі: діжка з водою й рогач; на стінах — трави сушаться й вудки чекають ранку.
-  add('home_water_barrel', 160, 100, [[154, 95, 12, 5]])
-  add('home_oven_tools', 170, 96, [[166, 92, 8, 4]])
-  add('home_herbs', 212, 28, [], 'floor')
-  add('home_rods', 148, 48, [], 'floor')
-  if (level >= 2) {
-    add('home_mysnyk', 27, 46, [], 'floor')
-    add('home_bench', 180, 182, [[162, 177, 36, 5]])
-    add('home_basket', 64, 130, [[58, 125, 12, 5]])
-    add('home_rug', 120, 172, [], 'floor')
-    add('home_shelf', 120, 62, [[106, 54, 28, 8]])
-    add('home_rushnyk', 120, 24, [], 'floor')
-    add('home_plant', 218, 176, [[212, 170, 12, 6]])
-  }
-  if (level >= 3) {
-    add('home_armchair', 38, 168, [[26, 158, 24, 10]])
-    add('home_picture', 91, 32, [], 'floor')
-    add('home_cat', 188, 112)
-    add('home_spinning_wheel', 72, 170, [[64, 165, 16, 5]])
+  if (level >= 2) add('home_shelf', 120, 62, [[106, 54, 28, 8]])
+
+  for (const d of interior) {
+    const g = geom[d.k]
+    if (!g) continue
+    const extra = { uid: d.id, kind: d.k }
+    if (g.layer === 'wall') {
+      const x = d.wall === 'back' ? d.at : d.wall === 'left' ? FLOOR.x0 : FLOOR.x1
+      const y = d.wall === 'back' ? FLOOR.y0 - d.h : d.at
+      add(g.sprite, x, y, [], 'wall', { ...extra, wall: d.wall, at: d.at, h: d.h })
+    } else add(g.sprite, d.x, d.y, g.layer === 'obj' && footprint ? [footprint(d.k, d.x, d.y)] : [], g.layer, extra)
   }
   return out
 }

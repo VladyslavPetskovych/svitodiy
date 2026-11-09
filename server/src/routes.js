@@ -7,6 +7,7 @@ import { claimDaily } from "./game/daily.js";
 import { moveDecor, placeDecor, removeDecor } from "./game/decor.js";
 import { commandDog, feedDog, petDog } from "./game/dogs.js";
 import { GameError } from "./game/errors.js";
+import { moveInterior, placeInterior, removeInterior } from "./game/interior.js";
 import { buySeeds, clearPlot, harvestPlot, plantPlot, sellCrops, tillPlot, waterPlot } from "./game/farm.js";
 import { collectHome, upgradeBuilding } from "./game/homestead.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
@@ -98,6 +99,11 @@ export function buildApiRouter(botToken) {
   api.post("/home/deco", handler((req) => placeDecor(uid(req), body(req).kind, body(req).x, body(req).y)));
   api.post("/home/deco/:id/move", handler((req) => moveDecor(uid(req), req.params.id, body(req).x, body(req).y)));
   api.delete("/home/deco/:id", handler((req) => removeDecor(uid(req), req.params.id)));
+
+  // Пісочниця в хатинці: меблі й речі на стінах
+  api.post("/home/interior", handler((req) => placeInterior(uid(req), body(req))));
+  api.post("/home/interior/:id/move", handler((req) => moveInterior(uid(req), req.params.id, body(req))));
+  api.delete("/home/interior/:id", handler((req) => removeInterior(uid(req), req.params.id)));
 
   // Город: грядки, насіння, урожай
   api.post("/farm/:plot/till", handler((req) => tillPlot(uid(req), req.params.plot)));

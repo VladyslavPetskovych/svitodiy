@@ -10,13 +10,21 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { deflateSync, inflateSync } from 'node:zlib'
-import { DOOR, FLOOR, HOME_MAP, WINDOWS, homePlacements } from '../src/game/walk/home.js'
+import { FLOOR, HOME_MAP, homePlacements } from '../src/game/walk/home.js'
 import { farmArt } from './farm-art.mjs'
+import { homeArt } from './home-art.mjs'
+import { decorArt } from './decor-art.mjs'
 import { BEDS, BOARDWALK, CELL, DECOR, INTERACT, LAND, MAP, PATH, PIER, PLAZA, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_PUBLIC = join(ROOT, 'public/game/walk')
 const OUT_ATLAS = join(ROOT, 'src/game/walk/atlas.json')
+/** Окремий аркуш для хатинки зсередини: усі спрайти home_* (меблі, речі на стінах, лежанка). */
+const OUT_HOME_ATLAS = join(ROOT, 'src/game/walk/home-atlas.json')
+const isInterior = (name) => name.startsWith('home_')
+/** Нові речі для пісочниці хати — третій аркуш (home-decor.png, спрайти hd_*). */
+const isDecor = (name) => name.startsWith('hd_')
+const OUT_DECOR_ATLAS = join(ROOT, 'src/game/walk/home-decor.json')
 /** Намальовані вручну/AI спрайти будівель: <назва кадру>.png замінює згенерований кадр з тією ж назвою. */
 const HANDMADE = join(ROOT, 'public/game/buildings')
 
@@ -1922,84 +1930,7 @@ function decoSprites() {
 
 const WHITE = ['#d9ccb2', '#e6dbc4', '#efe6d3', '#f6f0e2']
 const RED = ['#7e1f1a', '#b8322a', '#d9493a']
-const FLOORWOOD = ['#8a5c36', '#946640', '#a0714a']
 
-/** Фон кімнати: стеля-сволок, біла стіна з вікнами, дощата підлога, двері в нижній стіні. */
-function homeImage() {
-  const { w, h } = HOME_MAP
-  const img = new Img(w, h)
-  img.rect(0, 0, w, h, '#1a120d')
-  // Підлога: дошки по 8 px, стики вразбіг, прожилки, світліший верх кожної дошки.
-  for (let y = FLOOR.y0; y < FLOOR.y1; y++) {
-    const row = Math.floor((y - FLOOR.y0) / 8)
-    const iy = (y - FLOOR.y0) % 8
-    for (let x = FLOOR.x0; x < FLOOR.x1; x++) {
-      const off = (row % 3) * 17
-      const plank = Math.floor((x + off) / 44)
-      let col = FLOORWOOD[Math.floor(hash(plank, row, 5) * 3)]
-      if ((x + off) % 44 === 0) col = '#4e321d'
-      else if (iy === 7) col = '#5a3a22'
-      else if (iy === 0) col = '#b07e52'
-      else if (hash(x >> 2, y, 6) < 0.06) col = '#7a5030'
-      img.set(x, y, col)
-      if (iy === 3 && (x + off) % 44 === 4) img.set(x, y, '#3b2a1f') // цвях
-    }
-  }
-  // Задня стіна: сволок під стелею, побілена стіна, дерев'яний плінтус.
-  for (let y = 0; y < FLOOR.y0; y++)
-    for (let x = 0; x < w; x++) {
-      if (y < 7) img.set(x, y, y === 0 ? '#2b1d16' : y === 1 ? '#7a5232' : y === 6 ? '#3b2a1f' : '#5b3a22')
-      else if (y >= FLOOR.y0 - 6) img.set(x, y, y === FLOOR.y0 - 6 ? '#8b5d3b' : y === FLOOR.y0 - 1 ? '#3b2a1f' : '#6b4426')
-      else img.set(x, y, WHITE[Math.min(3, Math.floor(fbm(x / 9, y / 9, 120) * 3 + hash(x, y, 121) * 0.6))])
-    }
-  // Балки сволока, що виступають.
-  for (const bx of [40, 120, 200]) {
-    img.rect(bx - 4, 0, 8, 9, '#4a2f1d')
-    img.hline(bx - 4, bx + 3, 1, '#7a5232')
-    img.hline(bx - 4, bx + 3, 8, '#2b1d16')
-  }
-  // Вікна з рамою, шибками, підвіконням і фіранками-рушничками.
-  for (const win of WINDOWS) {
-    const { x0, x1 } = win
-    img.rect(x0, 12, x1 - x0, 26, '#5b3a22')
-    for (let y = 14; y < 36; y++)
-      for (let x = x0 + 2; x < x1 - 2; x++) img.set(x, y, y < 22 ? '#a9dcf7' : y < 30 ? '#c4e7fb' : '#9fd08a')
-    for (let k = 0; k < 6; k++) img.set(x0 + 4 + k, 15 + k, '#f2fbff') // відблиск
-    const mid = (x0 + x1) >> 1
-    img.vline(mid, 14, 35, '#5b3a22')
-    img.hline(x0 + 2, x1 - 3, 24, '#5b3a22')
-    img.rect(x0 - 2, 38, x1 - x0 + 4, 3, '#a0714a')
-    img.hline(x0 - 2, x1 + 1, 38, '#c79a62')
-    for (const fx of [x0 - 3, x1]) {
-      img.rect(fx, 10, 3, 24, '#f3eee2')
-      for (let y = 12; y < 34; y += 4) img.set(fx + 1, y, RED[1])
-      img.vline(fx, 10, 33, '#cbc2b0')
-    }
-  }
-  // Бічні стіни — товщина зрубу згори.
-  for (const sx of [0, w - FLOOR.x0]) {
-    img.rect(sx, 0, FLOOR.x0, h, '#3b2a1f')
-    img.vline(sx === 0 ? FLOOR.x0 - 1 : sx, 0, h - 1, '#5b3a22')
-  }
-  // Нижня стіна з дверним прорізом: поріг і світло з двору.
-  img.rect(0, FLOOR.y1, w, h - FLOOR.y1, '#3b2a1f')
-  img.hline(0, w - 1, FLOOR.y1, '#5b3a22')
-  img.rect(DOOR.x0, FLOOR.y1, DOOR.x1 - DOOR.x0, h - FLOOR.y1, '#c79a62')
-  img.rect(DOOR.x0 + 2, FLOOR.y1 + 3, DOOR.x1 - DOOR.x0 - 4, h - FLOOR.y1 - 3, '#7fc34e')
-  img.hline(DOOR.x0, DOOR.x1 - 1, FLOOR.y1, '#8b5d3b')
-  // Тінь від стіни на підлозі й сонячні плями з вікон.
-  for (let y = FLOOR.y0; y < FLOOR.y0 + 4; y++) img.hline(FLOOR.x0, FLOOR.x1 - 1, y, '#000', 0.22 - (y - FLOOR.y0) * 0.05)
-  for (const win of WINDOWS)
-    for (let y = FLOOR.y0; y < FLOOR.y0 + 46; y++) {
-      const shift = Math.round((y - FLOOR.y0) * 0.45)
-      for (let x = win.x0 + 2 + shift; x < win.x1 - 2 + shift; x++) img.set(x, y, '#fff2c0', 0.13 * (1 - (y - FLOOR.y0) / 46))
-    }
-  // Килимок біля дверей.
-  img.rect(DOOR.x0 - 2, FLOOR.y1 - 9, DOOR.x1 - DOOR.x0 + 4, 8, '#8e2a1f')
-  img.rect(DOOR.x0, FLOOR.y1 - 8, DOOR.x1 - DOOR.x0, 6, '#c8372d')
-  for (let x = DOOR.x0 + 1; x < DOOR.x1 - 1; x += 3) img.set(x, FLOOR.y1 - 5, '#ffd23c')
-  return img
-}
 
 function homeWalkGrid() {
   const cols = HOME_MAP.w / CELL
@@ -2028,28 +1959,6 @@ function embroidery(img, x0, y0, w, h, base = '#f3eee2') {
     }
 }
 
-function homeBed() {
-  const img = new Img(36, 50)
-  shadow(img, 18, 47, 17, 3)
-  img.rect(1, 0, 34, 12, C.woodLo)
-  img.hline(1, 34, 0, C.wood)
-  for (const x of [6, 12, 18, 24, 30]) img.set(x, 4, C.woodPale)
-  img.rect(2, 10, 32, 36, C.wood)
-  img.ellipse(18, 15, 13, 4.5, '#f6f0e2')
-  img.hline(7, 29, 18, '#d9ccb2')
-  img.rect(3, 20, 30, 24, RED[1])
-  img.rect(3, 20, 30, 4, '#f3eee2')
-  for (let y = 26; y < 43; y++)
-    for (let x = 4; x < 32; x++) {
-      const d = Math.abs(((x + 1) % 8) - 4) + Math.abs(((y - 26) % 8) - 4)
-      if (d === 3) img.set(x, y, '#ffd23c')
-      else if (d === 1) img.set(x, y, '#f3eee2')
-    }
-  img.vline(32, 20, 43, RED[0])
-  img.hline(3, 32, 43, RED[0])
-  img.rect(2, 44, 32, 3, C.woodLo)
-  return img.outline(C.K)
-}
 
 function homeStove() {
   const img = new Img(54, 64)
@@ -2092,30 +2001,6 @@ function homeStove() {
   return img.outline(C.K)
 }
 
-function homeTable(level) {
-  const img = new Img(44, 30)
-  shadow(img, 22, 27, 21, 3)
-  img.rect(1, 3, 42, 16, C.woodPale)
-  img.hline(1, 42, 3, '#ddb67e')
-  embroidery(img, 4, 5, 36, 11)
-  img.rect(7, 7, 30, 7, '#f6f0e2')
-  for (const x of [3, 39]) img.rect(x, 19, 3, 9, C.woodLo)
-  img.rect(1, 18, 42, 2, C.wood)
-  // Коровай.
-  img.ellipse(22, 10, 6, 3.5, '#c98a3a')
-  img.ellipse(21, 9, 4, 2, '#e8b05a')
-  img.set(20, 8, '#f6d08a')
-  if (level >= 3) {
-    // Глечик і свічка.
-    img.rect(8, 4, 5, 7, '#b8621b')
-    img.hline(8, 12, 4, '#e8892d')
-    img.set(13, 6, '#b8621b')
-    img.rect(34, 4, 2, 6, '#f6f0e2')
-    img.set(34, 2, '#ffd35a')
-    img.set(34, 3, '#ff8a2a')
-  }
-  return img.outline(C.K)
-}
 
 function homeStool() {
   const img = new Img(10, 12)
@@ -2209,18 +2094,6 @@ function homeArmchair() {
   return img.outline(C.K)
 }
 
-function homePicture() {
-  const img = new Img(20, 16)
-  img.rect(0, 0, 20, 16, '#c49a12')
-  img.rect(2, 2, 16, 12, '#8fc8f0')
-  img.rect(2, 9, 16, 5, '#3b7fd0')
-  img.ellipse(10, 9, 5, 2, '#5fae3e')
-  img.rect(9, 5, 3, 4, '#efe6d3')
-  img.rect(8, 4, 5, 2, '#b5452d')
-  img.ellipse(15, 4, 1.6, 1.6, '#ffd35a')
-  img.hline(0, 19, 0, '#ffe080')
-  return img.outline(C.K)
-}
 
 function homeCat() {
   const img = new Img(16, 11)
@@ -2489,17 +2362,13 @@ function homeSprites() {
     home_bench: homeBench(),
     home_basket: homeBasket(),
     home_spinning_wheel: homeSpinningWheel(),
-    home_bed: homeBed(),
     home_stove: homeStove(),
-    home_table: homeTable(1),
-    home_table_3: homeTable(3),
     home_stool: homeStool(),
     home_shelf: homeShelf(),
     home_rug: homeRug(),
     home_rushnyk: homeRushnyk(),
     home_plant: homePlant(),
     home_armchair: homeArmchair(),
-    home_picture: homePicture(),
     home_cat: homeCat(),
   }
 }
@@ -3036,7 +2905,7 @@ function dogSheet(anims, cell, image, scale = 1) {
 
 /* ───────── Атлас ───────── */
 
-function buildSprites(farm) {
+function buildSprites(farm, room) {
   const s = {
     ...heroFrames(),
     oak: oak(),
@@ -3067,6 +2936,8 @@ function buildSprites(farm) {
     ...decoSprites(),
     ...homeSprites(),
     ...farm.sprites,
+    ...room.sprites,
+    ...decorArt({ Img }),
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)
@@ -3096,9 +2967,8 @@ function handmade() {
   return out
 }
 
-/** Полиці: спрайти за висотою, 1 px проміжку, ширина атласу 512. */
-function pack(sprites) {
-  const W = 512
+/** Полиці: спрайти за висотою, 1 px проміжку, ширина атласу W. */
+function pack(sprites, W = 512) {
   const entries = Object.entries(sprites).sort((a, b) => b[1].h - a[1].h)
   let x = 0
   let y = 0
@@ -3169,18 +3039,31 @@ const ground = groundImage(t)
 const foam = shoreImage(t)
 const water = waterImage()
 const farm = farmArt({ Img })
-const sprites = buildSprites(farm)
-const { atlas, frames } = pack(sprites)
+const room = homeArt({ Img, hash })
+const sprites = buildSprites(farm, room)
+const split = (keep) => Object.fromEntries(Object.entries(sprites).filter(([name]) => keep(name)))
+const { atlas, frames } = pack(split((n) => !isInterior(n) && !isDecor(n)))
+const interior = pack(split(isInterior), 256)
+const decorSheet = pack(split(isDecor), 256)
 
 mkdirSync(OUT_PUBLIC, { recursive: true })
 writeFileSync(join(OUT_PUBLIC, 'ground.png'), encodePng(ground))
 writeFileSync(join(OUT_PUBLIC, 'foam.png'), encodePng(foam))
 writeFileSync(join(OUT_PUBLIC, 'water.png'), encodePng(water))
-const home = homeImage()
+const home = room.image
+const walls = room.walls
 writeFileSync(join(OUT_PUBLIC, 'home.png'), encodePng(home))
 writeFileSync(join(OUT_PUBLIC, 'sprites.png'), encodePng(atlas))
+writeFileSync(join(OUT_PUBLIC, 'home-sprites.png'), encodePng(interior.atlas))
+writeFileSync(join(OUT_PUBLIC, 'home-decor.png'), encodePng(decorSheet.atlas))
+writeFileSync(OUT_DECOR_ATLAS, JSON.stringify({ size: { w: decorSheet.atlas.w, h: decorSheet.atlas.h }, frames: decorSheet.frames }) + '\n')
+console.log(`нові речі для хати: ${decorSheet.atlas.w}×${decorSheet.atlas.h} (${Object.keys(decorSheet.frames).length})`)
+// Стіни хати — окремий аркуш: рушій ставить їх вертикально довкола підлоги.
+writeFileSync(join(OUT_PUBLIC, 'home-walls.png'), encodePng(walls.image))
+const wallsMeta = { size: { w: walls.image.w, h: walls.image.h }, ...walls.rects }
+writeFileSync(OUT_HOME_ATLAS, JSON.stringify({ size: { w: interior.atlas.w, h: interior.atlas.h }, frames: interior.frames, walls: wallsMeta }) + '\n')
 writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid() }) + '\n')
-console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів)`)
+console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів), хатинка ${interior.atlas.w}×${interior.atlas.h} (${Object.keys(interior.frames).length})`)
 // Іконки врожаю й насіння для рюкзака (public/game/items/<id>.png).
 const OUT_ITEMS = join(ROOT, 'public/game/items')
 for (const [id, img] of Object.entries(farm.items)) writeFileSync(join(OUT_ITEMS, `${id}.png`), encodePng(img))
@@ -3200,7 +3083,7 @@ for (const [name, anims, cell, scale] of [
 // лише разом із самими картинками, тож довгий кеш і далі працює.
 {
   const h = createHash('sha1')
-  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'dog', 'sirko'].map((n) => join(OUT_PUBLIC, `${n}.png`))
+  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'dog', 'sirko'].map((n) => join(OUT_PUBLIC, `${n}.png`))
   for (const id of Object.keys(farm.items).sort()) pngs.push(join(OUT_ITEMS, `${id}.png`))
   for (const f of pngs) h.update(readFileSync(f))
   const v = h.digest('hex').slice(0, 10)
@@ -3234,21 +3117,26 @@ if (pi > 0) {
       for (let k = 0; k < 4; k++) hz.d[oi + k] = sheet.d[si + k]
     }
   writeFileSync(join(dir, 'hero-x6.png'), encodePng(hz))
-  // Хатинка зсередини на 3-му рівні з мандрівником біля дверей.
-  const room = new Img(HOME_MAP.w, HOME_MAP.h)
-  room.blit(home, 0, 0)
-  const inside = homePlacements(3)
-  inside.push({ s: 'hero_up_0', x: 120, y: 170, layer: 'obj' })
-  for (const q of [...inside.filter((q) => q.layer === 'floor'), ...inside.filter((q) => q.layer !== 'floor').sort((a, b) => a.y - b.y)]) {
-    const sp = sprites[q.s]
-    room.blit(sp, Math.round(q.x - sp.w / 2), Math.round(q.y - sp.h))
+  // Хатинка зсередини на рівнях 1–3 (поруч) з мандрівником біля дверей.
+  const rooms = new Img(HOME_MAP.w * 3 + 8, HOME_MAP.h)
+  for (const lvl of [1, 2, 3]) {
+    const room = new Img(HOME_MAP.w, HOME_MAP.h)
+    room.blit(home, 0, 0)
+    room.blit(walls.back, FLOOR.x0, 0) // задня стіна «розгорнута» вгору, як у старому 2D
+    const inside = homePlacements(lvl).filter((q) => q.layer !== 'wall' || q.wall === 'back')
+    inside.push({ s: 'hero_up_0', x: 120, y: 170, layer: 'obj' })
+    for (const q of [...inside.filter((q) => q.layer === 'floor'), ...inside.filter((q) => q.layer !== 'floor').sort((a, b) => a.y - b.y)]) {
+      const sp = sprites[q.s]
+      room.blit(sp, Math.round(q.x - sp.w / 2), Math.round(q.y - sp.h))
+    }
+    rooms.blit(room, (lvl - 1) * (HOME_MAP.w + 4), 0)
   }
-  const rz = new Img(room.w * 3, room.h * 3)
+  const rz = new Img(rooms.w * 2, rooms.h * 2)
   for (let y = 0; y < rz.h; y++)
     for (let x = 0; x < rz.w; x++) {
-      const si = (Math.floor(y / 3) * room.w + Math.floor(x / 3)) * 4
+      const si = (Math.floor(y / 2) * rooms.w + Math.floor(x / 2)) * 4
       const oi = (y * rz.w + x) * 4
-      for (let k = 0; k < 4; k++) rz.d[oi + k] = room.d[si + k]
+      for (let k = 0; k < 4; k++) rz.d[oi + k] = rooms.d[si + k]
     }
   writeFileSync(join(dir, 'preview-home.png'), encodePng(rz))
   const big = new Img(atlas.w * 3, atlas.h * 3)
@@ -3259,6 +3147,24 @@ if (pi > 0) {
       for (let k = 0; k < 4; k++) big.d[oi + k] = atlas.d[si + k]
     }
   writeFileSync(join(dir, 'atlas-x3.png'), encodePng(big))
+  const ia = interior.atlas
+  const ibig = new Img(ia.w * 4, ia.h * 4)
+  ibig.rect(0, 0, ibig.w, ibig.h, '#3b2a1f')
+  for (let y = 0; y < ibig.h; y++)
+    for (let x = 0; x < ibig.w; x++) {
+      const si = (Math.floor(y / 4) * ia.w + Math.floor(x / 4)) * 4
+      if (ia.d[si + 3]) ibig.set(x, y, '#' + [ia.d[si], ia.d[si + 1], ia.d[si + 2]].map((v) => v.toString(16).padStart(2, '0')).join(''))
+    }
+  writeFileSync(join(dir, 'home-sprites-x4.png'), encodePng(ibig))
+  const da = decorSheet.atlas
+  const dbig = new Img(da.w * 4, da.h * 4)
+  dbig.rect(0, 0, dbig.w, dbig.h, '#3b2a1f')
+  for (let y = 0; y < dbig.h; y++)
+    for (let x = 0; x < dbig.w; x++) {
+      const si = (Math.floor(y / 4) * da.w + Math.floor(x / 4)) * 4
+      if (da.d[si + 3]) dbig.set(x, y, '#' + [da.d[si], da.d[si + 1], da.d[si + 2]].map((v) => v.toString(16).padStart(2, '0')).join(''))
+    }
+  writeFileSync(join(dir, 'home-decor-x4.png'), encodePng(dbig))
   // Город: усі стадії культур і грядки, ×4.
   {
     const names = Object.keys(farm.sprites)

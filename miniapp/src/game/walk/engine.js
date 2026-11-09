@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import atlas from './atlas.json'
+import homeAtlas from './home-atlas.json'
+import decorAtlas from './home-decor.json'
 import artVersion from './version.json'
 import { createCameraRig } from './camera.js'
 import { DECO_GEOM, decoFootprint, snapDeco } from './decor.js'
@@ -11,7 +13,8 @@ import sirkoMeta from './sirko.json'
 const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
 import { beamTexture, blobTexture, bubbleTexture, createParticles, dropHeight, glowTexture, popScale, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
-import { DOG_BED, HOME_MAP, HOME_START, homeInteract, homePlacements } from './home.js'
+import { DOG_BED, FLOOR, HOME_MAP, HOME_START, WALL_H, homeInteract, homePlacements } from './home.js'
+import { INTERIOR_GEOM, interiorFootprint, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
 import { createInput } from './input.js'
 import { CELL, FIELD, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotAt, plotCenter, plotRect, walkGrid } from './layout.js'
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
@@ -29,9 +32,25 @@ import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } fr
  * Сцени: «island» (острів надворі) і «home» (кімната хатинки).
  */
 
-const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', ...Object.keys(DOG_SHEETS)]
-const AW = atlas.size.w
-const AH = atlas.size.h
+const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', ...Object.keys(DOG_SHEETS)]
+
+/**
+ * Аркуші спрайтів: острів (будівлі, декор, город, мандрівник) і окремо — хатинка зсередини
+ * (усі home_*). tex — ключ текстури в assets; кожен кадр шукаємо в тому аркуші, де він є.
+ */
+const SHEETS = [
+  { tex: 'sprites', size: atlas.size, frames: atlas.frames },
+  { tex: 'home-sprites', size: homeAtlas.size, frames: homeAtlas.frames },
+  { tex: 'home-decor', size: decorAtlas.size, frames: decorAtlas.frames },
+]
+/** Кадр за назвою разом з аркушем, у якому він лежить. */
+function frameOf(name) {
+  for (const sheet of SHEETS) {
+    const f = sheet.frames[name]
+    if (f) return { f, sheet }
+  }
+  return null
+}
 
 export function loadAssets() {
   const loader = new THREE.TextureLoader()
@@ -53,7 +72,7 @@ export function loadAssets() {
       tex.generateMipmaps = false
     }
     // Альфа атласів — щоб тап по спрайту влучав лише в непрозорі пікселі.
-    a.alpha = alphaOf(a.sprites.image)
+    a.alpha = Object.fromEntries(SHEETS.map((sh) => [sh.tex, alphaOf(a[sh.tex].image)]))
     a.sheetAlpha = Object.fromEntries(Object.keys(DOG_SHEETS).map((k) => [k, alphaOf(a[k].image)]))
     a.foamFrames = Math.round(a.foam.image.height / MAP.h)
     return a
@@ -94,9 +113,11 @@ function effectsFor(levels, deco) {
   return { smoke, lights, fires }
 }
 
-/** Вогонь у печі хатинки. */
-function homeEffects() {
-  return { smoke: [], lights: [{ ax: 200, ay: 110, dx: -11, h: 8, r: 26, warm: true }], fires: [] }
+/** Вогонь у печі хатинки; з 3-го рівня — ще й гасова лампа на столі. */
+function homeEffects(level) {
+  const lights = [{ ax: 200, ay: 110, dx: -11, h: 8, r: 26, warm: true }]
+  if (level >= 3) lights.push({ ax: 120, ay: 128, dx: 13, h: 19, r: 18, warm: true })
+  return { smoke: [], lights, fires: [] }
 }
 
 /** До якої будівлі / точки належить спрайт — для «попу» при покращенні. */
@@ -141,6 +162,8 @@ for (const sc of Object.values(SCENES)) sc.geo = geometry(sc.walk, sc.map)
 
 /** Суша острова, на якій можна будувати: з генератора, без мостків над водою. */
 const land = walkGrid(atlas.walk, [])
+/** Підлога хатинки, на якій можна ставити речі. */
+const homeLand = walkGrid(atlas.homeWalk, [])
 
 const HERO_SEQ = [1, 0, 2, 0]
 const TAP_SLOP = 10 // CSS px: далі — це вже перетягування, а не тап
@@ -152,7 +175,8 @@ const TAP_SLOP = 10 // CSS px: далі — це вже перетягуванн
  *   onBuildTap: (p: { x: number, y: number, uid: string|null }) => void }} cb
  */
 export function createWalk(canvas, assets, cb) {
-  const frames = atlas.frames
+  /** Розміри кадру за назвою — з будь-якого аркуша. */
+  const frames = new Proxy({}, { get: (_, name) => frameOf(name)?.f })
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' })
   renderer.outputColorSpace = THREE.SRGBColorSpace
   const scene3 = new THREE.Scene()
@@ -170,8 +194,10 @@ export function createWalk(canvas, assets, cb) {
     const key = flat ? `${name}#flat` : name
     let g = geoCache.get(key)
     if (g) return g
-    const f = frames[name]
-    if (!f) return null
+    const found = frameOf(name)
+    if (!found) return null
+    const { f, sheet } = found
+    const { w: AW, h: AH } = sheet.size
     g = new THREE.PlaneGeometry(f.w, f.h)
     g.translate(0, f.h / 2, 0)
     const u0 = f.x / AW
@@ -184,10 +210,21 @@ export function createWalk(canvas, assets, cb) {
     return g
   }
   const spriteMat = new THREE.MeshBasicMaterial({ map: assets.sprites, transparent: true, alphaTest: 0.5, depthWrite: false })
+  /** Матеріал на кожен аркуш: спрайт малюється тим, де лежить його кадр. */
+  const sheetMats = Object.fromEntries(
+    SHEETS.map((sh) => [sh.tex, sh.tex === 'sprites' ? spriteMat : new THREE.MeshBasicMaterial({ map: assets[sh.tex], transparent: true, alphaTest: 0.5, depthWrite: false })])
+  )
+  const matOf = (name) => sheetMats[frameOf(name)?.sheet.tex] ?? spriteMat
   // Привид напівпрозорий, а alphaTest порівнює альфу вже з opacity — тож поріг майже нульовий
   // (альфа піксель-арту й так 0 або 1), інакше блідий привид зникав би повністю.
-  const ghostMat = spriteMat.clone()
-  ghostMat.alphaTest = 0.01
+  const ghostMats = Object.fromEntries(
+    Object.entries(sheetMats).map(([k, m]) => {
+      const g = m.clone()
+      g.alphaTest = 0.01
+      return [k, g]
+    })
+  )
+  const ghostMat = ghostMats.sprites
   const glowTex = glowTexture()
   const blobTex = blobTexture()
   const beamTex = beamTexture()
@@ -221,6 +258,65 @@ export function createWalk(canvas, assets, cb) {
   foam.position.set(MAP.w / 2, 0.05, MAP.h / 2)
   foam.renderOrder = -19
   scene3.add(foam)
+
+  /* ───── Стіни хати: вертикальні площини довкола підлоги ─────
+   * Аркуш home-walls.png (прямокутники — homeAtlas.walls). n — нормаль усередину кімнати:
+   * стіну, з-за якої дивиться камера, ховаємо (розріз, як у ляльковому будиночку), тож при
+   * повороті камери завжди видно, що всередині. Речі на стінах (layer 'wall') ховаються разом зі стіною.
+   */
+  const wallMat = new THREE.MeshBasicMaterial({ map: assets['home-walls'], transparent: true, alphaTest: 0.5, depthWrite: false })
+  const WS = homeAtlas.walls
+  const midX = (FLOOR.x0 + FLOOR.x1) / 2
+  const midY = (FLOOR.y0 + FLOOR.y1) / 2
+  const walls = [
+    { id: 'back', at: [midX, FLOOR.y0], rot: 0, n: [0, 1] },
+    { id: 'front', at: [midX, FLOOR.y1], rot: Math.PI, n: [0, -1] },
+    { id: 'left', at: [FLOOR.x0, midY], rot: Math.PI / 2, n: [1, 0] },
+    { id: 'right', at: [FLOOR.x1, midY], rot: -Math.PI / 2, n: [-1, 0] },
+  ].map((w) => {
+    const r = WS[w.id]
+    const g = new THREE.PlaneGeometry(r.w, r.h)
+    g.translate(0, r.h / 2, 0)
+    const [u0, u1, v1, v0] = [r.x / WS.size.w, (r.x + r.w) / WS.size.w, 1 - r.y / WS.size.h, 1 - (r.y + r.h) / WS.size.h]
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([u0, v1, u1, v1, u0, v0, u1, v0], 2))
+    const mesh = new THREE.Mesh(g, wallMat)
+    mesh.position.set(w.at[0], 0, w.at[1])
+    mesh.rotation.y = w.rot
+    mesh.renderOrder = -5
+    mesh.visible = false
+    scene3.add(mesh)
+    return { ...w, mesh }
+  })
+  /** Яка стіна зараз видна (камера всередині її півпростору). */
+  const wallShown = { back: false, front: false, left: false, right: false }
+  function updateWalls() {
+    for (const w of walls) {
+      const inside = !scene.outdoor && (camera.position.x - w.at[0]) * w.n[0] + (camera.position.z - w.at[1]) * w.n[1] > 0
+      w.mesh.visible = inside
+      wallShown[w.id] = inside
+    }
+  }
+  /** Куди на видимій стіні дивиться промінь (після rayFrom): { wall, at, h } або null. */
+  function wallHit() {
+    const h = raycaster.intersectObjects(walls.filter((w) => w.mesh.visible && w.id !== 'front').map((w) => w.mesh), false)[0]
+    if (!h) return null
+    const id = walls.find((w) => w.mesh === h.object).id
+    return { wall: id, at: id === 'back' ? h.point.x : h.point.z, h: h.point.y }
+  }
+  function wallAt(clientX, clientY) {
+    rayFrom(clientX, clientY)
+    return wallHit()
+  }
+
+  /** Поставити річ на стіну: трохи перед площиною стіни, обличчям у кімнату. */
+  function mountOnWall(p, mesh) {
+    const lift = 0.3
+    if (p.wall === 'back') mesh.position.set(p.at, p.h, FLOOR.y0 + lift)
+    else if (p.wall === 'left') mesh.position.set(FLOOR.x0 + lift, p.h, p.at)
+    else mesh.position.set(FLOOR.x1 - lift, p.h, p.at)
+    mesh.rotation.set(0, walls.find((w) => w.id === p.wall).rot, 0)
+    mesh.renderOrder = -4
+  }
 
   const cloudMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x0a1e32, transparent: true, opacity: 0.12, depthWrite: false })
   const clouds = [0, 1, 2].map(() => {
@@ -460,12 +556,14 @@ export function createWalk(canvas, assets, cb) {
     clearItems()
     for (const p of list) {
       const flat = p.layer === 'floor'
+      const onWall = p.layer === 'wall'
       const g = spriteGeo(p.s, flat)
       if (!g) continue
-      const mesh = new THREE.Mesh(g, spriteMat)
+      const mesh = new THREE.Mesh(g, matOf(p.s))
       mesh.position.set(p.x, flat ? 0.02 : 0, p.y)
       mesh.renderOrder = flat ? -10 : 0
-      const it = { p, mesh, flat, key: keyOf(p) }
+      if (onWall) mountOnWall(p, mesh)
+      const it = { p, mesh, flat, wall: onWall, key: keyOf(p) }
       mesh.userData.item = it
       items.push(it)
       if (!flat) billboards.push(mesh)
@@ -501,11 +599,11 @@ export function createWalk(canvas, assets, cb) {
   function drawGrid() {
     const ctx = gridCanvas.getContext('2d')
     ctx.clearRect(0, 0, MAP.w, MAP.h)
-    if (!scene.outdoor) return
+    const ground = scene.outdoor ? land : homeLand
     const busy = new Uint8Array(geo.cols * geo.rows)
     for (const p of list) for (const b of p.blocks ?? []) for (const c of geo.cellsOf(b)) if (c >= 0) busy[c] = 1
-    for (let c = 0; c < land.length; c++) {
-      if (!land[c]) continue
+    for (let c = 0; c < ground.length; c++) {
+      if (!ground[c]) continue
       const x = (c % geo.cols) * CELL
       const y = Math.floor(c / geo.cols) * CELL
       if (busy[c]) {
@@ -523,16 +621,16 @@ export function createWalk(canvas, assets, cb) {
 
   function rebuild() {
     if (!world) return
-    const { levels, chestOpen, deco } = world
+    const { levels, chestOpen, deco, interior } = world
     if (scene.outdoor) {
       list = [...placements(levels, chestOpen, deco), ...farmPlacements(farmView)]
       interact = INTERACT
       fx = effectsFor(levels, deco)
     } else {
       const lvl = Math.max(1, levels.house ?? 1)
-      list = homePlacements(lvl)
+      list = homePlacements(lvl, interior, INTERIOR_GEOM, interiorFootprint)
       interact = homeInteract(lvl)
-      fx = homeEffects()
+      fx = homeEffects(lvl)
     }
     grid = walkGrid(scene.walk, list)
     if (selected && !list.some((p) => p.uid === selected)) selected = null
@@ -580,9 +678,29 @@ export function createWalk(canvas, assets, cb) {
     prevChest = chestOpen
   }
 
-  function setWorld(levels, chestOpen, deco = []) {
+  let prevInterior = null
+  /** Сік у хаті: нова річ «падає» й попає, пересунута — попає, прибрана — пуф. */
+  function celebrateInterior(interior) {
+    if (prevInterior && !scene.outdoor) {
+      const next = new Map(interior.map((d) => [d.id, d]))
+      for (const d of interior) {
+        const old = prevInterior.get(d.id)
+        const wallItem = INTERIOR_GEOM[d.k]?.layer === 'wall'
+        if (!old) {
+          juice.set(d.id, { t0: t, power: 1, drop: wallItem || INTERIOR_GEOM[d.k]?.layer === 'floor' ? 0 : 10 })
+          if (!wallItem) particles.dust(d.x, d.y, 8, 0.8)
+          rig.addTrauma(0.08)
+        } else if (old.x !== d.x || old.y !== d.y || old.at !== d.at || old.h !== d.h || old.wall !== d.wall) juice.set(d.id, { t0: t, power: 0.7, drop: 0 })
+      }
+      for (const [id, d] of prevInterior) if (!next.has(id) && d.x != null) particles.puff(d.x, d.y - 3)
+    }
+    prevInterior = new Map(interior.map((d) => [d.id, d]))
+  }
+
+  function setWorld(levels, chestOpen, deco = [], interior = []) {
     celebrate(levels, chestOpen, deco)
-    world = { levels, chestOpen, deco }
+    celebrateInterior(interior)
+    world = { levels, chestOpen, deco, interior }
     rebuild()
     if (!dogPlaced) {
       dogPlaced = true
@@ -683,11 +801,14 @@ export function createWalk(canvas, assets, cb) {
     return raycaster.ray.intersectPlane(groundPlane, hitPoint) ? { x: hitPoint.x, y: hitPoint.z } : null
   }
 
-  /** Чи непрозорий піксель атласу під точкою UV. */
-  function opaque(uv) {
+  /** Чи непрозорий піксель спрайта name під точкою UV (у його аркуші). */
+  function opaque(name, uv) {
+    const sheet = frameOf(name)?.sheet
+    if (!sheet) return false
+    const { w: AW, h: AH } = sheet.size
     const px = Math.min(AW - 1, Math.floor(uv.x * AW))
     const py = Math.min(AH - 1, Math.floor((1 - uv.y) * AH))
-    return assets.alpha[(py * AW + px) * 4 + 3] > 40
+    return assets.alpha[sheet.tex][(py * AW + px) * 4 + 3] > 40
   }
 
   /**
@@ -707,7 +828,7 @@ export function createWalk(canvas, assets, cb) {
     let best = null
     let bestD = Infinity
     for (const h of raycaster.intersectObjects(billboards.filter((m) => m.visible), false)) {
-      if (!h.uv || !opaque(h.uv)) continue
+      if (!h.uv || !opaque(h.object.userData.item.p.s, h.uv)) continue
       const d = camera.position.distanceToSquared(h.object.position)
       if (d < bestD) {
         best = h
@@ -715,9 +836,11 @@ export function createWalk(canvas, assets, cb) {
       }
     }
     if (raycaster.ray.intersectPlane(groundPlane, hitPoint)) out.ground = { x: hitPoint.x, y: hitPoint.z }
+    out.wall = scene.outdoor ? null : wallHit()
     if (best) {
       const it = best.object.userData.item
-      const f = frames[it.p.s]
+      const { f, sheet } = frameOf(it.p.s)
+      const { w: AW, h: AH } = sheet.size
       out.item = it
       out.art = { x: it.p.x - f.w / 2 + (best.uv.x * AW - f.x), y: it.p.y - f.h + ((1 - best.uv.y) * AH - f.y) }
       if (it.p.plot != null) out.plot = it.p.plot
@@ -747,6 +870,62 @@ export function createWalk(canvas, assets, cb) {
    * й так, щоб до всіх будівель, скрині й причалу лишався прохід.
    * @returns {{ ok: boolean, reason?: string }}
    */
+  /** Чи можна поставити привид g — у поточній сцені. */
+  function canPlaceGhost(g) {
+    return scene.outdoor ? canPlace(g.kind, g.x, g.y, g.uid ?? null) : canPlaceHome(g)
+  }
+
+  /**
+   * Хата: на стіну — у межах стіни й не на іншу річ; на підлогу — на підлогу, не на зайняте
+   * (килим можна й під меблі), і так, щоб до ліжка, печі, полиці й дверей лишався прохід.
+   */
+  function canPlaceHome(gh) {
+    const g = INTERIOR_GEOM[gh.kind]
+    if (!g) return { ok: false, reason: 'Невідома річ' }
+    const others = list.filter((p) => !p.uid || p.uid !== gh.uid)
+    if (g.layer === 'wall') {
+      const [lo, hi] = wallSpan(gh.wall)
+      const r = wallRect(gh.kind, gh.at, gh.h)
+      if (r[0] < lo || r[0] + r[2] > hi || r[1] < 0 || r[1] + r[3] > WALL_H) return { ok: false, reason: 'Не влазить на стіну' }
+      for (const p of others) {
+        if (p.layer !== 'wall' || p.wall !== gh.wall || !p.kind) continue
+        if (overlaps(r, wallRect(p.kind, p.at, p.h))) return { ok: false, reason: 'Тут уже щось висить' }
+      }
+      return { ok: true }
+    }
+    const fp = interiorFootprint(gh.kind, gh.x, gh.y)
+    const cells = geo.cellsOf(fp)
+    if (cells.some((c) => c < 0 || !homeLand[c])) return { ok: false, reason: 'Тут ставити не можна' }
+    const busy = new Uint8Array(geo.cols * geo.rows)
+    for (const p of others) {
+      if (g.layer === 'floor') {
+        // Килим — лише не на інший килим.
+        if (p.layer === 'floor' && p.kind) for (const c of geo.cellsOf(interiorFootprint(p.kind, p.x, p.y))) if (c >= 0) busy[c] = 1
+      } else for (const b of p.blocks ?? []) for (const c of geo.cellsOf(b)) if (c >= 0) busy[c] = 1
+    }
+    if (cells.some((c) => busy[c])) return { ok: false, reason: 'Місце зайняте' }
+    if (g.layer === 'obj') {
+      const test = walkGrid(atlas.homeWalk, [...others, { blocks: [fp] }])
+      const me = geo.cellOf(body.x, body.y)
+      if (!test[me]) return { ok: false, reason: 'Тут стоїть мандрівник' }
+      if (!geo.allReachable(test, me, interact)) return { ok: false, reason: 'Це перекриє прохід' }
+    }
+    return { ok: true }
+  }
+
+  /** Геометрія привида: спрайт, чи лежить, чи висить. */
+  function ghostGeom(kind) {
+    if (scene.outdoor) {
+      const g = DECO_GEOM[kind]
+      return g && { sprite: g.sprite, floor: !!g.floor, wall: false }
+    }
+    const g = INTERIOR_GEOM[kind]
+    return g && { sprite: g.sprite, floor: g.layer === 'floor', wall: g.layer === 'wall' }
+  }
+  const footOf = (kind, x, y) => (scene.outdoor ? decoFootprint(kind, x, y) : interiorFootprint(kind, x, y))
+  /** Місце привида як рядок — щоб знати, чи він зрушив. */
+  const ghostKey = (g) => (g.wall ? `${g.wall}:${g.at}:${g.h}` : `${g.x},${g.y}`)
+
   function canPlace(kind, x, y, ignoreUid = null) {
     const g = DECO_GEOM[kind]
     if (!g) return { ok: false, reason: 'Невідомий предмет' }
@@ -778,11 +957,13 @@ export function createWalk(canvas, assets, cb) {
       ghostFoot.group.visible = false
       return
     }
-    const g = DECO_GEOM[ghost.kind]
-    ghostMesh.geometry = spriteGeo(g.sprite, !!g.floor)
+    const g = ghostGeom(ghost.kind)
+    ghostMesh.geometry = spriteGeo(g.sprite, g.floor)
+    ghostMesh.material = ghostMats[frameOf(g.sprite)?.sheet.tex] ?? ghostMat
     ghostMesh.renderOrder = g.floor ? -9 : 2
     ghostMesh.visible = true
-    ghostBlob.visible = !g.floor
+    ghostBlob.visible = !g.floor && !g.wall
+    if (g.wall) ghostFoot.group.visible = false
     const f = frames[g.sprite]
     ghostBlob.scale.set(Math.max(10, f.w * 0.8), 1, 6)
   }
@@ -920,11 +1101,22 @@ export function createWalk(canvas, assets, cb) {
     const p = pick(e.clientX, e.clientY)
     held = { cx: e.clientX, cy: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, p }
     if (mode === 'build') {
-      const onGhost = ghost && p.ground && (p.item === null || p.item?.p.uid === ghost.uid) && inBox(p.ground, grow(decoFootprint(ghost.kind, ghost.x, ghost.y), 4))
+      const gg = ghost && ghostGeom(ghost.kind)
+      if (gg?.wall && p.wall?.wall === ghost.wall) {
+        // Привид на стіні: хапаємо, якщо палець на ньому (з невеликим запасом).
+        const [x0, y0, w, h] = wallRect(ghost.kind, ghost.at, ghost.h)
+        if (p.wall.at >= x0 - 4 && p.wall.at <= x0 + w + 4 && p.wall.h >= y0 - 4 && p.wall.h <= y0 + h + 4) {
+          held.kind = 'ghost'
+          held.off = { at: ghost.at - p.wall.at, h: ghost.h + interiorSize(ghost.kind).h / 2 - p.wall.h }
+          held.cell = ghostKey(ghost)
+          return
+        }
+      }
+      const onGhost = gg && !gg.wall && p.ground && (p.item === null || p.item?.p.uid === ghost.uid) && inBox(p.ground, grow(footOf(ghost.kind, ghost.x, ghost.y), 4))
       if (onGhost) {
         held.kind = 'ghost'
         held.off = { x: ghost.x - p.ground.x, y: ghost.y - p.ground.y }
-        held.cell = `${ghost.x},${ghost.y}`
+        held.cell = ghostKey(ghost)
       } else {
         held.kind = 'pan'
         held.anchor = p.ground
@@ -962,13 +1154,25 @@ export function createWalk(canvas, assets, cb) {
         camera.updateMatrixWorld()
       }
     } else if (held.kind === 'ghost' && ghost) {
+      if (ghost.wall) {
+        const w = wallAt(e.clientX, e.clientY)
+        if (!w || w.wall !== ghost.wall) return
+        const tap = { wall: { wall: w.wall, at: w.at + held.off.at, h: w.h + held.off.h } }
+        const s = snapInterior(ghost.kind, tap)
+        const cell = s && ghostKey(s)
+        if (cell && cell !== held.cell) {
+          held.cell = cell
+          cb.onBuildTap({ ...tap, uid: null })
+        }
+        return
+      }
       const g = groundAt(e.clientX, e.clientY)
       if (!g) return
       const x = g.x + held.off.x
       const y = g.y + held.off.y
-      const s = snapDeco(ghost.kind, x, y)
-      const cell = `${s.x},${s.y}`
-      if (cell !== held.cell) {
+      const s = snapOf(ghost.kind, { x, y })
+      const cell = s && ghostKey(s)
+      if (cell && cell !== held.cell) {
         held.cell = cell
         cb.onBuildTap({ x, y, uid: null })
       }
@@ -982,10 +1186,16 @@ export function createWalk(canvas, assets, cb) {
       if (!pointers.size) held = null
       return
     }
-    if (mode === 'build' && !held.moved && held.p.ground) {
-      cb.onBuildTap({ x: held.p.ground.x, y: held.p.ground.y, uid: held.p.item?.p.uid ?? null })
+    if (mode === 'build' && !held.moved && (held.p.ground || held.p.wall)) {
+      cb.onBuildTap({ x: held.p.ground?.x, y: held.p.ground?.y, wall: held.p.wall, uid: held.p.item?.p.uid ?? null })
     }
     held = null
+  }
+
+  /** Прив'язати місце під пальцем до сітки / стіни — у поточній сцені. */
+  function snapOf(kind, tap) {
+    if (scene.outdoor) return tap.x == null ? null : snapDeco(kind, tap.x, tap.y)
+    return snapInterior(kind, tap)
   }
 
   const onWheel = (e) => {
@@ -1139,6 +1349,7 @@ export function createWalk(canvas, assets, cb) {
     camera.updateMatrixWorld()
     camRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
     camUp.set(0, 1, 0).applyQuaternion(camera.quaternion)
+    updateWalls()
 
     // Мандрівник: напрям — відносно екрана, кадри ходи — у темпі швидкості.
     const speed = Math.hypot(body.vx, body.vy)
@@ -1167,15 +1378,15 @@ export function createWalk(canvas, assets, cb) {
     // Спрайти дивляться в камеру; «поп» і падіння новеньких.
     for (const it of items) {
       const m = it.mesh
-      m.visible = !(ghost?.uid && it.p.uid === ghost.uid)
-      if (!it.flat) m.quaternion.copy(camera.quaternion)
+      m.visible = it.wall ? wallShown[it.p.wall] : !(ghost?.uid && it.p.uid === ghost.uid)
+      if (!it.flat && !it.wall) m.quaternion.copy(camera.quaternion)
       const j = it.key && juice.get(it.key)
       if (j) {
         const age = t - j.t0
         const [sx, sy] = popScale(age, j.power)
         if (it.flat) m.scale.set(sx, 1, sy)
         else m.scale.set(sx, sy, 1)
-        m.position.y = (it.flat ? 0.02 : 0) + dropHeight(age, j.drop)
+        m.position.y = it.wall ? it.p.h : (it.flat ? 0.02 : 0) + dropHeight(age, j.drop)
         if (age > 1) juice.delete(it.key)
       } else if (it.p.crop) {
         // Рослини ледь гойдаються на вітрі; стиглі — ще й поблискують.
@@ -1229,7 +1440,7 @@ export function createWalk(canvas, assets, cb) {
     gridMesh.visible = mode === 'build'
     const blink = 0.55 + Math.sin(t * 6) * 0.25
     const sel = mode === 'build' && selected && !ghost && list.find((p) => p.uid === selected)
-    if (sel) selFoot.set(decoFootprint(sel.kind, sel.x, sel.y), 0xffdc5a, 0.25 * blink, 0xffe678, blink)
+    if (sel && sel.layer !== 'wall') selFoot.set(footOf(sel.kind, sel.x, sel.y), 0xffdc5a, 0.25 * blink, 0xffe678, blink)
     else selFoot.group.visible = false
 
     // Рамка грядки, з якою працюватимеш.
@@ -1254,21 +1465,34 @@ export function createWalk(canvas, assets, cb) {
     if (ghost && mode === 'build') {
       // Привид ковзає до клітинки (а не стрибає), трохи «висить» над землею й тремтить, коли сюди не можна.
       const k = 1 - Math.exp(-25 * dt)
-      ghostVis.x += (ghost.x - ghostVis.x) * k
-      ghostVis.y += (ghost.y - ghostVis.y) * k
-      const g = DECO_GEOM[ghost.kind]
+      const g = ghostGeom(ghost.kind)
+      // На стіні привид ковзає вздовж неї (x — де, y — висота), на підлозі — по клітинках.
+      const tx = g.wall ? ghost.at : ghost.x
+      const ty = g.wall ? ghost.h : ghost.y
+      ghostVis.x += (tx - ghostVis.x) * k
+      ghostVis.y += (ty - ghostVis.y) * k
       const wig = ghostVis.badAt >= 0 && t - ghostVis.badAt < 0.3 ? Math.sin((t - ghostVis.badAt) * 60) * 2 * (1 - (t - ghostVis.badAt) / 0.3) : 0
-      ghostMesh.position.set(ghostVis.x, g.floor ? 0.12 : 2 + Math.sin(t * 4) * 1, ghostVis.y).addScaledVector(camRight, wig)
-      if (!g.floor) ghostMesh.quaternion.copy(camera.quaternion)
-      else ghostMesh.quaternion.identity()
+      if (g.wall) {
+        mountOnWall({ wall: ghost.wall, at: ghostVis.x, h: ghostVis.y }, ghostMesh)
+        ghostMesh.position.addScaledVector(camRight, wig)
+        ghostMesh.position.y = ghostVis.y
+        ghostMesh.renderOrder = 2
+      } else {
+        ghostMesh.position.set(ghostVis.x, g.floor ? 0.12 : 2 + Math.sin(t * 4) * 1, ghostVis.y).addScaledVector(camRight, wig)
+        if (!g.floor) ghostMesh.quaternion.copy(camera.quaternion)
+        else ghostMesh.quaternion.identity()
+      }
       const [sx, sy] = popScale(t - ghostVis.born, 0.6)
       ghostMesh.scale.set(sx, g.floor ? 1 : sy, g.floor ? sy : 1)
-      ghostMat.opacity = ghost.ok ? 0.6 + blink * 0.3 : 0.4
-      ghostMat.color.setRGB(1, ghost.ok ? 1 : 0.55, ghost.ok ? 1 : 0.5)
+      const gm = ghostMesh.material
+      gm.opacity = ghost.ok ? 0.6 + blink * 0.3 : 0.4
+      gm.color.setRGB(1, ghost.ok ? 1 : 0.55, ghost.ok ? 1 : 0.5)
       ghostBlob.position.set(ghostVis.x, 0.2, ghostVis.y)
-      const fp = decoFootprint(ghost.kind, ghost.x, ghost.y)
-      if (ghost.ok) ghostFoot.set(fp, 0x6ee678, 0.35, 0xaaffaa, 0.95)
-      else ghostFoot.set(fp, 0xff5046, 0.3 + 0.2 * blink, 0xff6e64, 1)
+      if (!g.wall) {
+        const fp = footOf(ghost.kind, ghost.x, ghost.y)
+        if (ghost.ok) ghostFoot.set(fp, 0x6ee678, 0.35, 0xaaffaa, 0.95)
+        else ghostFoot.set(fp, 0xff5046, 0.3 + 0.2 * blink, 0xff6e64, 1)
+      }
     }
 
     // Бульбашки врожаю над будівлями.
@@ -1305,7 +1529,8 @@ export function createWalk(canvas, assets, cb) {
   return {
     setWorld,
     setScene,
-    canPlace,
+    /** Прив'язати тап до сітки (острів, підлога хати) або стіни; null — сюди цю річ не можна. */
+    snap: (kind, tap) => snapOf(kind, tap),
     /** 'walk' — гуляємо, 'build' — пісочниця: палець рухає камеру, тап — вибір місця. */
     setMode(m) {
       if (m === mode) return
@@ -1329,15 +1554,15 @@ export function createWalk(canvas, assets, cb) {
     /** Привид предмета (або null). Повертає його разом із тим, чи можна тут ставити. */
     setGhost(g) {
       const prev = ghost
-      ghost = g ? { ...g, ...canPlace(g.kind, g.x, g.y, g.uid ?? null) } : null
+      ghost = g ? { ...g, ...canPlaceGhost(g) } : null
       if (ghost) {
         if (!prev || prev.kind !== ghost.kind || prev.uid !== ghost.uid) {
           // Новий привид з'являється одразу на місці й «попає».
-          ghostVis.x = ghost.x
-          ghostVis.y = ghost.y
+          ghostVis.x = ghost.wall ? ghost.at : ghost.x
+          ghostVis.y = ghost.wall ? ghost.h : ghost.y
           ghostVis.born = t
         }
-        if (!ghost.ok && (!prev || prev.ok || prev.x !== ghost.x || prev.y !== ghost.y)) ghostVis.badAt = t
+        if (!ghost.ok && (!prev || prev.ok || ghostKey(prev) !== ghostKey(ghost))) ghostVis.badAt = t
       }
       setGhostMesh()
       return ghost
@@ -1471,6 +1696,7 @@ export function createWalk(canvas, assets, cb) {
         if (o.geometry && ![...geoCache.values()].includes(o.geometry)) o.geometry.dispose()
         if (o.material) o.material.dispose()
       })
+      for (const m of [...Object.values(sheetMats), ...Object.values(ghostMats)]) m.dispose() // і ті, якими цього разу не малювали
       for (const tex of [glowTex, blobTex, beamTex, gridTex, foamTex]) tex.dispose()
       for (const name of ASSETS) assets[name].dispose()
       renderer.dispose()

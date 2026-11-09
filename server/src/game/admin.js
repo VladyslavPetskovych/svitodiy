@@ -1,4 +1,5 @@
 import {
+  addBalance,
   buildContainersReport,
   buildMonitorReport,
   addResourceToInventory,
@@ -65,17 +66,23 @@ export async function saveContact(userId, signed, botToken) {
 
 
 /* ───────── Стартовий запас адміна ─────────
- * Разово +1000 кожного ресурсу на адмінський номер (ADMIN_PHONES у specialAccess.js).
- * Прапорець у Redis гарантує, що бонус не нарахується вдруге; щоб видати ще раз —
- * змінити ADMIN_GRANT_ID. */
+ * Разові подарунки на адмінський номер (ADMIN_PHONES у specialAccess.js). Кожен має свій
+ * прапорець у Redis, тож нараховується рівно раз; щоб видати ще раз — новий id.
+ * Видаються при першому відкритті Mini App після деплою. */
 
-const ADMIN_GRANT_ID = "resources-1000-v1";
-const ADMIN_GRANT_AMOUNT = 1000;
+const ADMIN_GRANTS = [
+  {
+    id: "resources-1000-v1",
+    give: (userId) => Promise.all(RESOURCE_TYPES.map((res) => addResourceToInventory(userId, res.id, 1000))),
+  },
+  { id: "balance-1000-v1", give: (userId) => addBalance(userId, 1000) }, // +1000 ✨ промінчиків
+];
 
 export async function grantAdminResources(userId) {
   if (!(await hasAdminAccess(userId))) return;
   const r = getRedis();
-  const first = await r.set(`svitodiy:admingrant:${userId}:${ADMIN_GRANT_ID}`, "1", { NX: true });
-  if (first !== "OK") return;
-  await Promise.all(RESOURCE_TYPES.map((res) => addResourceToInventory(userId, res.id, ADMIN_GRANT_AMOUNT)));
+  for (const g of ADMIN_GRANTS) {
+    const first = await r.set(`svitodiy:admingrant:${userId}:${g.id}`, "1", { NX: true });
+    if (first === "OK") await g.give(userId);
+  }
 }

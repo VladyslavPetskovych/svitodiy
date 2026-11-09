@@ -1,14 +1,24 @@
 import homeAtlas from './home-atlas.json'
 import decorAtlas from './home-decor.json'
 import { CELL } from './layout.js'
-import { FLOOR, WALL_H } from './home.js'
+import { DOG_SPOT, FLOOR, HOME_EXIT, WALL_H } from './home.js'
 
 /**
  * Пісочниця в хатинці: геометрія речей, які гравець сам розставляє (назви, ціни й рівні — з сервера,
  * catalog.interior). layer: 'obj' — стоїть на підлозі (заважає ходити), 'floor' — лежить (килими,
  * по них ходять), 'wall' — висить на стіні. fw × fh — «ніжки» у клітинках сітки підлоги.
+ * act — що робить річ (підійти й натиснути): ліжко, піч, полиця; light — світло { dx, h, r }
+ * відносно якоря; dogBed — тут сплять пси, яким сказали «Додому».
  */
 export const INTERIOR_GEOM = {
+  // Колись постійні меблі — тепер такі самі речі.
+  bed: { sprite: 'home_bed', layer: 'obj', fw: 4, fh: 5, act: 'bed', label: 'Ліжко' },
+  stove: { sprite: 'home_stove', layer: 'obj', fw: 6, fh: 5, act: 'stove', label: 'Піч', light: { dx: -11, h: 8, r: 26 } },
+  table: { sprite: 'home_table', layer: 'obj', fw: 4, fh: 2 },
+  lamp_table: { sprite: 'home_table_3', layer: 'obj', fw: 4, fh: 2, light: { dx: 13, h: 19, r: 18 } },
+  stool: { sprite: 'home_stool', layer: 'obj', fw: 1, fh: 1 },
+  shelf: { sprite: 'home_shelf', layer: 'obj', fw: 4, fh: 1, act: 'shelf', label: 'Полиця з книжками' },
+  dog_bed: { sprite: 'home_dog_bed', layer: 'floor', fw: 3, fh: 2, dogBed: true },
   chest: { sprite: 'home_chest', layer: 'obj', fw: 3, fh: 1 },
   bench: { sprite: 'home_bench', layer: 'obj', fw: 4, fh: 1 },
   boots: { sprite: 'home_boots', layer: 'obj', fw: 1, fh: 1 },
@@ -69,7 +79,7 @@ export const INTERIOR_GEOM = {
   horseshoe: { sprite: 'hd_horseshoe', layer: 'wall' },
   wall_lamp: { sprite: 'hd_wall_lamp', layer: 'wall' },
   // Ще партія від локальної моделі (scripts/sd-home-items.mjs → art/home-ai → home-decor.png).
-  bookcase: { sprite: 'hd_bookcase', layer: 'obj', fw: 3, fh: 1 },
+  bookcase: { sprite: 'hd_bookcase', layer: 'obj', fw: 3, fh: 1, act: 'shelf', label: 'Книжкова шафа' },
   easel: { sprite: 'hd_easel', layer: 'obj', fw: 2, fh: 1 },
   rocking_horse: { sprite: 'hd_rocking_horse', layer: 'obj', fw: 3, fh: 1 },
   sofa: { sprite: 'hd_sofa', layer: 'obj', fw: 5, fh: 1 },
@@ -126,4 +136,37 @@ export function snapInterior(kind, tap) {
 export function wallRect(kind, at, h) {
   const { w, h: sh } = interiorSize(kind)
   return [at - w / 2, h, w, sh]
+}
+
+/**
+ * Що можна зробити в хаті: вийти — завжди, решта — від речей з act (ліжко, піч, полиця…).
+ * id — «<дія>:<id речі>», тож два ліжка — дві окремі точки. near — перед річчю (куди підходить
+ * мандрівник), box — сам спрайт (тап по ньому веде сюди).
+ */
+export function interiorInteract(interior = []) {
+  const list = [HOME_EXIT]
+  for (const d of interior) {
+    const g = INTERIOR_GEOM[d.k]
+    if (!g?.act || d.x == null) continue
+    const { w, h } = interiorSize(d.k)
+    const near = [Math.min(FLOOR.x1 - 6, Math.max(FLOOR.x0 + 6, d.x)), Math.min(FLOOR.y1 - 4, d.y + 6)]
+    list.push({ id: `${g.act}:${d.id}`, label: g.label, near, r: 16, box: [d.x - w / 2, d.y - h, w, h] })
+  }
+  return list
+}
+
+/** Світло від речей у хаті (піч, лампа на столі) — у форматі ефектів рушія. */
+export function interiorLights(interior = []) {
+  const lights = []
+  for (const d of interior) {
+    const l = INTERIOR_GEOM[d.k]?.light
+    if (l && d.x != null) lights.push({ ax: d.x, ay: d.y, dx: l.dx, h: l.h, r: l.r, warm: true, uid: d.id })
+  }
+  return lights
+}
+
+/** Куди йдуть спати пси, яким сказали «Додому»: перша лежанка в хаті, інакше — біля стіни. */
+export function dogBedSpot(interior = []) {
+  const d = interior.find((x) => INTERIOR_GEOM[x.k]?.dogBed && x.x != null)
+  return d ? { x: d.x, y: d.y - 4 } : DOG_SPOT
 }

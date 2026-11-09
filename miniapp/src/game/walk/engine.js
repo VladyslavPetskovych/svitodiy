@@ -13,9 +13,9 @@ import sirkoMeta from './sirko.json'
 const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
 import { beamTexture, blobTexture, bubbleTexture, createParticles, dropHeight, glowTexture, popScale, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
-import { DOG_BED, FLOOR, HOME_MAP, HOME_START, WALL_H, homeInteract, homePlacements } from './home.js'
+import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
 import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
-import { INTERIOR_GEOM, interiorFootprint, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
+import { INTERIOR_GEOM, dogBedSpot, interiorFootprint, interiorInteract, interiorLights, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
 import { createInput } from './input.js'
 import { CELL, FIELD, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotAt, plotCenter, plotRect, walkGrid } from './layout.js'
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
@@ -114,11 +114,9 @@ function effectsFor(levels, deco) {
   return { smoke, lights, fires }
 }
 
-/** Вогонь у печі хатинки; з 3-го рівня — ще й гасова лампа на столі. */
-function homeEffects(level) {
-  const lights = [{ ax: 200, ay: 110, dx: -11, h: 8, r: 26, warm: true }]
-  if (level >= 3) lights.push({ ax: 120, ay: 128, dx: 13, h: 19, r: 18, warm: true })
-  return { smoke: [], lights, fires: [] }
+/** Світло в хатинці — від речей, що його дають (піч, лампа на столі), де б вони не стояли. */
+function homeEffects(interior) {
+  return { smoke: [], lights: interiorLights(interior), fires: [] }
 }
 
 /** До якої будівлі / точки належить спрайт — для «попу» при покращенні. */
@@ -428,7 +426,10 @@ export function createWalk(canvas, assets, cb) {
   const dogById = (id) => dogs.find((d) => d.id === id)
   /** Пси, що зараз поруч у цій сцені (решта — в іншій: у хаті чи надворі). */
   const presentDogs = () => dogs.filter((d) => d.sceneId === scene.id && d.visible)
-  const bedSpot = (dog) => ({ x: DOG_BED.x + (dog.index ? -8 : 6), y: DOG_BED.y - 4 + dog.index * 3 })
+  const bedSpot = (dog) => {
+    const b = dogBedSpot(world?.interior)
+    return { x: b.x + (dog.index ? -8 : 6), y: b.y + dog.index * 3 }
+  }
   const doorSpot = () => ({ x: SPOTS.house.x, y: SPOTS.house.y + 10 })
   const cfgKeyOf = (c) => `${c.mode}|${c.sit ? `${c.sit.scene}:${c.sit.x}:${c.sit.y}` : ''}`
 
@@ -651,10 +652,9 @@ export function createWalk(canvas, assets, cb) {
       interact = INTERACT
       fx = effectsFor(levels, deco)
     } else {
-      const lvl = Math.max(1, levels.house ?? 1)
-      list = homePlacements(lvl, interior, INTERIOR_GEOM, interiorFootprint)
-      interact = homeInteract(lvl)
-      fx = homeEffects(lvl)
+      list = homePlacements(interior, INTERIOR_GEOM, interiorFootprint)
+      interact = interiorInteract(interior)
+      fx = homeEffects(interior)
     }
     grid = walkGrid(scene.walk, list)
     if (selected && !list.some((p) => p.uid === selected)) selected = null
@@ -902,7 +902,7 @@ export function createWalk(canvas, assets, cb) {
 
   /**
    * Хата: на стіну — у межах стіни й не на іншу річ; на підлогу — на підлогу, не на зайняте
-   * (килим можна й під меблі), і так, щоб до ліжка, печі, полиці й дверей лишався прохід.
+   * (килим можна й під меблі), і так, щоб до дверей і речей з дією (ліжко, піч, полиця) лишався прохід.
    */
   function canPlaceHome(gh) {
     const g = INTERIOR_GEOM[gh.kind]
@@ -933,7 +933,9 @@ export function createWalk(canvas, assets, cb) {
       const test = walkGrid(atlas.homeWalk, [...others, { blocks: [fp] }])
       const me = geo.cellOf(body.x, body.y)
       if (!test[me]) return { ok: false, reason: 'Тут стоїть мандрівник' }
-      if (!geo.allReachable(test, me, interact)) return { ok: false, reason: 'Це перекриє прохід' }
+      // Мають лишитись досяжними двері й ті речі, до яких і зараз можна підійти (не та, яку несемо).
+      const must = interact.filter((it) => (!gh.uid || !it.id.endsWith(`:${gh.uid}`)) && geo.allReachable(grid, me, [it]))
+      if (!geo.allReachable(test, me, must)) return { ok: false, reason: 'Це перекриє прохід' }
     }
     return { ok: true }
   }

@@ -3,22 +3,27 @@ import { addBalance, addResourceToInventory, consumeResources, getBalance, getRe
 import { GameError, badRequest, conflict } from "./errors.js";
 import { getHome } from "./homestead.js";
 import { homeOwner } from "./household.js";
-import { INTERIOR_DEFAULTS } from "./interiorDefaults.js";
 import { floorKey, interiorKey, takeCooldown } from "./keys.js";
 
 /**
  * Пісочниця в хатинці: гравець сам розставляє меблі й вішає речі на стіни.
- * Ліжко, піч, стіл з ослінчиками, полиця й лежанка псів — постійні (з ними пов'язані дії),
- * решта — тут. Геометрія (розмір «ніжок», стіна чи підлога) — на клієнті, miniapp/src/game/walk/interior.js.
- *
- * Перше відкриття хати розставляє ті речі, що вже були на поточному рівні хатинки (безкоштовно,
- * тож і повернути за них нічого не можна). Далі гравець вільно їх пересуває, прибирає й докуповує.
+ * Хата починається порожньою, і все в ній — зокрема ліжко, піч, стіл і лежанка псів — можна
+ * поставити, пересунути й прибрати. Дії (поспати, готувати, читати) — від самих речей, де б вони
+ * не стояли. Геометрія (розмір «ніжок», стіна чи підлога) — на клієнті, miniapp/src/game/walk/interior.js.
  * Нові речі відкриваються з рівнем хатинки (level).
  *
  * Запис: hash «id → JSON»: { k, x, y } на підлозі або { k, w, a, h } на стіні
  * (w — 'back' | 'left' | 'right', a — де вздовж стіни, h — висота низу над підлогою); f: 1 — безкоштовна.
  */
 export const INTERIOR = [
+  // Основне (колись стояло в хаті завжди)
+  { id: "bed", cat: "furniture", name: "Ліжко з периною", emoji: "🛏", level: 1, cost: { plank: 4, seaweed: 1 } },
+  { id: "stove", cat: "kitchen", name: "Піч", emoji: "🔥", level: 1, cost: { stone: 6 } },
+  { id: "table", cat: "furniture", name: "Стіл зі скатертиною", emoji: "🍞", level: 1, cost: { plank: 3 } },
+  { id: "stool", cat: "furniture", name: "Ослінчик", emoji: "🪑", level: 1, cost: { plank: 1 } },
+  { id: "dog_bed", cat: "furniture", name: "Лежанка для псів", emoji: "🐕", level: 1, cost: { twig: 2, seaweed: 1 } },
+  { id: "shelf", cat: "furniture", name: "Полиця з книжками", emoji: "📖", level: 2, cost: { plank: 3 } },
+  { id: "lamp_table", cat: "furniture", name: "Стіл із гасовою лампою", emoji: "🪔", level: 3, cost: { plank: 3, metal_scrap: 1, glass_shard: 1 } },
   // Меблі
   { id: "chest", cat: "furniture", name: "Скриня-посаг", emoji: "🧳", level: 1, cost: { plank: 4, metal_scrap: 1 } },
   { id: "bench", cat: "furniture", name: "Лава з подушками", emoji: "🪑", level: 1, cost: { plank: 3 } },
@@ -123,7 +128,10 @@ const BY_ID = new Map(INTERIOR.map((d) => [d.id, d]));
 const ROOM = { x0: 8, x1: 232, y0: 54, y1: 184, wallH: 54 };
 const WALLS = new Set(["back", "left", "right"]);
 const ITEM_ID = /^[a-z0-9]{6,16}$/;
+/** Службові поля в hash (не речі): позначка, що стартові подарунки вже прибрано. */
 const SEEDED = "~seeded";
+const EMPTIED = "~emptied";
+const isMeta = (field) => field.startsWith("~");
 
 const newId = () => randomBytes(6).toString("hex");
 
@@ -149,23 +157,24 @@ function toItem(id, raw) {
   }
 }
 
-/** Речі в хатинці; перше відкриття розставляє стандартні для поточного рівня. */
+/**
+ * Речі в хатинці. Раніше перше відкриття розставляло безкоштовні стартові речі (f: 1) — тепер хата
+ * починається порожньою, тож ті подарунки один раз прибираємо (куплене гравцем лишається).
+ */
 export async function getInterior(userId) {
   const r = getRedis();
   const k = await keyOf(userId);
-  if (await r.hSetNX(k, SEEDED, "1")) {
-    const lvl = await houseLevel(userId);
-    const seed = {};
-    for (const [from, to, kind, pos] of INTERIOR_DEFAULTS) {
-      if (lvl < from || lvl > to) continue;
-      seed[newId()] = JSON.stringify({ k: kind, ...pos, f: 1 });
-    }
-    if (Object.keys(seed).length) await r.hSet(k, seed);
+  let h = await r.hGetAll(k);
+  if (!h[EMPTIED] && (await r.hSetNX(k, EMPTIED, "1"))) {
+    const gifts = Object.entries(h)
+      .filter(([id, raw]) => !isMeta(id) && raw.includes('"f":1'))
+      .map(([id]) => id);
+    if (gifts.length || h[SEEDED]) await r.hDel(k, [...gifts, SEEDED]);
+    h = await r.hGetAll(k);
   }
-  const h = await r.hGetAll(k);
   const out = [];
   for (const [id, raw] of Object.entries(h)) {
-    if (id === SEEDED) continue;
+    if (isMeta(id)) continue;
     const item = toItem(id, raw);
     if (item) out.push(item);
   }
@@ -217,7 +226,8 @@ export async function placeInterior(userId, body) {
   await lock(userId);
   const r = getRedis();
   const k = await keyOf(userId);
-  if ((await r.hLen(k)) - 1 >= INTERIOR_MAX) throw conflict("full", `У хаті вже ${INTERIOR_MAX} речей — прибери щось.`);
+  const count = (await r.hKeys(k)).filter((f) => !isMeta(f)).length;
+  if (count >= INTERIOR_MAX) throw conflict("full", `У хаті вже ${INTERIOR_MAX} речей — прибери щось.`);
   await pay(userId, def.cost);
   const id = newId();
   await r.hSet(k, id, JSON.stringify({ k: def.id, ...pos }));

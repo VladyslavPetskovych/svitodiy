@@ -10,10 +10,9 @@ import homeAtlas from '../walk/home-atlas.json'
 import decorAtlas from '../walk/home-decor.json'
 import artVersion from '../walk/version.json'
 import { DECO_GEOM } from '../walk/decor.js'
-import { INTERIOR_GEOM } from '../walk/interior.js'
+import { INTERIOR_GEOM, interiorInteract } from '../walk/interior.js'
 import { DEFAULT_FLOOR, FLOOR_COLORS, FLOOR_SHEET, floorRect } from '../walk/floors.js'
 import { DOGS, dogById } from '../walk/companion.js'
-import { homeInteract } from '../walk/home.js'
 import { INTERACT } from '../walk/layout.js'
 import { BuildingSheet, DailySheet } from './Home.jsx'
 import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
@@ -29,6 +28,8 @@ const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Ув
 const dogOf = (id) => (id?.startsWith('dog:') ? dogById(id.slice(4)) : null)
 /** Грядки на полі — «plot:<№>». */
 const plotOf = (id) => (id?.startsWith('plot:') ? Number(id.slice(5)) : null)
+/** Дія в хаті «bed:<id речі>» → «bed» (у хаті може бути кілька ліжок чи полиць). */
+const actOf = (id) => id?.split(':')[0]
 const FEED_TEXT = [(n) => `😋 ${n} уминає за обидві щоки!`, (n) => `😋 Хрум-хрум! ${n} задоволений.`]
 const DOG_PETS = [
   (n) => `🐶 ${n} радісно махає хвостом!`,
@@ -220,9 +221,9 @@ export default function IslandWalk() {
     else if (id === 'chest') setDaily(true)
     else if (id === 'fishing') switchTab('fishing')
     else if (id === 'boat') switchTab('map')
-    else if (id === 'bed') toast('😴 Подрімав під вишитою ковдрою — сил додалось!')
-    else if (id === 'stove') switchTab('backpack') // готують рибу в рюкзаку
-    else if (id === 'shelf') switchTab('journal')
+    else if (actOf(id) === 'bed') toast('😴 Подрімав під вишитою ковдрою — сил додалось!')
+    else if (actOf(id) === 'stove') switchTab('backpack') // готують рибу в рюкзаку
+    else if (actOf(id) === 'shelf') switchTab('journal')
   }
 
   /* ───── Пісочниця: дії ───── */
@@ -450,7 +451,7 @@ export default function IslandWalk() {
     ? { id: near, label: `Песик ${nearDog.name}` }
     : plotV
       ? { id: near, label: plotInfo.label }
-      : (indoors ? homeInteract(Math.max(1, home.levels.house)) : INTERACT).find((i) => i.id === near)
+      : (indoors ? interiorInteract(interior) : INTERACT).find((i) => i.id === near)
   const showSeeds = !build && !indoors && (plotV ? plotV.action === 'plant' || plotV.action === 'till' : near === 'farmshop')
   const dogInfo = nearDog ? state.dogs?.[nearDog.id] : null
   const building = catalog.buildings.find((b) => b.id === sheet)
@@ -465,7 +466,7 @@ export default function IslandWalk() {
               ? 'Обери річ і торкнись підлоги чи стіни, перетягни привид, куди треба. У «Підлозі» — візерунок і колір.'
               : 'Тягни пальцем, щоб роззирнутися. Обери предмет, торкнись місця — і перетягни привид, куди треба.'
             : indoors
-              ? 'Тепло біля печі. Двері внизу ведуть надвір.'
+              ? 'Твоя хатинка — облаштуй її як хочеш. Двері внизу ведуть надвір.'
               : 'Торкнись землі — підеш туди. Двома пальцями — наближення.'
         }
       />
@@ -574,7 +575,7 @@ export default function IslandWalk() {
                     </>
                   ) : (
                     <PxButton size="sm" variant="green" onClick={() => interact(spot.id)}>
-                      {nearDog ? 'Погладити' : (ACTION[spot.id] ?? 'Відкрити')}
+                      {nearDog ? 'Погладити' : (ACTION[actOf(spot.id)] ?? 'Відкрити')}
                     </PxButton>
                   )}
                   {nearDog && (
@@ -598,7 +599,7 @@ export default function IslandWalk() {
                   transition={{ duration: 0.15 }}
                 >
                   {indoors
-                    ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.'
+                    ? interior.length ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.' : 'Хата порожня — натисни «Облаштувати» й постав, що хочеш.'
                     : 'Тапни будівлю чи грядку — мандрівник сам дійде. На ПК — WASD, E — дія, коліщатко — зум.'}
                 </motion.p>
               )}
@@ -939,6 +940,7 @@ function PlotIcon({ v, items }) {
 }
 
 function spotIcon(catalog, id) {
+  if (ICONS[actOf(id)]) return ICONS[actOf(id)]
   return catalog.buildings.find((b) => b.id === id)?.emoji ?? ICONS[id] ?? '❔'
 }
 
@@ -946,9 +948,9 @@ function spotHint(catalog, levels, chestOpen, id) {
   if (id.startsWith('dog:')) return 'Вірний пес — ходить за тобою слідом'
   if (id === 'exit') return 'Повернутися на острів'
   if (id === 'farmshop') return 'Насіння, продаж урожаю й поради'
-  if (id === 'bed') return 'Перина й вишита ковдра'
-  if (id === 'stove') return 'Готують рибу — у рюкзаку'
-  if (id === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'
+  if (actOf(id) === 'bed') return 'Перина й вишита ковдра'
+  if (actOf(id) === 'stove') return 'Готують рибу — у рюкзаку'
+  if (actOf(id) === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'
   if (id === 'chest') return chestOpen ? 'Сьогодні вже відкрито — повертайся завтра' : 'Щоденна нагорода чекає!'
   if (id === 'fishing') return 'Закинути вудку з краю причалу'
   if (id === 'boat') return 'Попливти до інших островів'

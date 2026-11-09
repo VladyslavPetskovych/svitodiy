@@ -3136,7 +3136,7 @@ if (pi > 0) {
     const room = new Img(HOME_MAP.w, HOME_MAP.h)
     room.blit(home, 0, 0)
     room.blit(walls.back, FLOOR.x0, 0) // задня стіна «розгорнута» вгору, як у старому 2D
-    const inside = homePlacements(lvl).filter((q) => q.layer !== 'wall' || q.wall === 'back')
+    const inside = homePlacements().filter((q) => q.layer !== 'wall' || q.wall === 'back')
     inside.push({ s: 'hero_up_0', x: 120, y: 170, layer: 'obj' })
     for (const q of [...inside.filter((q) => q.layer === 'floor'), ...inside.filter((q) => q.layer !== 'floor').sort((a, b) => a.y - b.y)]) {
       const sp = sprites[q.s]

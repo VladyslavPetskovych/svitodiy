@@ -68,6 +68,22 @@ export const INTERIOR_GEOM = {
   pike_trophy: { sprite: 'hd_pike_trophy', layer: 'wall' },
   horseshoe: { sprite: 'hd_horseshoe', layer: 'wall' },
   wall_lamp: { sprite: 'hd_wall_lamp', layer: 'wall' },
+  // Ще партія від локальної моделі (scripts/sd-home-items.mjs → art/home-ai → home-decor.png).
+  bookcase: { sprite: 'hd_bookcase', layer: 'obj', fw: 3, fh: 1 },
+  easel: { sprite: 'hd_easel', layer: 'obj', fw: 2, fh: 1 },
+  rocking_horse: { sprite: 'hd_rocking_horse', layer: 'obj', fw: 3, fh: 1 },
+  sofa: { sprite: 'hd_sofa', layer: 'obj', fw: 5, fh: 1 },
+  aquarium: { sprite: 'hd_aquarium', layer: 'obj', fw: 3, fh: 1 },
+  globe: { sprite: 'hd_globe', layer: 'obj', fw: 2, fh: 1 },
+  birdcage: { sprite: 'hd_birdcage', layer: 'obj', fw: 2, fh: 1 },
+  piano: { sprite: 'hd_piano', layer: 'obj', fw: 4, fh: 1 },
+  telescope: { sprite: 'hd_telescope', layer: 'obj', fw: 2, fh: 1 },
+  tea_table: { sprite: 'hd_tea_table', layer: 'obj', fw: 2, fh: 1 },
+  round_rug: { sprite: 'hd_round_rug', layer: 'floor', fw: 6, fh: 3 },
+  ship_wheel: { sprite: 'hd_ship_wheel', layer: 'wall' },
+  life_ring: { sprite: 'hd_life_ring', layer: 'wall' },
+  sea_painting: { sprite: 'hd_sea_painting', layer: 'wall' },
+  ship_bottle: { sprite: 'hd_ship_bottle', layer: 'obj', fw: 2, fh: 1 },
 }
 
 /** Розмір спрайта речі (px світу). */

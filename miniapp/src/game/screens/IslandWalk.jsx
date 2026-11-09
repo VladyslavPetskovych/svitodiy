@@ -11,6 +11,7 @@ import decorAtlas from '../walk/home-decor.json'
 import artVersion from '../walk/version.json'
 import { DECO_GEOM } from '../walk/decor.js'
 import { INTERIOR_GEOM } from '../walk/interior.js'
+import { DEFAULT_FLOOR, FLOOR_COLORS, FLOOR_SHEET, floorRect } from '../walk/floors.js'
 import { DOGS, dogById } from '../walk/companion.js'
 import { homeInteract } from '../walk/home.js'
 import { INTERACT } from '../walk/layout.js'
@@ -19,6 +20,7 @@ import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
 
 const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
+const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
 const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱' }
 /** Що написати на кнопці дії. */
@@ -46,6 +48,7 @@ const CATS_HOME = [
   { value: 'kitchen', label: '🍲 Кухня' },
   { value: 'textile', label: '🧶 Килими' },
   { value: 'wall', label: '🖼 Стіни' },
+  { value: 'floor', label: '🟫 Підлога' },
 ]
 
 /** Рідний острів зсередини: ходиш мандрівником, підходиш до будівель — або будуєш у пісочниці. */
@@ -66,6 +69,7 @@ export default function IslandWalk() {
   const [sel, setSel] = useState(null) // id виділеної прикраси
   const [busy, setBusy] = useState(false)
   const [scene, setScene] = useState('island') // 'island' | 'home'
+  const [floorTry, setFloorTry] = useState(null) // { p, c } — приміряємо ще не куплений візерунок
   const indoors = scene === 'home'
   // Город і пси.
   const [farmTab, setFarmTab] = useState(null) // шторка комори: 'seeds' | 'sell' | 'guide' | null
@@ -77,6 +81,7 @@ export default function IslandWalk() {
   const { home } = state
   const deco = state.deco ?? NO_DECO
   const interior = state.interior ?? NO_DECO
+  const floor = state.floor ?? DEFAULT_FLOOR_STATE
   const houseLevel = Math.max(1, home.levels.house ?? 1)
   /** Пісочниця: острів (декор) чи хатинка (меблі й речі на стінах). */
   const sandbox = indoors
@@ -301,6 +306,52 @@ export default function IslandWalk() {
     toast(Object.keys(res.refund).length ? `Прибрано. Повернуто: ${formatAmounts(items, res.refund)}` : 'Прибрано')
   }
 
+  /* ───── Підлога ───── */
+
+  /** Постелити: свій візерунок — одразу (колір безкоштовний), новий — спершу приміряти, потім «Купити». */
+  const chooseFloor = async (p, c) => {
+    const def = catalog.floors?.find((f) => f.id === p)
+    if (!def || busy) return
+    if (floor.owned.includes(p)) {
+      setFloorTry(null)
+      if (floor.p === p && floor.c === c) return
+      setBusy(true)
+      engine.current?.setFloor({ p, c }) // одразу, не чекаючи сервера
+      const res = await act('POST', '/home/floor', { pattern: p, color: c })
+      setBusy(false)
+      if (res) haptic('success')
+      else engine.current?.setFloor(floor)
+      return
+    }
+    if (def.level > houseLevel) {
+      haptic('warning')
+      toast(`🔒 Відкриється, коли хатинка стане ${def.level}-го рівня`, 'error')
+      return
+    }
+    haptic('select')
+    setFloorTry({ p, c })
+  }
+  const buyFloor = async () => {
+    const def = floorTry && catalog.floors?.find((f) => f.id === floorTry.p)
+    if (!def || busy) return
+    if (!canAfford(def.cost, state.balance, state.inventory)) {
+      haptic('warning')
+      toast(`Не вистачає: ${costText(items, def.cost, { ...state.inventory, balance: state.balance })}`, 'error')
+      return
+    }
+    setBusy(true)
+    const res = await act('POST', '/home/floor', { pattern: floorTry.p, color: floorTry.c })
+    setBusy(false)
+    if (!res) return
+    haptic('success')
+    setFloorTry(null)
+    toast(`${def.emoji} Нова підлога — ${def.name.toLowerCase()}!`)
+  }
+  // Рушій показує приміряну підлогу або збережену.
+  useEffect(() => {
+    engine.current?.setFloor(floorTry ?? floor)
+  }, [ready, floorTry, floor])
+
   const enterBuild = () => {
     haptic('medium')
     setCat(indoors ? 'furniture' : 'plants')
@@ -309,6 +360,7 @@ export default function IslandWalk() {
   }
   const exitBuild = () => {
     setBuild(false)
+    setFloorTry(null)
     setPick(null)
     setGhost(null)
     setSel(null)
@@ -318,6 +370,7 @@ export default function IslandWalk() {
   useBackButton(scene === 'home', () => goScene('island'))
   // «Назад» у Telegram: спершу скасовує вибір, потім виходить із будівництва.
   useBackButton(build, () => {
+    if (floorTry) return setFloorTry(null)
     if (!ghost && !pick && !sel) return exitBuild()
     clearGhost()
     select(null)
@@ -409,11 +462,11 @@ export default function IslandWalk() {
         subtitle={
           build
             ? indoors
-              ? 'Обери річ і торкнись підлоги чи стіни, перетягни привид, куди треба. Поверни камеру ⟲, щоб дістати іншу стіну.'
+              ? 'Обери річ і торкнись підлоги чи стіни, перетягни привид, куди треба. У «Підлозі» — візерунок і колір.'
               : 'Тягни пальцем, щоб роззирнутися. Обери предмет, торкнись місця — і перетягни привид, куди треба.'
             : indoors
               ? 'Тепло біля печі. Двері внизу ведуть надвір.'
-              : 'Торкнись землі — підеш туди. Двома пальцями — поворот і наближення.'
+              : 'Торкнись землі — підеш туди. Двома пальцями — наближення.'
         }
       />
 
@@ -450,7 +503,19 @@ export default function IslandWalk() {
           indoor={indoors}
           houseLevel={houseLevel}
           cat={cat}
-          setCat={setCat}
+          setCat={(c) => {
+            setCat(c)
+            setFloorTry(null)
+            if (c === 'floor') {
+              clearGhost()
+              select(null)
+            }
+          }}
+          floor={floor}
+          floorTry={floorTry}
+          onFloor={chooseFloor}
+          onBuyFloor={buyFloor}
+          onCancelFloor={() => setFloorTry(null)}
           pick={pick}
           ghost={ghost}
           sel={sel}
@@ -534,7 +599,7 @@ export default function IslandWalk() {
                 >
                   {indoors
                     ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.'
-                    : 'Тапни будівлю чи грядку — мандрівник сам дійде. На ПК — WASD, E — дія, Q/R — поворот, коліщатко — зум.'}
+                    : 'Тапни будівлю чи грядку — мандрівник сам дійде. На ПК — WASD, E — дія, коліщатко — зум.'}
                 </motion.p>
               )}
             </AnimatePresence>
@@ -584,8 +649,6 @@ function CameraControls({ engine, onWhistle }) {
   )
   return (
     <div className="absolute top-2 right-2 flex gap-1">
-      {btn('⟲', 'Повернути ліворуч', (e) => e?.rotate(-1))}
-      {btn('⟳', 'Повернути праворуч', (e) => e?.rotate(1))}
       {btn('+', 'Наблизити', (e) => e?.zoom(0.8))}
       {btn('−', 'Віддалити', (e) => e?.zoom(1.25))}
       {btn('📯', 'Покликати псів', () => onWhistle())}
@@ -595,7 +658,7 @@ function CameraControls({ engine, onWhistle }) {
 
 /* ───────── Панель пісочниці ───────── */
 
-function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, onDone }) {
+function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, onDone, floor, floorTry, onFloor, onBuyFloor, onCancelFloor }) {
   const { catalog, state, items } = useGame()
   const decor = (indoor ? catalog.interior : catalog.decor) ?? []
   const placed = (indoor ? state.interior : state.deco) ?? []
@@ -604,8 +667,30 @@ function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, o
   const active = ghost ? defOf(ghost.kind) : pick ? defOf(pick) : null
   const where = (d) => (indoor ? (d.wall ? 'на стіні, де повісити' : 'на підлозі, де поставити') : 'на острові, де поставити')
 
+  const floorDef = floorTry && catalog.floors?.find((f) => f.id === floorTry.p)
+
   let context
-  if (ghost && active) {
+  if (indoor && cat === 'floor') {
+    context = floorDef ? (
+      <>
+        <FloorThumb f={floorTry} w={34} h={34} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-extrabold">
+            {floorDef.name} · {FLOOR_COLORS[floorTry.p][floorTry.c].name.toLowerCase()}
+          </p>
+          <p className="truncate text-[11px] text-cream/75">Приміряй кольори · ціна: {costText(items, floorDef.cost)}</p>
+        </div>
+        <PxButton size="sm" variant="green" disabled={busy} onClick={onBuyFloor}>
+          Купити
+        </PxButton>
+        <PxButton size="sm" variant="paper" onClick={onCancelFloor} aria-label="Скасувати">
+          ✕
+        </PxButton>
+      </>
+    ) : (
+      <p className="flex-1 text-center text-[12px] text-cream/80">Обери візерунок і колір. Куплений візерунок перефарбовуєш безкоштовно.</p>
+    )
+  } else if (ghost && active) {
     context = (
       <>
         <DecoIcon kind={active.id} box={34} indoor={indoor} />
@@ -669,6 +754,9 @@ function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, o
 
       <Segmented options={indoor ? CATS_HOME : CATS} value={cat} onChange={setCat} />
 
+      {indoor && cat === 'floor' ? (
+        <FloorPicker floor={floor} floorTry={floorTry} houseLevel={houseLevel} onFloor={onFloor} />
+      ) : (
       <div className="no-scrollbar -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-1">
         {decor
           .filter((d) => d.cat === cat)
@@ -707,11 +795,104 @@ function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, o
             )
           })}
       </div>
+      )}
 
       <PxButton variant="green" size="lg" className="w-full" onClick={onDone}>
         ✓ Готово
       </PxButton>
     </div>
+  )
+}
+
+/** Візерунки підлоги (картки з цінами) і кольори вибраного візерунку. */
+function FloorPicker({ floor, floorTry, houseLevel, onFloor }) {
+  const { catalog, state, items } = useGame()
+  const shown = floorTry ?? floor
+  return (
+    <>
+      <div className="no-scrollbar -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-1">
+        {(catalog.floors ?? []).map((d) => {
+          const owned = floor.owned.includes(d.id)
+          const locked = !owned && d.level > houseLevel
+          const affordable = owned || (!locked && canAfford(d.cost, state.balance, state.inventory))
+          const chosen = shown.p === d.id
+          const c = chosen ? shown.c : floor.p === d.id ? floor.c : 0
+          return (
+            <motion.button
+              key={d.id}
+              type="button"
+              whileTap={{ scale: 0.93 }}
+              onClick={() => onFloor(d.id, c)}
+              className={`px-slot relative flex w-[84px] shrink-0 flex-col items-center gap-1 py-1.5 ${affordable ? '' : 'opacity-55'}`}
+              style={chosen ? { boxShadow: '0 0 0 2px #ffcf3f, 0 0 10px #ffcf3f' } : undefined}
+            >
+              <FloorThumb f={{ p: d.id, c }} w={64} h={40} />
+              {locked && <span className="absolute top-0.5 right-1 font-pixel text-[9px] text-ink">🔒{d.level}</span>}
+              <span className="w-full truncate px-1 text-center text-[10px] leading-tight font-extrabold text-ink">{d.name}</span>
+              <span className="flex min-h-[14px] flex-wrap justify-center gap-x-1 px-0.5 text-[9px] leading-tight text-ink-soft">
+                {owned ? (
+                  <span className="text-[#2f6b1f]">{floor.p === d.id ? '✓ постелено' : '✓ куплено'}</span>
+                ) : Object.keys(d.cost).length ? (
+                  Object.entries(d.cost).map(([id, n]) => {
+                    const have = id === 'balance' ? state.balance : (state.inventory[id] ?? 0)
+                    return (
+                      <span key={id} className={`inline-flex items-center ${have >= n ? '' : 'text-[#9a2f1d]'}`}>
+                        {id === 'balance' ? '✨' : <ItemIcon item={itemOf(items, id)} size={13} />}
+                        {n}
+                      </span>
+                    )
+                  })
+                ) : (
+                  'безкоштовно'
+                )}
+              </span>
+            </motion.button>
+          )
+        })}
+      </div>
+      <div className="px-wood flex items-center justify-center gap-2 px-2 py-1.5">
+        {FLOOR_COLORS[shown.p].map((col, i) => {
+          const on = shown.c === i
+          return (
+            <button
+              key={col.name}
+              type="button"
+              title={col.name}
+              aria-label={col.name}
+              aria-pressed={on}
+              onClick={() => {
+                haptic('select')
+                onFloor(shown.p, i)
+              }}
+              className="flex flex-col items-center gap-0.5"
+            >
+              <span className="rounded-sm" style={{ boxShadow: on ? '0 0 0 2px #ffcf3f, 0 0 8px #ffcf3f' : '0 0 0 2px #0006' }}>
+                <FloorThumb f={{ p: shown.p, c: i }} w={40} h={28} />
+              </span>
+              <span className={`max-w-[64px] truncate text-[9px] leading-tight ${on ? 'font-extrabold text-cream' : 'text-cream/70'}`}>{col.name}</span>
+            </button>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+/** Шматок підлоги з аркуша home-floors.png (із середини кімнати, без тіней від стін), ×2. */
+function FloorThumb({ f, w, h }) {
+  const r = floorRect(f)
+  const s = 2
+  return (
+    <span
+      className="pixelated block shrink-0 rounded-sm"
+      style={{
+        width: w,
+        height: h,
+        backgroundImage: `url(/game/walk/home-floors.png?v=${artVersion.v})`,
+        backgroundSize: `${FLOOR_SHEET.w * s}px ${FLOOR_SHEET.h * s}px`,
+        backgroundPosition: `-${(r.x + 24) * s}px -${(r.y + 60) * s}px`,
+      }}
+    />
   )
 }
 

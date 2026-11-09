@@ -8,6 +8,8 @@
  */
 
 import { DOOR, FLOOR, HOME_MAP, WALL_H, WINDOWS } from '../src/game/walk/home.js'
+import { DEFAULT_FLOOR } from '../src/game/walk/floors.js'
+import { drawFloor, floorLight } from './floor-art.mjs'
 
 const K = '#2b1d16'
 
@@ -15,12 +17,6 @@ const K = '#2b1d16'
 
 const WOOD = { h: '#c79a62', H: '#b07a4c', b: '#8b5d3b', m: '#6b4426', d: '#5b3a22', s: '#3b2a1f' }
 const PLASTER = ['#f4ecdb', '#ece2cc', '#ddd0b6']
-const PLANKS = [
-  { h: '#bb8a5e', b: '#9e6d46', g: '#86593a', k: '#6e4a2e' },
-  { h: '#b07f55', b: '#93643f', g: '#7c5233', k: '#654229' },
-  { h: '#c4945f', b: '#a7764c', g: '#8f633f', k: '#74502f' },
-]
-const SEAM = '#4e321d'
 
 /* ───────── Плитки фону ───────── */
 
@@ -48,19 +44,6 @@ const PLASTER_TILE = [
   '.............aaa........',
   '........................',
 ]
-
-/** Килимок-доріжка біля дверей (тканий, смугастий). */
-const DOORMAT = [
-  '.rrrrrrrrrrrrrrrrrrrrrr.',
-  'rRRRRRRRRRRRRRRRRRRRRRRr',
-  'rRyRRyRRyRRyRRyRRyRRyRRr',
-  'rggggggggggggggggggggggr',
-  'rRRRyRRRRyRRRRyRRRRyRRRr',
-  'rRRRRRRRRRRRRRRRRRRRRRRr',
-  '.rrrrrrrrrrrrrrrrrrrrrr.',
-  'f.f.f.f.f.f.f.f.f.f.f.f.',
-]
-const DOORMAT_PAL = { r: '#8e2a1f', R: '#c8372d', y: '#ffd23c', g: '#2f6fd0', f: '#e6dbc4' }
 
 /* ───────── Меблі й речі (сітки) ───────── */
 
@@ -529,34 +512,8 @@ export function homeArt({ Img, hash }) {
   const img = new Img(W, H)
   img.rect(0, 0, W, H, '#1a120d')
 
-  // Підлога: дошки по 8 px різної довжини, стики вразбіг, прожилки, сучки й цвяхи на кінцях.
-  const LENS = [44, 60, 52, 36, 68, 48]
-  for (let row = 0; FY0 + row * 8 < FY1; row++) {
-    const y = FY0 + row * 8
-    let x = FX0 - ((row * 23) % 44)
-    for (let k = 0; x < FX1; k++) {
-      const len = LENS[(row * 4 + k) % LENS.length]
-      const t = PLANKS[Math.floor(hash(row, k, 7) * PLANKS.length)]
-      const grainRow = 2 + Math.floor(hash(row, k, 8) * 4)
-      const g0 = 5 + Math.floor(hash(row, k, 9) * (len / 3))
-      const g1 = g0 + 6 + Math.floor(hash(row, k, 10) * (len / 3))
-      const knot = hash(row, k, 11) < 0.35 ? x + Math.floor(len * 0.65) : -1
-      for (let dy = 0; dy < 8; dy++)
-        for (let dx = 0; dx < len; dx++) {
-          const px = x + dx
-          const py = y + dy
-          if (px < FX0 || px >= FX1 || py >= FY1) continue
-          let c = dy === 0 ? t.h : dy === 7 ? SEAM : t.b
-          if (dx === 0 && dy < 7) c = SEAM
-          else if (dy === grainRow && dx >= g0 && dx < g1) c = t.g
-          else if (dy === (grainRow + 3) % 6 + 1 && dx >= g1 - 4 && dx < g1 + 6) c = t.g
-          if (knot >= 0 && dy >= 3 && dy <= 4 && (px === knot || px === knot + 1)) c = t.k
-          if ((dx === 2 || dx === len - 3) && dy === 3) c = '#3b2a1f' // цвяхи
-          img.set(px, py, c)
-        }
-      x += len
-    }
-  }
+  // Підлога (стандартна — медові дошки; інші рушій кладе поверх з аркуша home-floors.png).
+  drawFloor(img, hash, DEFAULT_FLOOR.p, DEFAULT_FLOOR.c)
 
   // Стіни стоять у 3D (рушій ставить їх вертикально довкола підлоги) — тут лише «шапки»:
   // зріз зрубу довкола підлоги, який видно там, де стіну між камерою й кімнатою сховано.
@@ -579,30 +536,8 @@ export function homeArt({ Img, hash }) {
   img.rect(DOOR.x0, FY1 + CAP, DOOR.x1 - DOOR.x0, H - FY1 - CAP, '#74bb44')
   for (const [x, y] of [[3, 1], [9, 3], [17, 0], [21, 2]]) img.set(DOOR.x0 + x, FY1 + CAP + y, '#559b33')
 
-  // Тіні: від задньої стіни, біля бічних стін (смуги рівного тону, без градієнта).
-  for (const [y, a] of [[FY0, 0.32], [FY0 + 1, 0.2], [FY0 + 2, 0.1]]) img.hline(FX0, FX1 - 1, y, '#1a0e06', a)
-  for (const [dx, a] of [[0, 0.24], [1, 0.12]]) {
-    img.vline(FX0 + dx, FY0, FY1 - 1, '#1a0e06', a)
-    img.vline(FX1 - 1 - dx, FY0, FY1 - 1, '#1a0e06', a)
-  }
-  // Сонце з вікон: чіткі плями одного тону.
-  for (const win of WINDOWS)
-    for (let y = FY0 + 2; y < FY0 + 40; y++) {
-      const shift = Math.round((y - FY0) * 0.5)
-      for (let x = win.x0 + 3 + shift; x < win.x1 - 3 + shift; x++) {
-        const edge = x === win.x0 + 3 + shift || x === win.x1 - 4 + shift
-        img.set(x, y, '#ffe9b0', edge ? 0.08 : 0.16)
-      }
-    }
-  // Тепло від печі на підлозі — два рівні тони.
-  for (let y = 100; y < 140; y++)
-    for (let x = 160; x < 232; x++) {
-      const d = ((x - 196) / 34) ** 2 + ((y - 116) / 16) ** 2
-      if (d < 0.45) img.set(x, y, '#ffb050', 0.12)
-      else if (d < 1) img.set(x, y, '#ffb050', 0.06)
-    }
-  // Килимок біля дверей.
-  img.rows(DOORMAT, DOOR.x0 - 2 + ((DOOR.x1 - DOOR.x0 + 4 - 24) >> 1), FY1 - 9, DOORMAT_PAL)
+  // Тіні від стін, сонце з вікон, тепло печі й килимок біля дверей.
+  floorLight(img)
 
   /* ───── Меблі ───── */
   /** Спрайт із сітки; grounded — м'яка тінь під ним (напівпрозора, тож контур її не обводить). */

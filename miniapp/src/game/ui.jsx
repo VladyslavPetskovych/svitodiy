@@ -63,6 +63,8 @@ export function ScreenTitle({ title, subtitle, right }) {
 }
 
 export function Segmented({ options, value, onChange }) {
+  // Багато вкладок на вузькому екрані — дрібніший шрифт і менші поля, щоб підписи влазили.
+  const tight = options.length > 4
   return (
     <div className="px-wood grid gap-1 p-0.5" style={{ gridTemplateColumns: `repeat(${options.length}, 1fr)` }}>
       {options.map((o) => {
@@ -75,7 +77,7 @@ export function Segmented({ options, value, onChange }) {
               haptic('select')
               onChange(o.value)
             }}
-            className={`relative rounded-sm px-2 py-2 text-[13px] font-extrabold transition ${active ? 'text-ink' : 'text-cream/80'}`}
+            className={`relative rounded-sm py-2 font-extrabold transition ${tight ? 'px-0.5 text-[11px]' : 'px-2 text-[13px]'} ${active ? 'text-ink' : 'text-cream/80'}`}
           >
             {active && (
               <motion.span

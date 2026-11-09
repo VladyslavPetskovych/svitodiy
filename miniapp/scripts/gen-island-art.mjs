@@ -7,13 +7,14 @@
  */
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { deflateSync, inflateSync } from 'node:zlib'
 import { FLOOR, HOME_MAP, homePlacements } from '../src/game/walk/home.js'
 import { farmArt } from './farm-art.mjs'
 import { homeArt } from './home-art.mjs'
 import { decorArt } from './decor-art.mjs'
+import { floorSheet } from './floor-art.mjs'
 import { BEDS, BOARDWALK, CELL, DECOR, INTERACT, LAND, MAP, PATH, PIER, PLAZA, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -27,6 +28,8 @@ const isDecor = (name) => name.startsWith('hd_')
 const OUT_DECOR_ATLAS = join(ROOT, 'src/game/walk/home-decor.json')
 /** Намальовані вручну/AI спрайти будівель: <назва кадру>.png замінює згенерований кадр з тією ж назвою. */
 const HANDMADE = join(ROOT, 'public/game/buildings')
+/** Речі для хати, намальовані локальною моделлю (scripts/sd-home-items.mjs): hd_<id>.png → аркуш home-decor.png. */
+const AI_ART = join(ROOT, 'art/home-ai')
 
 /* ───────── PNG ───────── */
 
@@ -2948,13 +2951,19 @@ function buildSprites(farm, room) {
   return { ...s, ...handmade() }
 }
 
-/** Ручні спрайти з public/game/buildings замінюють згенеровані кадри з тими ж назвами. */
+/**
+ * Ручні спрайти з public/game/buildings замінюють згенеровані кадри з тими ж назвами;
+ * з art/home-ai — речі для хати від локальної моделі (лише готові hd_<id>.png, без прев'ю).
+ */
 function handmade() {
   const out = {}
-  if (!existsSync(HANDMADE)) return out
-  for (const file of readdirSync(HANDMADE)) {
-    if (!file.endsWith('.png')) continue
-    const { w, h, bpp, px } = decodePng(readFileSync(join(HANDMADE, file)))
+  const files = [
+    ...(existsSync(HANDMADE) ? readdirSync(HANDMADE).filter((f) => f.endsWith('.png')).map((f) => join(HANDMADE, f)) : []),
+    ...(existsSync(AI_ART) ? readdirSync(AI_ART).filter((f) => /^hd_[a-z_]+\.png$/.test(f)).map((f) => join(AI_ART, f)) : []),
+  ]
+  for (const path of files) {
+    const file = basename(path)
+    const { w, h, bpp, px } = decodePng(readFileSync(path))
     const img = new Img(w, h)
     for (let i = 0; i < w * h; i++) {
       img.d[i * 4] = px[i * bpp]
@@ -3053,6 +3062,10 @@ writeFileSync(join(OUT_PUBLIC, 'water.png'), encodePng(water))
 const home = room.image
 const walls = room.walls
 writeFileSync(join(OUT_PUBLIC, 'home.png'), encodePng(home))
+// Підлоги на вибір (візерунок × колір) — рушій кладе вибрану поверх підлоги кімнати.
+const floors = floorSheet({ Img, hash })
+writeFileSync(join(OUT_PUBLIC, 'home-floors.png'), encodePng(floors))
+console.log(`підлоги: ${floors.w}×${floors.h}`)
 writeFileSync(join(OUT_PUBLIC, 'sprites.png'), encodePng(atlas))
 writeFileSync(join(OUT_PUBLIC, 'home-sprites.png'), encodePng(interior.atlas))
 writeFileSync(join(OUT_PUBLIC, 'home-decor.png'), encodePng(decorSheet.atlas))
@@ -3083,7 +3096,7 @@ for (const [name, anims, cell, scale] of [
 // лише разом із самими картинками, тож довгий кеш і далі працює.
 {
   const h = createHash('sha1')
-  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'dog', 'sirko'].map((n) => join(OUT_PUBLIC, `${n}.png`))
+  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'dog', 'sirko'].map((n) => join(OUT_PUBLIC, `${n}.png`))
   for (const id of Object.keys(farm.items).sort()) pngs.push(join(OUT_ITEMS, `${id}.png`))
   for (const f of pngs) h.update(readFileSync(f))
   const v = h.digest('hex').slice(0, 10)

@@ -5,3 +5,7 @@ node_modules/
 .DS_Store
 /data/
 .claude/settings.local.json
+
+# Сирі картинки локальної моделі (1024×1024) і прев'ю — лише для перегенерації
+miniapp/art/home-ai/raw/
+miniapp/art/home-ai/*-x*.png

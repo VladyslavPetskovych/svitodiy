@@ -15,7 +15,7 @@ import {
 import { DECOR, DECOR_MAX } from "./decor.js";
 import { dogsCatalog } from "./dogs.js";
 import { farmCatalog } from "./farm.js";
-import { INTERIOR, INTERIOR_MAX } from "./interior.js";
+import { FLOOR_COLORS, FLOORS, INTERIOR, INTERIOR_MAX } from "./interior.js";
 import { BUILDINGS } from "./homestead.js";
 
 /**
@@ -140,6 +140,8 @@ export function buildCatalog() {
     farm: farmCatalog(),
     interior: INTERIOR,
     interiorMax: INTERIOR_MAX,
+    floors: FLOORS,
+    floorColors: FLOOR_COLORS,
     pets: dogsCatalog(),
     arcs: ARC_CATALOG.map((a) => ({ id: a.id, title: a.title, emoji: a.emoji, summary: a.summary })),
     arcDurationDays: ARC_DURATION_DAYS,

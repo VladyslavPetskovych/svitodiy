@@ -6,7 +6,7 @@ import * as THREE from 'three'
  * — Згладжування експоненційне (1 − e^(−k·dt)): однакове відчуття на будь-якому FPS.
  * — Look-ahead: трохи випереджає рух, щоб було видно, куди йдеш.
  * — Межі: фокус не виходить за мапу (з відступом), тож не дивимось у порожнечу.
- * — Поворот кроками по 45° і зум — плавні; тряска (game-feel) додається поверх, а не в ціль.
+ * — Камера завжди дивиться спереду (з півдня), без повороту; зум плавний; тряска (game-feel) додається поверх, а не в ціль.
  * Координати фокуса — пікселі арту (x, y) = світові (X, Z).
  */
 
@@ -27,8 +27,8 @@ export function createCameraRig(aspect) {
     camera,
     focus: { x: 0, y: 0 },
     lead: { x: 0, y: 0 },
+    /** Кут камери навколо вертикалі — фіксований: світ видно лише спереду. */
     yaw: 0,
-    yawTarget: 0,
     zoom: 1,
     zoomTarget: 1,
     bounds: { w: 512, h: 448, margin: 40 },
@@ -82,14 +82,6 @@ export function createCameraRig(aspect) {
       rig.lead.x = rig.lead.y = 0
       clampFocus(Object.assign(rig.focus, { x, y }))
     },
-    rotate(steps) {
-      rig.yawTarget += (steps * Math.PI) / 4
-    },
-    /** Поворот на довільний кут (жест двома пальцями). */
-    twist(rad) {
-      rig.yawTarget += rad
-      rig.yaw += rad
-    },
     zoomBy(f) {
       rig.zoomTarget = THREE.MathUtils.clamp(rig.zoomTarget * f, ZOOM_MIN, ZOOM_MAX)
     },
@@ -99,7 +91,6 @@ export function createCameraRig(aspect) {
     },
     update(dt) {
       const k = 1 - Math.exp(-10 * dt)
-      rig.yaw += (rig.yawTarget - rig.yaw) * k
       rig.zoom += (rig.zoomTarget - rig.zoom) * k
       const s = Math.sin(rig.yaw)
       const c = Math.cos(rig.yaw)

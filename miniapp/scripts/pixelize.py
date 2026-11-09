@@ -224,6 +224,36 @@ def add_shadow(img):
     return img
 
 
+def keep_main(mask, share):
+    """
+    Лишити головний предмет: модель часом домальовує поруч дрібні зайві речі (тумбочки біля шафи).
+    Зберігаємо зв'язні шматки (8-сусідство), не менші за share від найбільшого.
+    """
+    h, w = mask.shape
+    label = np.zeros((h, w), np.int32)
+    sizes = [0]
+    for y0, x0 in zip(*np.nonzero(mask)):
+        if label[y0, x0]:
+            continue
+        n = len(sizes)
+        label[y0, x0] = n
+        q = deque([(y0, x0)])
+        size = 0
+        while q:
+            y, x = q.popleft()
+            size += 1
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not label[ny, nx]:
+                        label[ny, nx] = n
+                        q.append((ny, nx))
+        sizes.append(size)
+    big = max(sizes)
+    keep = np.array([s >= big * share and s > 0 for s in sizes])
+    return keep[label] & mask
+
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8')  # консоль Windows інакше падає на кирилиці
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -236,6 +266,7 @@ def main():
     p.add_argument('--grid', action='store_true', help='спершу знайти «піксельну» сітку AI (≈8 px на піксель)')
     p.add_argument('--outline', action='store_true')
     p.add_argument('--shadow', action='store_true')
+    p.add_argument('--main', type=float, default=0, help='лишити лише головний предмет: шматки ≥ цієї частки найбільшого (напр. 0.3)')
     p.add_argument('--preview', type=int, default=0, help='ще й прев\'ю ×N поруч (…-xN.png)')
     a = p.parse_args()
     tw, th = map(int, a.size.lower().split('x'))
@@ -243,6 +274,8 @@ def main():
     pad_x, pad_y = (1, 2) if a.outline else (0, 0)
     src = np.asarray(Image.open(a.src).convert('RGB'))
     mask = remove_background(src, a.tol)
+    if a.main:
+        mask = keep_main(mask, a.main)
     if a.grid:
         # Спершу — у рідну сітку AI; далі вписуємо так само, як і будь-яку картинку.
         src, mask = native_grid(src, mask)

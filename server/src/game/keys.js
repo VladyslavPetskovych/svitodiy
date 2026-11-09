@@ -37,4 +37,5 @@ export function previousDay(day) {
 
 export const farmKey = (id) => `svitodiy:farm:${id}`; // город: № грядки → JSON { c, g, w }
 export const interiorKey = (id) => `svitodiy:indeco:${id}`; // хатинка: id речі → JSON { k, x, y } або { k, w, a, h }
+export const floorKey = (id) => `svitodiy:infloor:${id}`; // підлога хатинки: { p — візерунок, c — колір, own — куплені візерунки через кому }
 export const dogsKey = (id) => `svitodiy:dogs:${id}`; // пси: id пса → JSON { love, fedDay, petDay, mode, sit }

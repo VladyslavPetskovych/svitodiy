@@ -14,6 +14,7 @@ const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
 import { beamTexture, blobTexture, bubbleTexture, createParticles, dropHeight, glowTexture, popScale, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
 import { DOG_BED, FLOOR, HOME_MAP, HOME_START, WALL_H, homeInteract, homePlacements } from './home.js'
+import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
 import { INTERIOR_GEOM, interiorFootprint, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
 import { createInput } from './input.js'
 import { CELL, FIELD, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotAt, plotCenter, plotRect, walkGrid } from './layout.js'
@@ -32,7 +33,7 @@ import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } fr
  * Сцени: «island» (острів надворі) і «home» (кімната хатинки).
  */
 
-const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', ...Object.keys(DOG_SHEETS)]
+const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', ...Object.keys(DOG_SHEETS)]
 
 /**
  * Аркуші спрайтів: острів (будівлі, декор, город, мандрівник) і окремо — хатинка зсередини
@@ -261,8 +262,8 @@ export function createWalk(canvas, assets, cb) {
 
   /* ───── Стіни хати: вертикальні площини довкола підлоги ─────
    * Аркуш home-walls.png (прямокутники — homeAtlas.walls). n — нормаль усередину кімнати:
-   * стіну, з-за якої дивиться камера, ховаємо (розріз, як у ляльковому будиночку), тож при
-   * повороті камери завжди видно, що всередині. Речі на стінах (layer 'wall') ховаються разом зі стіною.
+   * стіну, з-за якої дивиться камера (передню), ховаємо (розріз, як у ляльковому будиночку), тож
+   * завжди видно, що всередині. Речі на стінах (layer 'wall') ховаються разом зі стіною.
    */
   const wallMat = new THREE.MeshBasicMaterial({ map: assets['home-walls'], transparent: true, alphaTest: 0.5, depthWrite: false })
   const WS = homeAtlas.walls
@@ -307,6 +308,29 @@ export function createWalk(canvas, assets, cb) {
     rayFrom(clientX, clientY)
     return wallHit()
   }
+
+  /* ───── Підлога хати: вибраний візерунок і колір з аркуша home-floors.png поверх фону кімнати ───── */
+  const floorGeo = new THREE.PlaneGeometry(FLOOR_CELL.w, FLOOR_CELL.h).rotateX(-Math.PI / 2)
+  const floorMesh = new THREE.Mesh(
+    floorGeo,
+    new THREE.MeshBasicMaterial({ map: assets['home-floors'], transparent: true, depthWrite: false })
+  )
+  floorMesh.position.set((FLOOR.x0 + FLOOR.x1) / 2, 0, (FLOOR.y0 + FLOOR.y1) / 2)
+  floorMesh.renderOrder = -18
+  floorMesh.visible = false
+  scene3.add(floorMesh)
+  let floorShown = null
+  /** Показати підлогу { p, c } (і для прев'ю в пісочниці — до покупки). */
+  function showFloor(f) {
+    const r = floorRect(f ?? DEFAULT_FLOOR)
+    const key = `${r.x},${r.y}`
+    if (key === floorShown) return
+    floorShown = key
+    const { w: SW, h: SH } = FLOOR_SHEET
+    const [u0, u1, v1, v0] = [r.x / SW, (r.x + r.w) / SW, 1 - r.y / SH, 1 - (r.y + r.h) / SH]
+    floorGeo.setAttribute('uv', new THREE.Float32BufferAttribute([u0, v1, u1, v1, u0, v0, u1, v0], 2))
+  }
+  showFloor(DEFAULT_FLOOR)
 
   /** Поставити річ на стіну: трохи перед площиною стіни, обличчям у кімнату. */
   function mountOnWall(p, mesh) {
@@ -733,6 +757,7 @@ export function createWalk(canvas, assets, cb) {
   function applySceneLook() {
     const outdoor = scene.outdoor
     water.visible = foam.visible = outdoor
+    floorMesh.visible = !outdoor
     for (const c of clouds) c.visible = outdoor
     groundMat.map = assets[scene.bg]
     groundMat.needsUpdate = true
@@ -1075,11 +1100,11 @@ export function createWalk(canvas, assets, cb) {
 
   const pointers = new Map()
   let held = null // один палець: { cx, cy, sx, sy, moved, kind: 'walk'|'pan'|'ghost', ... }
-  let gesture = null // два пальці: { dist, angle }
+  let gesture = null // два пальці: { dist } — щипок для зуму
 
   const twoFinger = () => {
     const [a, b] = [...pointers.values()]
-    return { dist: Math.hypot(b.x - a.x, b.y - a.y), angle: Math.atan2(b.y - a.y, b.x - a.x) }
+    return { dist: Math.hypot(b.x - a.x, b.y - a.y) }
   }
 
   const onDown = (e) => {
@@ -1087,7 +1112,7 @@ export function createWalk(canvas, assets, cb) {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (e.pointerType === 'touch') input.touched()
     if (pointers.size === 2) {
-      // Другий палець — це жест (зум/поворот), а не хода.
+      // Другий палець — це жест (зум), а не хода.
       gesture = twoFinger()
       held = null
       if (mode === 'walk') {
@@ -1133,10 +1158,6 @@ export function createWalk(canvas, assets, cb) {
     if (gesture && pointers.size === 2) {
       const now = twoFinger()
       if (now.dist > 0 && gesture.dist > 0) rig.zoomBy(gesture.dist / now.dist)
-      let da = now.angle - gesture.angle
-      if (da > Math.PI) da -= Math.PI * 2
-      if (da < -Math.PI) da += Math.PI * 2
-      rig.twist(-da)
       gesture = now
       return
     }
@@ -1278,8 +1299,6 @@ export function createWalk(canvas, assets, cb) {
 
   function update(dt) {
     input.poll()
-    if (input.take('rotateLeft', 0.2)) rig.rotate(-1)
-    if (input.take('rotateRight', 0.2)) rig.rotate(1)
     if (input.take('zoomIn', 0.2)) rig.zoomBy(0.85)
     if (input.take('zoomOut', 0.2)) rig.zoomBy(1 / 0.85)
 
@@ -1596,12 +1615,12 @@ export function createWalk(canvas, assets, cb) {
       const it = interact.find((i) => i.id === id)
       if (it) walkTo({ x: it.near[0], y: it.near[1] }, id)
     },
-    /** Повернути камеру на кроки по 45° (кнопки ⟲ ⟳). */
-    rotate(steps) {
-      rig.rotate(steps)
-    },
     zoom(f) {
       rig.zoomBy(f)
+    },
+    /** Підлога хатинки { p, c } — збережена або прев'ю з панелі «Облаштувати». */
+    setFloor(f) {
+      showFloor(f)
     },
     /** Погладити пса за id (кнопка «Погладити» чи E поруч). */
     petDog(id) {

@@ -7,7 +7,7 @@ import { claimDaily } from "./game/daily.js";
 import { moveDecor, placeDecor, removeDecor } from "./game/decor.js";
 import { commandDog, feedDog, petDog } from "./game/dogs.js";
 import { GameError } from "./game/errors.js";
-import { moveInterior, placeInterior, removeInterior } from "./game/interior.js";
+import { moveInterior, placeInterior, removeInterior, setFloor } from "./game/interior.js";
 import { buySeeds, clearPlot, harvestPlot, plantPlot, sellCrops, tillPlot, waterPlot } from "./game/farm.js";
 import { collectHome, upgradeBuilding } from "./game/homestead.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
@@ -104,6 +104,7 @@ export function buildApiRouter(botToken) {
   api.post("/home/interior", handler((req) => placeInterior(uid(req), body(req))));
   api.post("/home/interior/:id/move", handler((req) => moveInterior(uid(req), req.params.id, body(req))));
   api.delete("/home/interior/:id", handler((req) => removeInterior(uid(req), req.params.id)));
+  api.post("/home/floor", handler((req) => setFloor(uid(req), body(req))));
 
   // Город: грядки, насіння, урожай
   api.post("/farm/:plot/till", handler((req) => tillPlot(uid(req), req.params.plot)));

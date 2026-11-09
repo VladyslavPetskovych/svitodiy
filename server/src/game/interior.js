@@ -4,7 +4,7 @@ import { GameError, badRequest, conflict } from "./errors.js";
 import { getHome } from "./homestead.js";
 import { homeOwner } from "./household.js";
 import { INTERIOR_DEFAULTS } from "./interiorDefaults.js";
-import { interiorKey, takeCooldown } from "./keys.js";
+import { floorKey, interiorKey, takeCooldown } from "./keys.js";
 
 /**
  * Пісочниця в хатинці: гравець сам розставляє меблі й вішає речі на стіни.
@@ -82,9 +82,42 @@ export const INTERIOR = [
   { id: "embroidery", cat: "wall", name: "Вишивка в рамці", emoji: "🌹", level: 2, cost: { balance: 15 }, wall: true },
   { id: "pike_trophy", cat: "wall", name: "Трофей — щука", emoji: "🐟", level: 2, cost: { plank: 1, fish_bone: 2 }, wall: true },
   { id: "wall_lamp", cat: "wall", name: "Лампа-бра", emoji: "🪔", level: 2, cost: { metal_scrap: 1, glass_shard: 1 }, wall: true },
+  // Ще партія (намальована локальною моделлю — miniapp/scripts/sd-home-items.mjs)
+  { id: "bookcase", cat: "furniture", name: "Книжкова шафа", emoji: "📚", level: 1, cost: { plank: 5 } },
+  { id: "easel", cat: "furniture", name: "Мольберт", emoji: "🎨", level: 1, cost: { plank: 2, twig: 2 } },
+  { id: "rocking_horse", cat: "furniture", name: "Коник-гойдалка", emoji: "🐴", level: 1, cost: { plank: 3 } },
+  { id: "sofa", cat: "furniture", name: "Оксамитова канапа", emoji: "🛋", level: 2, cost: { plank: 3, seaweed: 3, balance: 20 } },
+  { id: "aquarium", cat: "furniture", name: "Акваріум", emoji: "🐠", level: 2, cost: { glass_shard: 3, plank: 2 } },
+  { id: "globe", cat: "furniture", name: "Глобус", emoji: "🌍", level: 2, cost: { plank: 2, metal_scrap: 1 } },
+  { id: "birdcage", cat: "furniture", name: "Клітка з канаркою", emoji: "🐤", level: 2, cost: { metal_scrap: 2, twig: 1 } },
+  { id: "piano", cat: "furniture", name: "Піаніно", emoji: "🎹", level: 3, cost: { plank: 8, metal_scrap: 2, balance: 40 } },
+  { id: "telescope", cat: "furniture", name: "Підзорна труба", emoji: "🔭", level: 3, cost: { metal_scrap: 3, glass_shard: 2 } },
+  { id: "tea_table", cat: "kitchen", name: "Столик із чаєм", emoji: "🫖", level: 1, cost: { plank: 2, stone: 1 } },
+  { id: "round_rug", cat: "textile", name: "Плетений овальний килимок", emoji: "🔵", level: 1, cost: { twig: 2, seaweed: 2 } },
+  { id: "ship_wheel", cat: "wall", name: "Штурвал", emoji: "☸️", level: 1, cost: { plank: 3 }, wall: true },
+  { id: "life_ring", cat: "wall", name: "Рятувальний круг", emoji: "🛟", level: 1, cost: { seaweed: 2, twig: 1 }, wall: true },
+  { id: "sea_painting", cat: "wall", name: "Картина з маяком", emoji: "🖼", level: 2, cost: { plank: 1, balance: 15 }, wall: true },
+  { id: "ship_bottle", cat: "furniture", name: "Кораблик у пляшці", emoji: "⛵", level: 2, cost: { glass_shard: 1, plank: 1, twig: 1 } },
 ];
 
 export const INTERIOR_MAX = 100;
+
+/**
+ * Підлога хатинки: візерунок купується один раз (відкривається з рівнем хатинки), а колір
+ * купленого візерунку міняється безкоштовно. Дошки є від початку. Арт і назви кольорів —
+ * на клієнті (miniapp/src/game/walk/floors.js), FLOOR_COLORS — скільки там кольорів у візерунку.
+ */
+export const FLOORS = [
+  { id: "boards", name: "Дошки", emoji: "🪵", level: 1, cost: {} },
+  { id: "clay", name: "Глиняна доливка", emoji: "🟤", level: 1, cost: { stone: 3, seaweed: 2 } },
+  { id: "flagstone", name: "Кам'яні плити", emoji: "🪨", level: 1, cost: { stone: 10 } },
+  { id: "herringbone", name: "Паркет «ялинка»", emoji: "🟫", level: 2, cost: { plank: 8, balance: 20 } },
+  { id: "checker", name: "Кахлі-шахівниця", emoji: "🏁", level: 2, cost: { stone: 6, glass_shard: 1 } },
+  { id: "hex", name: "Шестикутна плитка", emoji: "🔶", level: 3, cost: { stone: 8, balance: 25 } },
+];
+export const FLOOR_COLORS = 4;
+const FLOOR_BY_ID = new Map(FLOORS.map((f) => [f.id, f]));
+const DEFAULT_FLOOR = { p: "boards", c: 0 };
 const BY_ID = new Map(INTERIOR.map((d) => [d.id, d]));
 /** Підлога й стіни кімнати — як FLOOR і WALL_H у miniapp/src/game/walk/home.js. */
 const ROOM = { x0: 8, x1: 232, y0: 54, y1: 184, wallH: 54 };
@@ -221,4 +254,31 @@ export async function removeInterior(userId, id) {
     else await addResourceToInventory(userId, res, n);
   }
   return { refund };
+}
+
+/** Підлога зараз і які візерунки вже куплено. */
+export async function getFloor(userId) {
+  const h = await getRedis().hGetAll(floorKey((await homeOwner(userId)).owner));
+  const p = FLOOR_BY_ID.has(h.p) ? h.p : DEFAULT_FLOOR.p;
+  const c = Number(h.c);
+  const owned = new Set([DEFAULT_FLOOR.p, ...(h.own ?? "").split(",").filter((id) => FLOOR_BY_ID.has(id))]);
+  return { p, c: Number.isInteger(c) && c >= 0 && c < FLOOR_COLORS ? c : 0, owned: [...owned] };
+}
+
+/** Постелити підлогу { pattern, color }: новий візерунок — купити, свій — лише змінити колір. */
+export async function setFloor(userId, body) {
+  const def = typeof body?.pattern === "string" ? FLOOR_BY_ID.get(body.pattern) : null;
+  const color = body?.color;
+  if (!def || !int(color) || color < 0 || color >= FLOOR_COLORS) throw badRequest("Невідома підлога.");
+  await lock(userId);
+  const k = floorKey((await homeOwner(userId)).owner);
+  const cur = await getFloor(userId);
+  const bought = !cur.owned.includes(def.id);
+  if (bought) {
+    if (def.level > (await houseLevel(userId))) throw conflict("locked", `Відкриється, коли хатинка стане ${def.level}-го рівня.`);
+    await pay(userId, def.cost);
+    cur.owned.push(def.id);
+  }
+  await getRedis().hSet(k, { p: def.id, c: String(color), own: cur.owned.join(",") });
+  return { floor: { p: def.id, c: color, owned: cur.owned }, bought };
 }

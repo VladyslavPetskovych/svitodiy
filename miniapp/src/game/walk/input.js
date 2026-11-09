@@ -1,10 +1,10 @@
 /**
- * Шар вводу: гра читає дії («move», «interact», «rotateLeft»…), а не клавіші.
+ * Шар вводу: гра читає дії («move», «interact», «zoomIn»…), а не клавіші.
  * Прив'язки — дані нижче: фізичні коди клавіш (WASD лишається на місці на будь-якій розкладці)
  * і кнопки геймпада. Дотик і миша обробляє рушій окремо — це «вказати точку», а не дія.
  *
  * — move: утримання (рівень), читається кожен фіксований крок.
- * — interact / rotate* / zoom*: натискання (фронт) з буфером: натиснув трохи раніше,
+ * — interact / zoom*: натискання (фронт) з буфером: натиснув трохи раніше,
  *   ніж підійшов до будівлі, — дія все одно спрацює.
  */
 
@@ -14,14 +14,12 @@ const KEYS = {
   left: ['KeyA', 'ArrowLeft'],
   right: ['KeyD', 'ArrowRight'],
   interact: ['KeyE', 'Space', 'Enter'],
-  rotateLeft: ['KeyQ'],
-  rotateRight: ['KeyR'],
   zoomIn: ['Equal', 'NumpadAdd'],
   zoomOut: ['Minus', 'NumpadSubtract'],
 }
 
 /** Стандартна розкладка геймпада (Gamepad API, mapping "standard"). */
-const PAD = { interact: 0, rotateLeft: 4, rotateRight: 5, zoomIn: 7, zoomOut: 6 }
+const PAD = { interact: 0, zoomIn: 7, zoomOut: 6 }
 const DEADZONE = 0.2
 
 const CODE_TO_ACTION = new Map(Object.entries(KEYS).flatMap(([action, codes]) => codes.map((c) => [c, action])))

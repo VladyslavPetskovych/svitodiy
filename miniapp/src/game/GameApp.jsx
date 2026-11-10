@@ -17,7 +17,7 @@ import WorldMap from './screens/WorldMap.jsx'
 import { useGame } from './context.js'
 import { GameProvider } from './store.jsx'
 import { haptic, useBackButton, useTelegramFullscreen } from './tg.js'
-import { Bar, Counter, FloatingDelta, PxButton, RewardModal, Sheet, Toasts } from './ui.jsx'
+import { Bar, Counter, FloatingDelta, PxButton, RewardBurst, Sheet, Toasts } from './ui.jsx'
 
 const TABS = [
   { id: 'home', icon: '🏝️', label: 'Острів' },
@@ -109,7 +109,7 @@ function Playing() {
       </main>
       {!full && <TabBar />}
       <Toasts toasts={toasts} />
-      <RewardModal spec={rewardPopup} onClose={() => reward(null)} />
+      <RewardBurst spec={rewardPopup} onClose={() => reward(null)} />
       <Onboarding />
     </div>
   )

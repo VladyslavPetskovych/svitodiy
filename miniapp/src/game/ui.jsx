@@ -248,142 +248,134 @@ export function Sheet({ open, onClose, title, children }) {
   )
 }
 
-/* ───────── Тости ───────── */
+/* ───────── Спливаючі написи ───────── */
 
+/** Темний контур навколо тексту: читається на будь-якому тлі без плашки. */
+const OUTLINE = '0 2px 0 #1c120a, 2px 0 0 #1c120a, -2px 0 0 #1c120a, 0 -2px 0 #1c120a, 1px 1px 0 #1c120a, -1px -1px 0 #1c120a, 0 4px 8px #0009'
+const FLOAT_TONE = { info: '#fff4dc', good: '#ffe27a', error: '#ff9d8c', calm: '#cfe8ff' }
+
+/** Тримати точку на екрані так, щоб напис шириною ~200px не вилазив за край. */
+function clampPoint(at, { top = 70, bottom = 120 } = {}) {
+  const w = typeof window === 'undefined' ? 400 : window.innerWidth
+  const h = typeof window === 'undefined' ? 800 : window.innerHeight
+  const x = at?.x ?? w / 2
+  const y = at?.y ?? h * 0.42
+  return { x: Math.min(w - 100, Math.max(100, x)), y: Math.min(h - bottom, Math.max(top, y)) }
+}
+
+/**
+ * Короткі відгуки («Куплено», «Не вистачає…»): не вікна, а написи, що спливають із місця дотику
+ * й тануть. Нічого не закривають і крізь них можна тапати.
+ */
 export function Toasts({ toasts }) {
   return (
-    // У повноекранному Telegram зверху його кнопки — опускаємо тости нижче (змінні ставить telegram-web-app.js).
-    <div
-      className="pointer-events-none fixed inset-x-0 z-50 flex flex-col items-center gap-2 px-4"
-      style={{ top: 'calc(4.5rem + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px))' }}
-    >
+    <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
       <AnimatePresence>
-        {toasts.map((t) => (
-          <motion.div
-            key={t.id}
-            layout
-            initial={{ opacity: 0, y: -16, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10 }}
-            className={`px-paper max-w-sm text-center text-sm font-bold ${t.kind === 'error' ? 'text-[#9a2f1d]' : ''}`}
-          >
-            <div className="px-2 py-1">{t.text}</div>
-          </motion.div>
-        ))}
+        {toasts.map((t) => {
+          const p = clampPoint(t.x == null ? null : t)
+          return (
+            <motion.div
+              key={t.id}
+              className="absolute w-max max-w-[200px] -translate-x-1/2 text-center text-[14px] leading-tight font-extrabold"
+              style={{ left: p.x, top: p.y - 34 - t.stack * 24, color: FLOAT_TONE[t.kind] ?? FLOAT_TONE.info, textShadow: OUTLINE }}
+              initial={{ opacity: 0, y: 12, scale: 0.6 }}
+              animate={{ opacity: 1, y: -14, scale: 1, x: t.kind === 'error' ? [0, -5, 5, -3, 0] : 0 }}
+              exit={{ opacity: 0, y: -40, transition: { duration: 0.45 } }}
+              transition={{ type: 'spring', stiffness: 420, damping: 20, x: { duration: 0.3 } }}
+            >
+              {t.text}
+            </motion.div>
+          )
+        })}
       </AnimatePresence>
     </div>
   )
 }
 
-/* ───────── Вікно нагороди ───────── */
+/* ───────── Сплеск нагороди ───────── */
 
 /**
- * Універсальне «Отримано!»: улов, крафт, бій, щоденна нагорода.
- * spec: { title, subtitle?, image?, icon?, tone: 'good'|'bad'|'epic'|'calm', lines?: string[],
- *         rarity?, actions?: [{ label, variant, onClick }] }
+ * Універсальне «Отримано!» (улов, крафт, бій, щоденна нагорода) — святковий сплеск на місці дотику:
+ * предмет вистрибує, над ним назва, усе само тане за пару секунд. Без затемнення й кнопок —
+ * гра не зупиняється, а тапи проходять крізь нього.
+ * spec: { title, subtitle?, image?, sprite?, fish?, icon?, tone: 'good'|'bad'|'epic'|'calm', lines?: string[], rarity? }
  */
-export function RewardModal({ spec, onClose }) {
-  useBackButton(!!spec, onClose)
+export function RewardBurst({ spec, onClose }) {
+  const epic = spec?.tone === 'epic'
+  const bad = spec?.tone === 'bad'
+  // onClose часто приходить новою функцією на кожен рендер — таймер від цього не скидаємо.
+  const close = useRef(onClose)
+  useEffect(() => {
+    close.current = onClose
+  })
   useEffect(() => {
     if (!spec) return
-    haptic(spec.tone === 'bad' ? 'error' : spec.tone === 'calm' ? 'soft' : 'success')
-  }, [spec])
+    haptic(bad ? 'error' : spec.tone === 'calm' ? 'soft' : 'success')
+    const longText = (spec.lines?.[0]?.length ?? 0) > 60
+    const t = setTimeout(() => close.current(), epic ? 3200 : longText ? 3600 : 2300)
+    return () => clearTimeout(t)
+  }, [spec, epic, bad])
 
   const rarity = spec?.rarity ? RARITY[spec.rarity] : null
-  const epic = spec?.tone === 'epic'
+  const p = spec ? clampPoint(spec.at, { top: 230, bottom: 40 }) : null
+  const glow = rarity?.color ?? (epic ? '#ffcf3f' : bad ? '#e2553e' : null)
 
   return (
-    <AnimatePresence>
-      {spec && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
-          <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-          {epic && <div className="glow-rays pointer-events-none absolute size-[140vw] max-w-175" />}
-          {epic && <Confetti />}
+    <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
+      <AnimatePresence>
+        {spec && (
           <motion.div
-            className="relative w-full max-w-sm"
-            initial={{ scale: 0.6, y: 40, rotate: -3 }}
-            animate={{ scale: 1, y: 0, rotate: 0 }}
-            exit={{ scale: 0.8, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+            key={spec.id}
+            className="absolute flex w-[230px] -translate-x-1/2 flex-col items-center text-center"
+            style={{ left: p.x, bottom: `calc(100% - ${p.y - 24}px)` }}
+            initial={{ opacity: 0, y: 30, scale: 0.4 }}
+            animate={{ opacity: 1, y: 0, scale: 1, x: bad ? [0, -8, 8, -5, 0] : 0 }}
+            exit={{ opacity: 0, y: -50, transition: { duration: 0.5 } }}
+            transition={{ type: 'spring', stiffness: 360, damping: 18, x: { duration: 0.4, delay: 0.15 } }}
           >
-            <Paper className={`p-3 text-center ${spec.tone === 'bad' ? 'shake' : ''}`}>
-              <p className="font-pixel text-[15px] leading-snug">{spec.title}</p>
-              {rarity && (
-                <p className="mt-1 font-pixel text-[10px]" style={{ color: rarity.color, textShadow: '0 1px 0 #0006' }}>
-                  {rarity.label}
-                </p>
-              )}
-              {spec.fish && (
-                <motion.div initial={{ rotateY: 90 }} animate={{ rotateY: 0 }} transition={{ delay: 0.15, duration: 0.45 }}>
-                  <FishArt
-                    item={spec.fish}
-                    className="mx-auto mt-3 aspect-[16/9] w-full rounded-sm border-4 border-wood-dark"
-                    style={rarity ? { boxShadow: `0 0 0 3px ${rarity.color}, 0 0 24px ${rarity.color}` } : undefined}
-                  />
-                </motion.div>
-              )}
-              {spec.image && (
-                <motion.img
-                  src={spec.image}
-                  alt=""
-                  className="mx-auto mt-3 w-full rounded-sm border-4 border-wood-dark object-cover"
-                  style={rarity ? { boxShadow: `0 0 0 3px ${rarity.color}, 0 0 24px ${rarity.color}` } : undefined}
-                  initial={{ rotateY: 90 }}
-                  animate={{ rotateY: 0 }}
-                  transition={{ delay: 0.15, duration: 0.45 }}
-                />
-              )}
-              {spec.sprite && (
-                <motion.img
-                  src={spec.sprite}
-                  alt=""
-                  className="pixelated mx-auto my-3 h-28 w-28 object-contain drop-shadow-[0_4px_0_#0005]"
-                  initial={{ scale: 0, rotate: -30 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  transition={{ delay: 0.1, type: 'spring', stiffness: 300, damping: 12 }}
-                />
-              )}
-              {spec.icon && (
-                <motion.div
-                  className="my-3 text-7xl"
-                  initial={{ scale: 0, rotate: -30 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  transition={{ delay: 0.1, type: 'spring', stiffness: 300, damping: 12 }}
-                >
-                  {spec.icon}
-                </motion.div>
-              )}
-              {spec.subtitle && <p className="mt-3 text-lg font-extrabold">{spec.subtitle}</p>}
-              {spec.lines?.map((l, i) => (
-                <p key={i} className={`mt-1 text-sm ${i === 0 && !spec.subtitle ? 'mt-3' : ''} text-ink-soft`}>
-                  {l}
-                </p>
-              ))}
-              <div className="mt-4 flex flex-col gap-2">
-                {(spec.actions ?? [{ label: 'Добре', variant: 'green' }]).map((a) => (
-                  <PxButton
-                    key={a.label}
-                    variant={a.variant ?? 'green'}
-                    onClick={() => {
-                      onClose()
-                      a.onClick?.()
-                    }}
-                  >
-                    {a.label}
-                  </PxButton>
-                ))}
-              </div>
-            </Paper>
+            {epic && <div className="glow-rays absolute top-[30%] left-1/2 size-[260px] -translate-x-1/2 -translate-y-1/2" />}
+            {epic && <Confetti />}
+            <BurstArt spec={spec} glow={glow} />
+            <p className="relative mt-1 font-pixel text-[11px] leading-snug" style={{ color: bad ? '#ff9d8c' : '#ffe27a', textShadow: OUTLINE }}>
+              {spec.title}
+            </p>
+            {rarity && (
+              <p className="relative font-pixel text-[9px]" style={{ color: rarity.color, textShadow: OUTLINE }}>
+                {rarity.label}
+              </p>
+            )}
+            {spec.subtitle && (
+              <p className="relative mt-0.5 text-[17px] leading-tight font-extrabold text-cream" style={{ textShadow: OUTLINE }}>
+                {spec.subtitle}
+              </p>
+            )}
+            {spec.lines?.[0] && (
+              <p className="relative mt-0.5 line-clamp-3 text-[12px] leading-snug font-bold text-cream/90" style={{ textShadow: OUTLINE }}>
+                {spec.lines[0]}
+              </p>
+            )}
           </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
+    </div>
   )
+}
+
+/** Що вистрибує: риба, спрайт, картинка (монстр) чи емодзі — з сяйвом кольору рідкості. */
+function BurstArt({ spec, glow }) {
+  const pop = { initial: { scale: 0, rotate: -25, y: 20 }, animate: { scale: 1, rotate: 0, y: 0 }, transition: { delay: 0.05, type: 'spring', stiffness: 320, damping: 11 } }
+  const halo = glow ? { filter: `drop-shadow(0 0 10px ${glow}) drop-shadow(0 4px 0 #0007)` } : { filter: 'drop-shadow(0 4px 0 #0007)' }
+  if (spec.fish?.image || spec.sprite)
+    return <motion.img {...pop} src={spec.fish?.image ?? spec.sprite} alt="" className="pixelated relative h-16 max-w-[150px] object-contain" style={halo} />
+  if (spec.image)
+    return <motion.img {...pop} src={spec.image} alt="" className="relative h-20 w-28 rounded-sm border-2 border-wood-dark object-cover" style={halo} />
+  if (spec.icon)
+    return (
+      <motion.span {...pop} className="relative text-5xl leading-none" style={halo}>
+        {spec.icon}
+      </motion.span>
+    )
+  return null
 }
 
 const CONFETTI_COLORS = ['#ffcf3f', '#5cb83c', '#4aa3ff', '#e2553e', '#b57bff', '#fff']

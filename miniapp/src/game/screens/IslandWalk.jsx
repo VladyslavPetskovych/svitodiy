@@ -1,10 +1,10 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { canAfford, formatAmounts, homeStorage, itemOf } from '../data.js'
+import { canAfford, homeStorage, itemOf } from '../data.js'
 import { useGame, useNow } from '../context.js'
-import { bedCount, fieldView, ownedSeeds, plotSpot, plotView } from '../farm.js'
+import { bedCount, fieldView, ownedSeeds, plotSpot, plotView, shortDuration } from '../farm.js'
 import { haptic, useBackButton } from '../tg.js'
-import { ItemIcon, PxButton, Segmented } from '../ui.jsx'
+import { Bar, ItemIcon, PxButton, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
 import homeAtlas from '../walk/home-atlas.json'
 import decorAtlas from '../walk/home-decor.json'
@@ -15,7 +15,7 @@ import { DEFAULT_FLOOR, FLOOR_COLORS, FLOOR_SHEET, floorRect } from '../walk/flo
 import { DOGS, dogById } from '../walk/companion.js'
 import { INTERACT } from '../walk/layout.js'
 import { skyAt, skyOverrideFromUrl } from '../walk/sky.js'
-import { BuildingSheet, DailySheet } from './Home.jsx'
+import { BuildingSheet } from './Home.jsx'
 import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
 import { CraftSheet, ResetSheet } from './islandCraft.jsx'
 
@@ -44,13 +44,21 @@ function skyHint(sky) {
 }
 /** Дія в хаті «bed:<id речі>» → «bed» (у хаті може бути кілька ліжок чи полиць). */
 const actOf = (id) => id?.split(':')[0]
-const FEED_TEXT = [(n) => `😋 ${n} уминає за обидві щоки!`, (n) => `😋 Хрум-хрум! ${n} задоволений.`]
-const DOG_PETS = [
-  (n) => `🐶 ${n} радісно махає хвостом!`,
-  (n) => `🐶 ${n} підставляє вушко — ще, ще!`,
-  (n) => `🐶 Гав! ${n} задоволений.`,
-  (n) => `🐶 ${n} лизнув тобі руку.`,
-]
+const FEED_TEXT = [(n) => `😋 ${n} уминає!`, () => '😋 Хрум-хрум!']
+const DOG_PETS = [() => 'Гав! 🐾', (n) => `${n} махає хвостом`, () => 'Ще, ще! ❤️', (n) => `${n} лизнув руку`]
+/** Випадковий елемент масиву (різні репліки пса). */
+const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)]
+/** «+3 🥕  +1 🌱» — коротко, для напису над грядкою чи ресурсом. */
+const shortGot = (items, got) =>
+  Object.entries(got ?? {})
+    .map(([id, n]) => `+${n} ${id === 'balance' ? '✨' : itemOf(items, id).emoji}`)
+    .join('  ')
+/** Обхід усіх грядок підряд: напис на кнопці й під час роботи. */
+const CHAIN = {
+  water: { all: '💧 Полити всі', doing: '💧 Поливаю' },
+  harvest: { all: '🧺 Зібрати все', doing: '🧺 Збираю' },
+  plant: { all: '🌱 Засадити всі', doing: '🌱 Саджу' },
+}
 const CATS = [
   { value: 'build', label: '🏗 Будова' },
   { value: 'plants', label: '🌿 Рослини' },
@@ -69,14 +77,13 @@ const CATS_HOME = [
 
 /** Рідний острів зсередини: ходиш мандрівником, підходиш до будівель — або будуєш у пісочниці. */
 export default function IslandWalk() {
-  const { state, catalog, items, act, toast, switchTab, back } = useGame()
+  const { state, catalog, items, act, toast, setToastSink, switchTab, back } = useGame()
   const canvas = useRef(null)
   const engine = useRef(null)
   const [error, setError] = useState(null)
   const [ready, setReady] = useState(false)
   const [near, setNear] = useState(null)
   const [sheet, setSheet] = useState(null)
-  const [daily, setDaily] = useState(false)
   // Пісочниця.
   const [build, setBuild] = useState(false)
   const [cat, setCat] = useState('plants')
@@ -94,7 +101,20 @@ export default function IslandWalk() {
   const [craft, setCraft] = useState(false) // шторка верстата
   const gathering = useRef(false) // добування в процесі — другий тап не почне нове
   const working = useRef(new Set()) // грядки, на яких дія ще в дорозі до сервера
-  const clearArmed = useRef(null) // «викопати» — другий тап підтверджує
+  // «Викопати» / «Розібрати»: перший тап перетворює кнопку на «Точно?», другий — підтверджує.
+  const [armed, setArmed] = useState(null)
+  const armTimer = useRef(null)
+  const arm = (id) => {
+    haptic('warning')
+    setArmed(id)
+    clearTimeout(armTimer.current)
+    armTimer.current = setTimeout(() => setArmed(null), 2500)
+  }
+  // «Полити всі» тощо: мандрівник сам обходить грядки одну за одною.
+  const chain = useRef(null) // { kind, target, timer }
+  const [chainKind, setChainKind] = useState(null)
+  // Звістка про острів «з нуля» — раз; сервер забуває її після «Будуймо!».
+  const [resetSeen, setResetSeen] = useState(false)
   const now = useNow()
   const { home } = state
   const deco = state.deco ?? NO_DECO
@@ -129,6 +149,15 @@ export default function IslandWalk() {
     ? { base: '/home/interior', placed: interior, defs: catalog.interior ?? [] }
     : { base: '/home/deco', placed: islandPlaced, defs: islandDefs }
 
+  /**
+   * Напис у світі: спливає над мандрівником, грядкою, псом чи ресурсом і тане.
+   * Поки рушій не готовий — звичайний напис на місці дотику.
+   */
+  const say = (text, at = 'hero', kind = 'info', burst = null) => {
+    if (engine.current) engine.current.floatText(text, { at, kind, burst })
+    else toast(text, kind)
+  }
+
   const collecting = useRef(false)
   const collect = async () => {
     if (collecting.current) return
@@ -137,7 +166,25 @@ export default function IslandWalk() {
     collecting.current = false
     if (!res) return
     haptic('success')
-    toast(`Зібрано: ${formatAmounts(items, res.got)}`)
+    say(shortGot(items, res.got), 'hero', 'good', 'coins')
+  }
+
+  /** Скриня на березі: тап — і дарунок твій, без вікон. */
+  const claiming = useRef(false)
+  const claimDaily = async () => {
+    const rewards = catalog.config.dailyRewards
+    if (state.daily.claimedToday) {
+      say(`Завтра: +${rewards[(state.daily.todayIndex + 1) % rewards.length]} ✨`, 'chest', 'calm')
+      return
+    }
+    if (claiming.current) return
+    claiming.current = true
+    const res = await act('POST', '/daily/claim')
+    claiming.current = false
+    if (!res) return
+    haptic('success')
+    say(`+${res.reward} ✨`, 'chest', 'good', 'coins')
+    setTimeout(() => say(`🔥 ${res.streak} ${res.streak === 1 ? 'день' : 'дні(в)'} поспіль`, 'chest', 'calm'), 300)
   }
   const goScene = (id) => {
     haptic('medium')
@@ -156,17 +203,25 @@ export default function IslandWalk() {
   const farmAction = async (i) => {
     if (working.current.has(i)) return
     const v = plotView(catalog, state.farm, i, now)
+    if (!v) return
+    const c = chain.current
+    if (c && v.action !== c.kind) {
+      // Обходимо грядки, а ця вже не потребує тієї ж дії (пішов дощ, хтось зібрав) — до наступної.
+      if (c.target === i) setTimeout(() => handlers.current.chainNext(), 0)
+      return
+    }
     if (v.action === 'wait') {
-      toast(`💧 ${plotSpot(catalog, state.farm, v, now).hint}`)
+      say(v.nextAt ? `⏳ ще ${shortDuration(v.nextAt - now)}` : '⏳ Росте', `plot:${i}`, 'calm')
       return
     }
     let body
     const kind = v.action
+    let crop = null
     if (kind === 'plant') {
-      const crop = seedToPlant()
+      crop = seedToPlant()
       if (!crop) {
+        // Немає насіння — одразу до крамнички, без зайвих повідомлень.
         haptic('warning')
-        toast('Немає насіння — купи в коморі городника 🌱', 'error')
         setFarmTab('seeds')
         return
       }
@@ -176,20 +231,52 @@ export default function IslandWalk() {
     engine.current?.farmFx(i, kind)
     const res = await act('POST', `/farm/${i}/${kind}`, body)
     working.current.delete(i)
-    if (!res) return
-    haptic(kind === 'harvest' ? 'success' : 'light')
-    if (res.got) toast(`🧺 Зібрано: ${formatAmounts(items, res.got)}`)
-  }
-
-  /** Викопати рослину (подвійний тап — щоб не зробити це випадково). */
-  const clearPlot = async (i) => {
-    if (clearArmed.current?.i !== i || Date.now() - clearArmed.current.at > 2500) {
-      clearArmed.current = { i, at: Date.now() }
-      haptic('warning')
-      toast('Тапни 🗑 ще раз — рослину буде викопано')
+    if (!res) {
+      stopChain()
       return
     }
-    clearArmed.current = null
+    haptic(kind === 'harvest' ? 'success' : 'light')
+    if (kind === 'harvest') say(shortGot(items, res.got), `plot:${i}`, 'good')
+    else if (kind === 'plant') say(`🌱 ${crop.name}`, `plot:${i}`, 'good')
+    // Обхід усіх грядок — до наступної, щойно прийде свіжий стан.
+    if (chain.current) setTimeout(() => handlers.current.chainNext(), 200)
+  }
+
+  /** Почати обхід: та сама дія на всіх грядках, від найближчої. */
+  const startChain = (kind) => {
+    haptic('medium')
+    chain.current = { kind, target: null, timer: 0 }
+    setChainKind(kind)
+    chainNext()
+  }
+  const stopChain = (msg) => {
+    if (!chain.current) return
+    clearTimeout(chain.current.timer)
+    chain.current = null
+    setChainKind(null)
+    if (msg) say(msg, 'hero', 'good')
+  }
+  /** Наступна найближча грядка з тією ж дією (або кінець обходу). */
+  const chainNext = () => {
+    const c = chain.current
+    if (!c) return
+    clearTimeout(c.timer)
+    if (c.kind === 'plant' && !seedToPlant()) return stopChain('Насіння скінчилось 🌱')
+    const me = engine.current?.heroPos()
+    const todo = fieldView(catalog, state.farm, now).filter((v) => v.action === c.kind && !working.current.has(v.i))
+    if (!me || !todo.length) return stopChain('✓ Готово!')
+    const dist = (v) => Math.hypot(v.x - me.x, v.y - 8 - me.y)
+    const next = todo.reduce((a, b) => (dist(b) < dist(a) ? b : a))
+    c.target = next.i
+    // Не дійшов (шлях перекрито) — не чекаємо вічно.
+    c.timer = setTimeout(() => chain.current === c && c.target === next.i && stopChain(), 10000)
+    if (!engine.current.goToPlot(next.i)) stopChain()
+  }
+
+  /** Викопати рослину: перший тап — «Точно?» на кнопці, другий — викопує. */
+  const clearPlot = async (i) => {
+    if (armed !== `plot:${i}`) return arm(`plot:${i}`)
+    setArmed(null)
     engine.current?.farmFx(i, 'clear')
     if (await act('POST', `/farm/${i}/clear`)) haptic('success')
   }
@@ -215,7 +302,7 @@ export default function IslandWalk() {
     const tool = toolFor(def)
     if (!tool.ok) {
       haptic('warning')
-      toast(`${def.emoji} Потрібна ${tool.need.toLowerCase()} — зроби на верстаті 🪚`, 'error')
+      say(`Потрібна ${tool.need.toLowerCase()} 🪚`, `node:${id}`, 'error')
       return
     }
     gathering.current = true
@@ -225,7 +312,8 @@ export default function IslandWalk() {
     gathering.current = false
     if (!res) return
     haptic('success')
-    toast(Object.keys(res.got).length ? `${def.emoji} Здобуто: ${formatAmounts(items, res.got)}` : `${def.emoji} Нічого цікавого`)
+    const got = shortGot(items, res.got)
+    say(got || 'Нічого цікавого', 'hero', got ? 'good' : 'calm')
   }
 
   /* ───── Пси ───── */
@@ -233,7 +321,7 @@ export default function IslandWalk() {
   const petDog = (dog) => {
     engine.current?.petDog(dog.id)
     haptic('success')
-    toast(DOG_PETS[Math.floor(Math.random() * DOG_PETS.length)](dog.name))
+    say(pickOne(DOG_PETS)(dog.name), `dog:${dog.id}`)
     // Дружба росте від першого погладжування за день.
     if (!state.dogs?.[dog.id]?.pettedToday) act('POST', `/dogs/${dog.id}/pet`, {}, { silent: true })
   }
@@ -244,9 +332,8 @@ export default function IslandWalk() {
     if (!dog || !cmd) return
     haptic('medium')
     setDogSheet(null)
-    const text = { follow: `🐾 ${dog.name} біжить до тебе!`, sit: `🪑 ${dog.name} сів і чекає тут.` }[mode] ??
-      (scene === 'home' ? `🏠 ${dog.name} вмостився на лежанці.` : `🏠 ${dog.name} побіг до хатинки.`)
-    toast(text)
+    const text = { follow: '🐾 Біжу!', sit: '🪑 Сиджу тут' }[mode] ?? (scene === 'home' ? '🏠 На лежанку' : '🏠 Додому!')
+    say(text, `dog:${id}`)
     await act('POST', `/dogs/${id}/command`, cmd)
   }
 
@@ -257,19 +344,19 @@ export default function IslandWalk() {
     setDogSheet(null)
     engine.current?.feedDog(id)
     haptic('success')
-    toast(`${FEED_TEXT[Math.floor(Math.random() * FEED_TEXT.length)](dog.name)}${res.favorite ? ' Улюблене! ⭐' : ''}`)
-    if (res.gift) setTimeout(() => toast(`🐶 ${dog.name} щось відкопав і приніс: ${formatAmounts(items, res.gift)}`), 1900)
+    say(`${pickOne(FEED_TEXT)(dog.name)}${res.favorite ? ' ⭐' : ''}`, `dog:${id}`, 'good')
+    if (res.gift) setTimeout(() => say(`🎁 ${shortGot(items, res.gift)}`, `dog:${id}`, 'good', 'coins'), 1900)
   }
 
   /** Свисток: усі пси, що сидять чи чекають удома, біжать до тебе. */
   const whistle = async () => {
     const away = DOG_IDS.filter((id) => (state.dogs?.[id]?.mode ?? 'follow') !== 'follow')
     if (!away.length) {
-      toast('🐾 Пси й так поруч.')
+      say('🐾 Пси й так поруч', 'hero', 'calm')
       return
     }
     haptic('medium')
-    toast('📯 Фіть-фіть! Пси біжать до тебе.')
+    say('📯 Фіть-фіть!')
     for (const id of away) {
       const cmd = engine.current?.commandDog(id, 'follow')
       if (cmd) await act('POST', `/dogs/${id}/command`, cmd, { silent: true })
@@ -288,10 +375,10 @@ export default function IslandWalk() {
     else if (id === 'house') goScene('home')
     else if (id === 'exit') goScene('island')
     else if (BUILDINGS.has(id)) setSheet(id)
-    else if (id === 'chest') setDaily(true)
+    else if (id === 'chest') claimDaily()
     else if (id === 'fishing') switchTab('fishing')
     else if (id === 'boat') switchTab('map')
-    else if (actOf(id) === 'bed') toast('😴 Подрімав під вишитою ковдрою — сил додалось!')
+    else if (actOf(id) === 'bed') say('😴 Сил додалось!', 'hero', 'calm')
     else if (actOf(id) === 'stove') switchTab('backpack') // готують рибу в рюкзаку
     else if (actOf(id) === 'shelf') switchTab('journal')
   }
@@ -329,7 +416,6 @@ export default function IslandWalk() {
   const choose = (d) => {
     if (d.building && home.levels[d.building] > 0) {
       haptic('select')
-      toast(`${d.emoji} ${d.name} уже стоїть — вибрано, можна перенести`)
       setPick(null)
       showGhost(null)
       select(d.id)
@@ -375,7 +461,7 @@ export default function IslandWalk() {
     haptic('success')
     showGhost(null)
     const def = sandbox.defs.find((d) => d.id === kind)
-    if (building && !ghost.uid) toast(`${def.emoji} ${def.name} збудовано! Торкнись її, щоб перенести`)
+    if (building && !ghost.uid && pos.x != null) say(`${def.emoji} ${def.name}!`, { x: pos.x, y: pos.y, h: 40 }, 'good', 'coins')
     if (ghost.uid) select(building || bed ? ghost.uid : res.item.id)
     else if (building) setPick(null)
     else if (bed) {
@@ -394,19 +480,14 @@ export default function IslandWalk() {
     showGhost(d.wall ? { kind: d.k, wall: d.wall, at: d.at, h: d.h, uid: d.id } : { kind: d.k, x: d.x, y: d.y, uid: d.id })
   }
 
-  const removeArmed = useRef(null) // розібрати будівлю чи грядку з урожаєм — другий тап підтверджує
+  // Розібрати будівлю чи грядку з урожаєм: перший тап — «Точно?» на кнопці, другий — прибирає.
   const remove = async () => {
     if (!sel || busy) return
     const item = sandbox.placed.find((x) => x.id === sel)
     const building = !indoors && sel.startsWith('b:') ? sel.slice(2) : null
     const bed = !indoors && sel.startsWith('bed:') ? sel.slice(4) : null
-    if ((building || (bed && item?.crop)) && (removeArmed.current?.id !== sel || Date.now() - removeArmed.current.at > 2500)) {
-      removeArmed.current = { id: sel, at: Date.now() }
-      haptic('warning')
-      toast(building ? 'Тапни 🗑 ще раз — будівлю розберемо, усе витрачене повернеться' : 'Тапни 🗑 ще раз — грядку приберемо разом з рослиною')
-      return
-    }
-    removeArmed.current = null
+    if ((building || (bed && item?.crop)) && armed !== sel) return arm(sel)
+    setArmed(null)
     setBusy(true)
     const res = building
       ? await act('DELETE', `/home/building/${building}`)
@@ -418,7 +499,7 @@ export default function IslandWalk() {
     haptic('success')
     select(null)
     const refund = res.refund ?? {}
-    toast(Object.keys(refund).length ? `${building ? 'Розібрано' : 'Прибрано'}. Повернуто: ${formatAmounts(items, refund)}` : 'Прибрано')
+    if (Object.keys(refund).length) say(shortGot(items, refund), item?.x != null ? { x: item.x, y: item.y, h: 14 } : 'hero', 'good')
   }
 
   /* ───── Підлога ───── */
@@ -460,7 +541,7 @@ export default function IslandWalk() {
     if (!res) return
     haptic('success')
     setFloorTry(null)
-    toast(`${def.emoji} Нова підлога — ${def.name.toLowerCase()}!`)
+    say(`${def.emoji} Нова підлога!`, 'hero', 'good')
   }
   // Рушій показує приміряну підлогу або збережену.
   useEffect(() => {
@@ -469,6 +550,7 @@ export default function IslandWalk() {
 
   const enterBuild = () => {
     haptic('medium')
+    stopChain()
     setCat(indoors ? 'furniture' : 'build')
     setBuild(true)
     engine.current?.setMode('build')
@@ -494,8 +576,27 @@ export default function IslandWalk() {
   // Обробники рушія читають свіжі значення через ref — рушій створюється один раз.
   const handlers = useRef({})
   useEffect(() => {
-    handlers.current = { interact, collect, buildTap }
+    handlers.current = { interact, collect, buildTap, chainNext }
   })
+
+  // Усі повідомлення на острові (і помилки сервера) — написами над мандрівником, а не плашками.
+  // Поки відкрита шторка чи будуєш — написи спливають там, де тапнув (острів тоді за шторкою чи не в фокусі).
+  const overlayOpen = !!(sheet || farmTab || dogSheet || craft || build || (home.reset && !resetSeen))
+  const overlay = useRef(overlayOpen)
+  useEffect(() => {
+    overlay.current = overlayOpen
+  })
+  useEffect(() => {
+    if (!ready) return
+    setToastSink((text, kind) => {
+      if (overlay.current || !engine.current) return false
+      engine.current.floatText(text, { at: 'hero', kind: kind === 'error' ? 'error' : 'info' })
+      return true
+    })
+    return () => setToastSink(null)
+  }, [ready, setToastSink])
+  // Пішов з острова чи почав будувати — обхід грядок зупиняється.
+  useEffect(() => () => clearTimeout(chain.current?.timer), [])
 
   useEffect(() => {
     let alive = true
@@ -533,10 +634,16 @@ export default function IslandWalk() {
   }, [ready, home.levels, home.pos, chestOpen, deco, interior, nodes])
 
   // Поле: що де росте (оновлюється й саме — волога грядка дорослішає без запитів).
+  // need — значок над грядкою (💧 🧺 🌱): що їй треба, видно здалеку. 🌱 — лише якщо є що садити.
+  const hasSeeds = ownedSeeds(catalog, state.inventory).length > 0
   const field = useMemo(() => fieldView(catalog, state.farm, now), [catalog, state.farm, now])
+  const farmIcons = useMemo(
+    () => field.map((v) => ({ ...v, need: v.action === 'wait' || (v.action === 'plant' && !hasSeeds) ? null : v.action })),
+    [field, hasSeeds]
+  )
   useEffect(() => {
-    if (ready) engine.current?.setFarm(field)
-  }, [ready, field])
+    if (ready) engine.current?.setFarm(farmIcons)
+  }, [ready, farmIcons])
 
   // Небо: справжній час доби там, де гравець, і спільна погода світу.
   const skyOverride = useMemo(() => skyOverrideFromUrl(), [])
@@ -566,8 +673,11 @@ export default function IslandWalk() {
 
   const nearDog = dogOf(near)
   const nearPlot = indoors ? null : plotOf(near)
-  const plotV = nearPlot != null ? field[nearPlot] : null
+  const plotV = nearPlot != null ? (field.find((v) => v.i === nearPlot) ?? null) : null
   const plotInfo = plotV ? plotSpot(catalog, state.farm, plotV, now) : null
+  // Скільки грядок потребують того ж, що й ця: від двох — кнопка «Полити всі» / «Зібрати все».
+  const sameCount = plotV && CHAIN[plotV.action] && (plotV.action !== 'plant' || hasSeeds) ? field.filter((v) => v.action === plotV.action).length : 0
+  const seedNow = plotV?.action === 'plant' ? seedToPlant() : null
   const nearNode = indoors ? null : nodeDef(nodeOf(near))
   const nodeTool = nearNode ? toolFor(nearNode) : null
   const spot = nearDog
@@ -590,8 +700,6 @@ export default function IslandWalk() {
   }
   const dogInfo = nearDog ? state.dogs?.[nearDog.id] : null
   const building = catalog.buildings.find((b) => b.id === sheet)
-  // Звістка про острів «з нуля» — раз; сервер забуває її після «Будуймо!».
-  const [resetSeen, setResetSeen] = useState(false)
   const ackReset = () => {
     setResetSeen(true)
     act('POST', '/home/reset/ack', {}, { silent: true })
@@ -601,7 +709,8 @@ export default function IslandWalk() {
     // Повноекранний острів: полотно на весь екран, керування — поверх нього.
     // Висота полотна не залежить від панелей, тож камера не смикається, коли вони з'являються.
     <div className="relative h-full w-full overflow-hidden bg-[#3b7fd0]">
-      <canvas ref={canvas} className="absolute inset-0 block h-full w-full touch-none" />
+      {/* Будь-який дотик до острова під час обходу грядок — зупиняє обхід (гравець перехопив керування). */}
+      <canvas ref={canvas} className="absolute inset-0 block h-full w-full touch-none" onPointerDown={() => stopChain()} />
       {!ready && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f2a3d]/60 text-center">
           <motion.span className="text-4xl" animate={error ? {} : { y: [0, -6, 0] }} transition={{ duration: 1.2, repeat: Infinity }}>
@@ -634,7 +743,7 @@ export default function IslandWalk() {
         </div>
         {ready && (
           <div className="pointer-events-auto flex gap-1">
-            {!build && <HudButton label={`${sky.part.emoji}${sky.weather.emoji}`} title={`${sky.part.name} · ${sky.weather.name}`} onClick={() => toast(skyHint(sky))} wide />}
+            {!build && <HudButton label={`${sky.part.emoji}${sky.weather.emoji}`} title={`${sky.part.name} · ${sky.weather.name}`} onClick={() => say(skyHint(sky), 'hero', 'calm')} wide />}
             <HudButton label="+" title="Наблизити" onClick={() => engine.current?.zoom(0.8)} />
             <HudButton label="−" title="Віддалити" onClick={() => engine.current?.zoom(1.25)} />
             {!build && <HudButton label="📯" title="Покликати псів" onClick={whistle} />}
@@ -677,14 +786,38 @@ export default function IslandWalk() {
               }}
               onMove={startMove}
               onRemove={remove}
+              armed={!!sel && armed === sel}
             />
           </div>
         ) : (
           <>
-            {showSeeds && (
+            {showSeeds && !chainKind && (
               <div className="pointer-events-auto">
                 <SeedBar seed={seedToPlant()?.id ?? null} setSeed={setSeed} onShop={() => setFarmTab('seeds')} />
               </div>
+            )}
+            {/* Обхід грядок: «Полити всі (5)» — або, поки триває, «Поливаю… ✕». */}
+            {chainKind ? (
+              <motion.button
+                type="button"
+                className="pointer-events-auto mx-auto flex items-center gap-2 rounded-sm bg-black/60 px-3 py-1.5 text-[13px] font-extrabold text-cream"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                onClick={() => stopChain()}
+              >
+                <motion.span animate={{ opacity: [1, 0.5, 1] }} transition={{ duration: 1, repeat: Infinity }}>
+                  {CHAIN[chainKind].doing}… {field.filter((v) => v.action === chainKind).length}
+                </motion.span>
+                <span className="rounded-sm bg-white/15 px-1.5">✕ Стоп</span>
+              </motion.button>
+            ) : (
+              sameCount > 1 && (
+                <motion.div className="pointer-events-auto mx-auto" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                  <PxButton size="sm" variant={plotV.action === 'harvest' ? 'yellow' : plotV.action === 'water' ? 'blue' : 'green'} onClick={() => startChain(plotV.action)}>
+                    {CHAIN[plotV.action].all} · {sameCount}
+                  </PxButton>
+                </motion.div>
+              )
             )}
             <div className="flex items-end gap-2">
               <div className="min-w-0 flex-1">
@@ -707,6 +840,8 @@ export default function IslandWalk() {
                         <p className="truncate text-sm font-extrabold">{spot.label}</p>
                         {dogInfo ? (
                           <Hearts hearts={dogInfo.hearts} love={dogInfo.love} size={10} />
+                        ) : plotV?.crop && !plotV.ready ? (
+                          <Growth v={plotV} now={now} raining={sky.weather.id === 'rain' || sky.weather.id === 'storm'} />
                         ) : (
                           <p className={`truncate text-[11px] ${nodeTool && !nodeTool.ok ? 'text-[#ffb3a6]' : 'text-cream/75'}`}>
                             {plotInfo ? plotInfo.hint : nearNode ? nodeHint(items, nearNode, nodeTool) : spotHint(catalog, home.levels, chestOpen, spot.id)}
@@ -716,18 +851,27 @@ export default function IslandWalk() {
                       {plotV ? (
                         <>
                           {plotV.crop && !plotV.ready && (
-                            <PxButton size="sm" variant="paper" onClick={() => clearPlot(plotV.i)} aria-label="Викопати">
-                              🗑
+                            <PxButton
+                              size="sm"
+                              variant={armed === `plot:${plotV.i}` ? 'red' : 'paper'}
+                              onClick={() => clearPlot(plotV.i)}
+                              aria-label="Викопати"
+                            >
+                              {armed === `plot:${plotV.i}` ? 'Точно?' : '🗑'}
                             </PxButton>
                           )}
-                          <PxButton
-                            size="sm"
-                            variant={plotV.action === 'harvest' ? 'yellow' : plotV.action === 'water' ? 'blue' : 'green'}
-                            className={plotV.action === 'wait' ? 'opacity-60' : ''}
-                            onClick={() => interact(spot.id)}
-                          >
-                            {plotV.action === 'plant' && seedToPlant() ? `🌱 ${seedToPlant().name}` : plotInfo.button}
-                          </PxButton>
+                          {plotV.action !== 'wait' && (
+                            <PxButton
+                              size="sm"
+                              variant={plotV.action === 'harvest' ? 'yellow' : plotV.action === 'water' ? 'blue' : 'green'}
+                              onClick={() => {
+                                stopChain()
+                                interact(spot.id)
+                              }}
+                            >
+                              {plotV.action === 'plant' ? (seedNow ? `🌱 ${seedNow.name}` : '🛒 Насіння') : plotInfo.button}
+                            </PxButton>
+                          )}
                         </>
                       ) : nearNode ? (
                         <PxButton size="sm" variant={nodeTool.ok ? 'yellow' : 'paper'} className={nodeTool.ok ? '' : 'opacity-60'} onClick={() => interact(spot.id)}>
@@ -774,7 +918,6 @@ export default function IslandWalk() {
       </div>
 
       <BuildingSheet building={building} onClose={() => setSheet(null)} />
-      <DailySheet open={daily} onClose={() => setDaily(false)} />
       <FarmSheet tab={farmTab} setTab={setFarmTab} onClose={() => setFarmTab(null)} />
       <DogSheet dog={dogSheet ? dogById(dogSheet) : null} onClose={() => setDogSheet(null)} onCommand={commandDog} onFeed={feedDog} />
       <CraftSheet open={craft} onClose={() => setCraft(false)} />
@@ -834,7 +977,7 @@ function RoundButton({ label, title, onClick, variant, disabled }) {
 
 /* ───────── Панель пісочниці ───────── */
 
-function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, floor, floorTry, onFloor, onBuyFloor, onCancelFloor }) {
+function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, armed, floor, floorTry, onFloor, onBuyFloor, onCancelFloor }) {
   const { catalog, state, items } = useGame()
   const decor = defs
   const defOf = (kind) => decor.find((d) => d.id === kind)
@@ -917,7 +1060,7 @@ function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost
           ↔
         </PxButton>
         <PxButton size="sm" variant="red" disabled={busy} onClick={onRemove} aria-label="Прибрати">
-          🗑
+          {armed ? 'Точно?' : '🗑'}
         </PxButton>
       </>
     )
@@ -1123,6 +1266,21 @@ function costText(items, cost, inventory) {
     .filter(([id, n]) => !inventory || (inventory[id] ?? 0) < n)
     .map(([id, n]) => `${id === 'balance' ? '✨' : itemOf(items, id).name} ×${inventory ? n - (inventory[id] ?? 0) : n}`)
   return parts.length ? parts.join(' · ') : 'безкоштовно'
+}
+
+/** Як росте рослина: смужка (стадії й поступ поточної) і скільки ще чекати — або що земля суха. */
+function Growth({ v, now, raining }) {
+  const ms = v.crop.stageMin * 60_000
+  const part = v.nextAt ? Math.min(1, Math.max(0, 1 - (v.nextAt - now) / ms)) : 0
+  const dry = v.action === 'water'
+  return (
+    <span className="mt-0.5 flex items-center gap-1.5">
+      <Bar value={(v.stage + part) / v.crop.stages} tone={dry ? 'gold' : ''} className="h-2! flex-1" />
+      <span className={`shrink-0 text-[11px] font-extrabold ${dry ? 'text-[#ffd27a]' : 'text-cream/80'}`}>
+        {dry ? '💧 Суха — полий!' : v.nextAt ? `${v.auto ? '💦' : raining ? '🌧️' : '⏳'} ${shortDuration(v.nextAt - now)}` : '⏳'}
+      </span>
+    </span>
+  )
 }
 
 /** Іконка грядки: що на ній росте (арт урожаю) або земля/бур'ян. */

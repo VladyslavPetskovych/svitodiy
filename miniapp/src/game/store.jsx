@@ -56,11 +56,44 @@ export function GameProvider({ wa, children }) {
     fetchGame().then(onLoaded, (e) => setFatal(loadError(e)))
   }, [fetchGame, onLoaded])
 
-  const toast = useCallback((text, kind = 'info') => {
-    const id = ++toastSeq
-    setToasts((t) => [...t.slice(-2), { id, text, kind }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600)
+  // Де гравець торкнувся востаннє: звідти й спливає напис — відгук там, куди дивишся.
+  const lastTap = useRef(null)
+  useEffect(() => {
+    const onDown = (e) => {
+      lastTap.current = { x: e.clientX, y: e.clientY, at: Date.now() }
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
   }, [])
+  /** Де показати відгук: місце останнього дотику (якщо недавно) або середина екрана. */
+  const fxPoint = useCallback(() => {
+    const tap = lastTap.current
+    return tap && Date.now() - tap.at < 5000 ? { x: tap.x, y: tap.y } : null
+  }, [])
+
+  // Екран-гра (острів) може забрати написи собі й показати їх у світі; повертає true, якщо показав.
+  const toastSink = useRef(null)
+  const setToastSink = useCallback((fn) => {
+    toastSink.current = fn
+  }, [])
+
+  /** Короткий відгук: напис спливає й тане — без вікон, що закривають екран. */
+  const toast = useCallback(
+    (text, kind = 'info') => {
+      if (toastSink.current?.(text, kind)) return
+      const id = ++toastSeq
+      const at = fxPoint()
+      setToasts((t) => {
+        // Кілька написів поспіль з одного місця — шикуються вгору, а не накладаються.
+        const stack = t.filter((x) => x.x === (at?.x ?? null) && x.y === (at?.y ?? null)).length
+        return [...t.slice(-3), { id, text, kind, x: at?.x ?? null, y: at?.y ?? null, stack }]
+      })
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2300 + Math.min(1200, text.length * 20))
+    },
+    [fxPoint]
+  )
+  /** Нагорода — святковий сплеск на місці дотику, що сам зникає (і не заважає грати далі). */
+  const reward = useCallback((spec) => setRewardPopup(spec ? { ...spec, id: ++toastSeq, at: fxPoint() } : null), [fxPoint])
 
   /**
    * Виклик API. Повертає відповідь або null (помилку вже показано тостом).
@@ -125,7 +158,8 @@ export function GameProvider({ wa, children }) {
     act,
     toast,
     toasts,
-    reward: setRewardPopup,
+    setToastSink,
+    reward,
     rewardPopup,
     nav,
     ...navApi,

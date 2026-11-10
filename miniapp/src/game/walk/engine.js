@@ -11,7 +11,7 @@ import rudkoMeta from './dog.json'
 import sirkoMeta from './sirko.json'
 
 const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
-import { beamTexture, blobTexture, bubbleTexture, createParticles, crispPixels, crispTexture, dropHeight, glowTexture, popScale, waterMaterial } from './fx.js'
+import { beamTexture, blobTexture, bubbleTexture, createParticles, crispPixels, crispTexture, dropHeight, glowTexture, popScale, textTexture, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
 import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
 import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
@@ -153,6 +153,12 @@ const overlaps = (a, b) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[
 
 /** Що показати над мандрівником під час роботи на городі й добування. */
 const TOOL_EMOJI = { till: '⛏️', plant: '🌱', water: '💧', harvest: '🧺', clear: '🧹', axe: '🪓', pickaxe: '⛏️', hand: '🤲' }
+/** Значок над грядкою: що їй зараз треба (видно здалеку, не підходячи). */
+const NEED_EMOJI = { water: '💧', harvest: '🧺', plant: '🌱', till: '⛏️' }
+/** Колір спливаючого напису за видом події. */
+const FLOAT_COLORS = { info: '#fff4dc', good: '#ffe27a', error: '#ff9d8c', calm: '#cfe8ff' }
+/** Скільки написів одночасно — старші зникають, щоб острів не захаращувало. */
+const FLOAT_MAX = 6
 /** Чим сиплеться ресурс під час добування: тріски, листя чи кам'яний пил. */
 const CHIPS = {
   oak: 'wood', birch: 'wood', pine: 'wood', driftwood: 'wood',
@@ -661,6 +667,135 @@ export function createWalk(canvas, assets, cb) {
   toolSprite.visible = false
   scene3.add(toolSprite)
   let toolAt = -1
+
+  /* ───── Спливаючі написи й значки над грядками ───── */
+
+  /** @type {{ s: THREE.Sprite, born: number, dur: number, at: string|object, key: string, pos: { x: number, y: number, h: number }, lift: number }[]} */
+  const floats = []
+  const bubbleOf = (emoji) => {
+    if (!bubbleTex.has(emoji)) bubbleTex.set(emoji, bubbleTexture(emoji))
+    return bubbleTex.get(emoji)
+  }
+
+  /** Висота спрайта рослини на грядці (щоб значок і напис були над нею, а не в ній). */
+  const cropTop = (v) => (v.crop ? (frames[`crop_${v.crop.id}_${Math.min(v.stage, v.crop.stages)}`]?.h ?? 14) + 3 : 4)
+
+  /**
+   * Де в світі показати напис: над мандрівником, грядкою, псом, ресурсом, точкою взаємодії
+   * чи просто { x, y, h }. null — такого вже немає (тоді — над мандрівником).
+   */
+  function anchorOf(at) {
+    if (at && typeof at === 'object') return { x: at.x, y: at.y, h: at.h ?? 16 }
+    if (typeof at === 'string') {
+      if (at.startsWith('plot:')) {
+        const v = plotById(Number(at.slice(5)))
+        if (v) {
+          const c = plotCenter(v)
+          return { x: c.x, y: c.y, h: cropTop(v) + 4 }
+        }
+      } else if (at.startsWith('dog:')) {
+        const d = dogById(at.slice(4))
+        if (d?.visible && d.sceneId === scene.id) return { x: d.body.x, y: d.body.y, h: 22 }
+      } else if (at.startsWith('node:')) {
+        const n = world?.nodes.find((q) => q.id === at.slice(5))
+        const it = list.find((p) => p.node === at.slice(5))
+        if (n) return { x: n.x, y: n.y, h: (it ? frames[it.s]?.h : 0) || 18 }
+      } else if (at !== 'hero') {
+        const it = interact.find((i) => i.id === at)
+        if (it) return { x: it.near[0], y: it.near[1] - 8, h: 24 }
+      }
+    }
+    return { x: hero.x, y: hero.y, h: 30 }
+  }
+
+  /**
+   * Напис, що спливає в світі й тане (замість вікон поверх екрана).
+   * kind — 'info' | 'good' | 'error' | 'calm'; burst — сипнути частинками ('coins' | 'leaves' | 'water').
+   */
+  function floatText(text, { at = 'hero', kind = 'info', burst = null } = {}) {
+    if (!text) return
+    const { tex, w, h } = textTexture(text, FLOAT_COLORS[kind] ?? FLOAT_COLORS.info)
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }))
+    s.scale.set(w, h, 1)
+    s.center.set(0.5, 0)
+    s.renderOrder = 9
+    scene3.add(s)
+    const key = typeof at === 'string' ? at : `${at.x}:${at.y}`
+    // Кілька написів над одним місцем — шикуються стовпчиком, а не накладаються.
+    const lift = floats.filter((f) => f.key === key && t - f.born < 0.9).reduce((m, f) => Math.max(m, f.lift + f.s.scale.y + 1), 0)
+    floats.push({ s, born: t, dur: Math.min(3.2, 1.5 + text.length * 0.03), at, key, pos: anchorOf(at), lift })
+    while (floats.length > FLOAT_MAX) dropFloat(0)
+    const p = floats.at(-1).pos
+    if (burst === 'coins') {
+      particles.dust(p.x, p.y + 2, 14, 1.1, [1, 0.84, 0.3])
+      rig.addTrauma(0.05)
+    } else if (burst === 'leaves') particles.leaves(p.x, p.y + 2, 6)
+    else if (burst === 'water') particles.dust(p.x, p.y + 2, 10, 0.7, [0.55, 0.78, 0.98])
+    if (kind === 'error') rig.addTrauma(0.03)
+  }
+  function dropFloat(k) {
+    const f = floats[k]
+    scene3.remove(f.s)
+    f.s.material.map.dispose()
+    f.s.material.dispose()
+    floats.splice(k, 1)
+  }
+  function floatStep() {
+    for (let k = floats.length - 1; k >= 0; k--) {
+      const f = floats[k]
+      const age = t - f.born
+      if (age >= f.dur) {
+        dropFloat(k)
+        continue
+      }
+      // Над мандрівником і псом напис іде разом з ними; над грядкою — стоїть на місці.
+      if (f.at === 'hero' || (typeof f.at === 'string' && f.at.startsWith('dog:'))) f.pos = anchorOf(f.at)
+      const k01 = age / f.dur
+      const rise = 1 - (1 - Math.min(1, age / 0.6)) ** 3
+      anchored({ ax: f.pos.x, ay: f.pos.y, dx: 0, h: f.pos.h + f.lift + 3 + rise * 8 + k01 * 4 }, f.s.position)
+      const [sx, sy] = popScale(age, 0.5)
+      const base = f.s.material.map.image
+      f.s.scale.set((base.width / 4) * sx, (base.height / 4) * sy, 1)
+      f.s.material.opacity = age > f.dur - 0.45 ? (f.dur - age) / 0.45 : 1
+      f.s.visible = scene.outdoor || !(typeof f.at === 'string' && (f.at.startsWith('plot:') || f.at.startsWith('node:')))
+    }
+  }
+
+  /** Значки над грядками: 💧 суха, 🧺 достигло, 🌱 можна садити. */
+  const plotIcons = new Map() // № грядки → { s, emoji, born }
+  function syncPlotIcons() {
+    const want = new Map((farmView ?? []).filter((v) => NEED_EMOJI[v.need]).map((v) => [v.i, NEED_EMOJI[v.need]]))
+    for (const [i, ic] of plotIcons)
+      if (want.get(i) !== ic.emoji) {
+        scene3.remove(ic.s)
+        ic.s.material.dispose()
+        plotIcons.delete(i)
+      }
+    for (const [i, emoji] of want) {
+      if (plotIcons.has(i)) continue
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleOf(emoji), transparent: true, depthWrite: false, depthTest: false }))
+      s.center.set(0.5, 0)
+      s.renderOrder = 7
+      s.visible = false
+      scene3.add(s)
+      plotIcons.set(i, { s, emoji, born: t })
+    }
+  }
+  function plotIconStep() {
+    const show = scene.outdoor && mode === 'walk'
+    for (const [i, ic] of plotIcons) {
+      const v = show ? plotById(i) : null
+      ic.s.visible = !!v
+      if (!v) continue
+      const c = plotCenter(v)
+      anchored({ ax: c.x, ay: c.y, dx: 0, h: cropTop(v) + 2 + Math.sin(t * 3 + i) * 1.2 }, ic.s.position)
+      const [sx, sy] = popScale(t - ic.born, 0.8)
+      // Грядка, біля якої стоїш, — значок трохи більший: «ось вона».
+      const big = near === `plot:${i}` ? 1.25 : 1
+      ic.s.scale.set(8.5 * sx * big, 9.2 * sy * big, 1)
+    }
+  }
+
   const ghostMesh = new THREE.Mesh(spriteGeo('bush'), ghostMat)
   ghostMesh.visible = false
   scene3.add(ghostMesh)
@@ -918,11 +1053,12 @@ export function createWalk(canvas, assets, cb) {
 
   /** Поле змінилось (скопали, полили, виросло) — перебудувати й «попнути» змінені грядки. */
   function setFarm(view) {
-    const key = JSON.stringify(view.map((v) => [v.i, v.x, v.y, v.auto, v.tilled, v.wet, v.crop?.id ?? null, v.stage]))
+    const key = JSON.stringify(view.map((v) => [v.i, v.x, v.y, v.auto, v.tilled, v.wet, v.crop?.id ?? null, v.stage, v.need ?? null]))
     if (key === farmKey) return
     const prev = farmView && new Map(farmView.map((v) => [v.i, v]))
     farmView = view
     farmKey = key
+    syncPlotIcons()
     if (prev && scene.outdoor)
       for (const v of view) {
         const o = prev.get(v.i)
@@ -1702,6 +1838,9 @@ export function createWalk(canvas, assets, cb) {
       plotFoot.set([r[0] + 0.5, r[1] + 0.5, r[2] - 1, r[3] - 1], 0xfff3b0, 0.1 * pulse, 0xfff7c8, pulse)
     } else plotFoot.group.visible = false
 
+    floatStep()
+    plotIconStep()
+
     // Інструмент над головою — злітає й тане.
     if (toolAt >= 0) {
       const age = t - toolAt
@@ -1963,6 +2102,21 @@ export function createWalk(canvas, assets, cb) {
         step()
       })
     },
+    /**
+     * Спливаючий напис у світі замість вікна поверх екрана.
+     * at — 'hero' | 'plot:<№>' | 'dog:<id>' | 'node:<id>' | id точки взаємодії | { x, y, h }.
+     */
+    floatText,
+    /** Підійти до грядки й попрацювати на ній (як тап по ній). false — грядки немає чи зараз не ходимо. */
+    goToPlot(i) {
+      if (mode !== 'walk' || !scene.outdoor || !plotById(i)) return false
+      tap({ plot: i })
+      return true
+    },
+    /** Де зараз мандрівник (координати мапи). */
+    heroPos() {
+      return { x: body.x, y: body.y }
+    },
     /** Де на екрані (clientX/Y) точка світу — для тестів і підказок поверх канви. */
     screenOf(x, y, h = 0) {
       const v = new THREE.Vector3(x, h, y).project(camera)
@@ -1995,6 +2149,8 @@ export function createWalk(canvas, assets, cb) {
       clearItems()
       for (const d of dogs) d.dispose()
       for (const s of bubbleSprites.values()) s.material.dispose()
+      while (floats.length) dropFloat(0)
+      for (const ic of plotIcons.values()) ic.s.material.dispose()
       for (const tex of bubbleTex.values()) tex.dispose()
       for (const g of geoCache.values()) g.dispose()
       particles.dispose()

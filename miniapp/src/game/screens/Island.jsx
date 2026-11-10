@@ -26,7 +26,7 @@ export default function Island({ id }) {
     if (!res) return
     const e = res.event
     if (e.kind === 'calm') {
-      reward({ title: 'Розвідка', icon: '🧭', lines: [e.text], tone: 'calm', actions: [{ label: 'Далі', variant: 'green' }] })
+      reward({ title: 'Розвідка', icon: '🧭', lines: [e.text], tone: 'calm' })
       return
     }
     const titles = { snake: 'Засідка в джунглях!', golem: 'Напад сніговика-голема!' }
@@ -41,7 +41,6 @@ export default function Island({ id }) {
       subtitle: e.result === 'win' ? `Перемога! +${e.delta} ✨` : e.result === 'lose' ? `Поразка ${e.delta} ✨` : 'Усе втрачено',
       lines: [texts[e.result]],
       tone: e.result === 'win' ? 'good' : 'bad',
-      actions: [{ label: e.result === 'win' ? 'Ура!' : 'Зализати рани', variant: e.result === 'win' ? 'green' : 'paper' }],
     })
   }
 

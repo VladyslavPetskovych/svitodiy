@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { RARITY, fishChance, itemOf, pct } from '../data.js'
 import { useGame } from '../context.js'
 import { haptic } from '../tg.js'
-import { FishArt, ItemIcon, Paper, PxButton, ScreenTitle, Sheet } from '../ui.jsx'
+import { FishArt, ItemIcon, PxButton, ScreenTitle, Sheet } from '../ui.jsx'
 
 /** Де на арті fishing.webp намальований поплавок (у % від розміру картинки). */
 const BOBBER = { x: 70.4, y: 65.8 }
@@ -88,7 +88,6 @@ export default function Fishing() {
   }
 
   const showCatch = (outcome, item) => {
-    const again = { label: '🎣 Ще закид', variant: 'yellow', onClick: () => setTimeout(cast, 250) }
     if (outcome.kind === 'fish') {
       const epic = item.rarity === 'legendary' || item.rarity === 'mythic'
       reward({
@@ -99,14 +98,6 @@ export default function Fishing() {
         subtitle: `${item.emoji} ${item.name}`,
         lines: [`📏 ~${item.size} · 💰 ${item.sellPrice} ✨`, item.flavor, `У рюкзаку: ×${outcome.total}`],
         tone: epic ? 'epic' : 'good',
-        actions: [
-          again,
-          {
-            label: `Продати зараз +${item.sellPrice} ✨`,
-            variant: 'paper',
-            onClick: () => act('POST', '/fish/sell', { fishId: item.id, count: 1 }),
-          },
-        ],
       })
     } else if (outcome.kind === 'resource') {
       reward({
@@ -114,9 +105,8 @@ export default function Fishing() {
         sprite: item.image ?? undefined,
         icon: item.image ? undefined : item.emoji,
         subtitle: item.name,
-        lines: ['Ресурс з води — знадобиться в алхімії.', `У рюкзаку: ×${outcome.total}`],
+        lines: [`У рюкзаку: ×${outcome.total} · знадобиться в алхімії`],
         tone: 'good',
-        actions: [again, { label: 'Добре', variant: 'paper' }],
       })
     } else {
       reward({
@@ -130,7 +120,6 @@ export default function Fishing() {
           `У колекції: ×${outcome.total}`,
         ],
         tone: 'epic',
-        actions: [again, { label: 'Чудово', variant: 'paper' }],
       })
     }
   }
@@ -156,14 +145,17 @@ export default function Fishing() {
 
         <AnimatePresence>
           {missLine && phase === 'miss' && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
+            // Промах — напис спливає над поплавцем і тане, без плашки поверх картинки.
+            <motion.p
+              initial={{ opacity: 0, y: 6, scale: 0.7 }}
+              animate={{ opacity: [0, 1, 1, 0], y: [6, -10, -16, -28], scale: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-x-3 top-3"
+              transition={{ duration: 2.6, times: [0, 0.12, 0.75, 1] }}
+              className="pointer-events-none absolute w-[70%] -translate-x-1/2 -translate-y-full text-center text-[14px] leading-tight font-extrabold text-cream"
+              style={{ left: `${BOBBER.x - 8}%`, top: `${BOBBER.y - 4}%`, textShadow: '0 2px 0 #1c120a, 2px 0 0 #1c120a, -2px 0 0 #1c120a, 0 -2px 0 #1c120a, 0 4px 8px #0009' }}
             >
-              <Paper className="p-1 text-center text-sm font-bold">{missLine}</Paper>
-            </motion.div>
+              {missLine}
+            </motion.p>
           )}
         </AnimatePresence>
 

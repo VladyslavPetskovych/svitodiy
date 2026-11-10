@@ -92,7 +92,7 @@ export function plotSpot(catalog, farm, v, now) {
   const label = crop ? crop.name : v.tilled ? 'Скопана грядка' : 'Ділянка під грядку'
   const hint = {
     till: 'Скопай мотикою — і можна садити',
-    plant: v.wet ? 'Волога земля — саме час садити' : 'Скопано — посади насіння',
+    plant: 'Обери насіння нижче й посади — поллється само',
     water: `Стадія ${v.stage}/${crop?.stages} · земля суха — полий!`,
     wait: v.nextAt
       ? `${v.auto ? '💦 Дощувач · ' : isRaining(now) ? '🌧️ Дощ поливає · ' : ''}Росте ${v.stage}/${crop?.stages} · далі за ${shortDuration(v.nextAt - now)}`

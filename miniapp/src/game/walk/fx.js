@@ -328,6 +328,50 @@ export function bubbleTexture(emoji) {
   })
 }
 
+/**
+ * Напис, що спливає над світом (+3 🥕, «Земля ще волога»): жирний текст з темним контуром,
+ * без плашки — щоб не закривати острів. Довгий — переноситься на кілька рядків.
+ * Повертає текстуру й розмір у px світу.
+ */
+export function textTexture(text, color = '#fff4dc', { size = 6.5, maxW = 110 } = {}) {
+  const S = 4 // пікселів полотна на піксель світу — чіткий текст навіть зблизька
+  const font = `800 ${size * S}px Manrope, system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`
+  const c = document.createElement('canvas')
+  const ctx = c.getContext('2d')
+  ctx.font = font
+  const lines = []
+  let line = ''
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    const next = line ? `${line} ${word}` : word
+    if (line && ctx.measureText(next).width > maxW * S) {
+      lines.push(line)
+      line = word
+    } else line = next
+  }
+  if (line) lines.push(line)
+  const lh = size * 1.25 * S
+  const pad = 2 * S
+  const w = Math.ceil(Math.max(1, ...lines.map((l) => ctx.measureText(l).width))) + pad * 2
+  const h = Math.ceil(lines.length * lh) + pad * 2
+  c.width = w
+  c.height = h
+  ctx.font = font
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = 2 * S
+  ctx.strokeStyle = '#1c120a'
+  lines.forEach((l, k) => {
+    const y = pad + lh * (k + 0.5)
+    ctx.strokeText(l, w / 2, y)
+    ctx.fillStyle = color
+    ctx.fillText(l, w / 2, y)
+  })
+  const tex = new THREE.CanvasTexture(c)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return { tex, w: w / S, h: h / S }
+}
+
 /* ───────── Вода ───────── */
 
 /**

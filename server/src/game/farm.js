@@ -17,7 +17,7 @@ import { RAIN_SINCE, firstRain, isRaining, lastRain } from "./weather.js";
 
 /**
  * Город на рідному острові (лише Mini App) — як у Stardew Valley:
- * скопай грядку мотикою → посади насіння → полий. Кожен полив дає один ріст: за stageMin
+ * посади насіння (садиш — одразу й поливаєш) → поливай далі. Кожен полив дає один ріст: за stageMin
  * хвилин рослина переходить на наступну стадію, а земля пересихає — поливай знову.
  *
  * Грядки гравець сам розставляє на острові (пісочниця, «Грядка») — скільки завгодно й де завгодно,
@@ -167,9 +167,8 @@ export async function plantPlot(userId, plot, cropId) {
   if (!(await consumeResources(userId, { [seedKey(crop.id)]: 1 }))) {
     throw conflict("not_enough", `Немає насіння «${crop.name}» — купи в коморі городника.`);
   }
-  // Посадив у вологу землю (дощ, дощувач чи щойно полив) — росте одразу; суху — запам'ятаємо, відколи суха.
-  const w = f.auto || f.p.w ? f.now : 0;
-  await save(f, w ? { c: crop.id, g: 0, w } : { c: crop.id, g: 0, w: 0, d: f.now });
+  // Посадив — одразу й полив: насіння починає рости без окремого кроку «полити».
+  await save(f, { c: crop.id, g: 0, w: f.now });
   return { plot: f.i, action: "plant" };
 }
 

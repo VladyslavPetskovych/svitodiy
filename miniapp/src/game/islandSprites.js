@@ -186,7 +186,6 @@ export const BUILDING_SPOTS = {
   house: { x: 460, y: 440, top: 390 },
   pier: { x: 470, y: 580, top: 545 },
   lighthouse: { x: 205, y: 520, top: 460 },
-  garden: { x: 612, y: 520, top: 495 },
   workshop: { x: 745, y: 560, top: 510 },
 }
 

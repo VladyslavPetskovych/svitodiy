@@ -378,3 +378,39 @@ export function waterMaterial(tex, ground, size) {
     depthWrite: false,
   })
 }
+
+/**
+ * «Чіткі пікселі» для піксель-арту, що рухається: текстура з лінійним фільтром, але шейдер
+ * притягує UV до центру тексела й змішує сусідні лише на ширині одного пікселя екрана.
+ * Із NearestFilter край кожного арт-пікселя стрибає між пікселями екрана, щойно камера
+ * зсувається на дробову відстань, — картинка «дряпається» й тремтить. Тут краї пливуть плавно,
+ * а сам арт лишається таким самим різким.
+ * @template {THREE.Material} T
+ * @param {T} mat матеріал із map
+ * @returns {T}
+ */
+export function crispPixels(mat) {
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace(
+      '#include <map_fragment>',
+      `#ifdef USE_MAP
+        vec2 crispSize = vec2(textureSize(map, 0));
+        vec2 crispPx = vMapUv * crispSize;
+        vec2 crispSeam = floor(crispPx + 0.5);
+        crispPx = crispSeam + clamp((crispPx - crispSeam) / max(fwidth(crispPx), vec2(1e-4)), -0.5, 0.5);
+        diffuseColor *= texture2D(map, crispPx / crispSize);
+      #endif`
+    )
+  }
+  mat.customProgramCacheKey = () => 'crisp-pixels'
+  return mat
+}
+
+/** Текстура для crispPixels: лінійний фільтр без мип-мапів. */
+export function crispTexture(tex) {
+  tex.magFilter = THREE.LinearFilter
+  tex.minFilter = THREE.LinearFilter
+  tex.generateMipmaps = false
+  tex.needsUpdate = true
+  return tex
+}

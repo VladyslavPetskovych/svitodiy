@@ -157,11 +157,6 @@ export default function IslandWalk() {
   const farmAction = async (i) => {
     if (working.current.has(i)) return
     const v = plotView(catalog, state.farm, i, now)
-    if (v.action === 'locked') {
-      haptic('warning')
-      toast(`🌿 ${plotSpot(catalog, state.farm, v, now).hint}`, 'error')
-      return
-    }
     if (v.action === 'wait') {
       toast(`💧 ${plotSpot(catalog, state.farm, v, now).hint}`)
       return
@@ -346,8 +341,7 @@ export default function IslandWalk() {
       const { used, max } = bedCount(state.farm)
       if (used >= max) {
         haptic('warning')
-        const next = (catalog.farm?.unlock ?? []).findIndex((n) => n > max)
-        toast(next > 0 ? `🟫 Більше ${max} грядок не доглянеш — покращ «Город» до ${next}-го рівня` : `🟫 Уже ${max} грядок — максимум`, 'error')
+        toast(`🟫 Уже ${max} грядок — більше острів не вмістить`, 'error')
         return
       }
     }
@@ -619,6 +613,12 @@ export default function IslandWalk() {
         {/* Полотно заповнює весь вільний простір; рушій сам підлаштовує камеру під розмір. */}
         <canvas ref={canvas} className="absolute inset-0 block h-full w-full touch-none" />
         {ready && <CameraControls engine={engine} onWhistle={whistle} />}
+        {/* Пакетики насіння — поверх острова, щоб не міняти висоту полотна. */}
+        {showSeeds && (
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/45 to-transparent px-3 pt-4">
+            <SeedBar seed={seedToPlant()?.id ?? null} setSeed={setSeed} onShop={() => setFarmTab('seeds')} />
+          </div>
+        )}
         {!ready && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f2a3d]/60 text-center">
             <motion.span
@@ -697,7 +697,8 @@ export default function IslandWalk() {
         />
       ) : (
         <>
-          <div className="px-wood flex min-h-14 items-center gap-2 px-2 py-1.5 text-cream">
+          {/* Висота стала: інакше полотно над панеллю міняло б розмір щоразу, як змінюється підказка, — і острів смикався б. */}
+          <div className="px-wood flex h-[60px] shrink-0 items-center gap-2 overflow-hidden px-2 py-1.5 text-cream">
             <AnimatePresence mode="wait" initial={false}>
               {spot ? (
                 <motion.div
@@ -733,7 +734,7 @@ export default function IslandWalk() {
                       <PxButton
                         size="sm"
                         variant={plotV.action === 'harvest' ? 'yellow' : plotV.action === 'water' ? 'blue' : 'green'}
-                        className={plotV.action === 'wait' || plotV.action === 'locked' ? 'opacity-60' : ''}
+                        className={plotV.action === 'wait' ? 'opacity-60' : ''}
                         onClick={() => interact(spot.id)}
                       >
                         {plotV.action === 'plant' && seedToPlant() ? `🌱 ${seedToPlant().name}` : plotInfo.button}
@@ -762,7 +763,7 @@ export default function IslandWalk() {
               ) : (
                 <motion.p
                   key="hint"
-                  className="flex-1 text-center text-[12px] text-cream/80"
+                  className="line-clamp-2 flex-1 text-center text-[12px] leading-snug text-cream/80"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
@@ -775,7 +776,6 @@ export default function IslandWalk() {
               )}
             </AnimatePresence>
           </div>
-          {showSeeds && <SeedBar seed={seedToPlant()?.id ?? null} setSeed={setSeed} onShop={() => setFarmTab('seeds')} />}
           {indoors ? (
             <div className="grid grid-cols-2 gap-2">
               <PxButton variant="yellow" size="lg" disabled={!ready} onClick={enterBuild}>
@@ -966,7 +966,7 @@ function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost
                     <span className="text-[#2f6b1f]">✓ стоїть</span>
                   ) : d.id === 'bed' ? (
                     <span className={full ? 'text-[#9a2f1d]' : ''}>
-                      {beds.used}/{beds.max}
+                      {beds.used ? `стоїть ${beds.used}` : 'безкоштовно'}
                     </span>
                   ) : Object.keys(d.cost).length
                     ? Object.entries(d.cost).map(([id, n]) => {
@@ -1131,7 +1131,7 @@ function costText(items, cost, inventory) {
 /** Іконка грядки: що на ній росте (арт урожаю) або земля/бур'ян. */
 function PlotIcon({ v, items }) {
   if (v.crop) return <ItemIcon item={itemOf(items, `crop_${v.crop.id}`)} size={30} className={v.ready ? '' : 'opacity-80 grayscale-[35%]'} />
-  return <span className="text-2xl">{v.locked ? '🌿' : v.tilled ? (v.wet ? '💧' : '🟫') : '🌾'}</span>
+  return <span className="text-2xl">{v.tilled ? (v.wet ? '💧' : '🟫') : '🌾'}</span>
 }
 
 /** Що стоїть на острові під цим id: будівля, верстат, комора чи те, що є завжди. */

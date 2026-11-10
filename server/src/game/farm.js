@@ -11,9 +11,8 @@ import {
   seedKey,
 } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
-import { getHome } from "./homestead.js";
 import { homeOwner } from "./household.js";
-import { farmKey, takeCooldown } from "./keys.js";
+import { decoKey, farmKey, takeCooldown } from "./keys.js";
 import { RAIN_SINCE, firstRain, isRaining, lastRain } from "./weather.js";
 
 /**
@@ -21,8 +20,9 @@ import { RAIN_SINCE, firstRain, isRaining, lastRain } from "./weather.js";
  * скопай грядку мотикою → посади насіння → полий. Кожен полив дає один ріст: за stageMin
  * хвилин рослина переходить на наступну стадію, а земля пересихає — поливай знову.
  *
- * Грядки гравець сам розставляє на острові (пісочниця, «Грядка») — одразу скопані: посадити,
- * поливати, збирати. Викопав рослину й прибрав порожню грядку — заростає, тоді знову скопати мотикою. Скільки грядок можна мати — залежить
+ * Грядки гравець сам розставляє на острові (пісочниця, «Грядка») — скільки завгодно й де завгодно,
+ * одразу скопані: посадити, поливати, збирати. Викопав рослину з порожньої грядки — заростає, тоді знову скопати.
+ * Дощувач (декор «sprinkler») поливає сам усі грядки в радіусі SPRINKLER_R — там рослини ростуть без перерви. Скільки грядок можна мати — залежить
  * від рівня будівлі «Город». На 3-му рівні — дощувач: поливає сам, тож рослини ростуть без перерви.
  * У спільному домі поле спільне, а насіння й урожай — у рюкзаку того, хто садить і збирає.
  *
@@ -30,10 +30,10 @@ import { RAIN_SINCE, firstRain, isRaining, lastRain } from "./weather.js";
  * 16×16), t — скопана, c — культура, g — стадія, w — коли полито, мс (0 — суха). Ріст рахуємо ліниво.
  */
 
-export const FIELD_PLOTS = 15;
-/** Скільки грядок можна мати на рівні «Городу» 0…3. */
-export const FIELD_UNLOCK = [6, 9, 12, 15];
-export const SPRINKLER_LEVEL = 3;
+/** Номери грядок 0…BED_MAX-1. Обмеження лише технічне — щоб острів не став полем на тисячі клітинок. */
+export const BED_MAX = 300;
+/** Скільки px від дощувача до центру грядки він ще поливає (~5×5 грядок довкола). */
+export const SPRINKLER_R = 40;
 /** Скільки тримається волога на порожній скопаній грядці. */
 const EMPTY_WET_MS = 30 * 60_000;
 const MAX_BUY = 99;
@@ -73,10 +73,26 @@ export function advancePlot(p, now, auto) {
   return w ? { c: crop.id, g, w } : { c: crop.id, g, w: 0, d };
 }
 
+/** Де стоять дощувачі острова: [{ x, y }]. */
+async function sprinklersOf(owner) {
+  const out = [];
+  for (const raw of await getRedis().hVals(decoKey(owner))) {
+    try {
+      const d = JSON.parse(raw);
+      if (d.k === "sprinkler") out.push({ x: d.x, y: d.y });
+    } catch {
+      /* зіпсований запис */
+    }
+  }
+  return out;
+}
+
+/** Чи поливає якийсь дощувач грядку з якорем (x, y) — центр грядки на 8 px вище якоря. */
+const watered = (bed, sprinklers) => sprinklers.some((s) => Math.hypot(s.x - bed.x, s.y - (bed.y - 8)) <= SPRINKLER_R);
+
 async function fieldOf(userId) {
-  const [{ owner }, home] = await Promise.all([homeOwner(userId), getHome(userId)]);
-  const level = Math.max(0, Math.min(3, home.levels.garden ?? 0));
-  return { owner, level, unlocked: FIELD_UNLOCK[level], auto: level >= SPRINKLER_LEVEL };
+  const { owner } = await homeOwner(userId);
+  return { owner, sprinklers: await sprinklersOf(owner) };
 }
 
 function parsePlot(raw) {
@@ -88,15 +104,20 @@ function parsePlot(raw) {
   }
 }
 
-/** Грядка на мить now: де стоїть, чи скопана і (якщо скопана) як росте. */
-function bedNow(raw, now, auto) {
+/**
+ * Грядка на мить now: де стоїть, чи скопана і (якщо скопана) як росте.
+ * a — над нею дощувач (поливає сам).
+ */
+function bedNow(raw, now, sprinklers) {
   const p = parsePlot(raw);
   if (!Number.isInteger(p.x) || !Number.isInteger(p.y)) return null;
   const at = { x: p.x, y: p.y };
-  return p.t ? { ...at, t: 1, ...advancePlot(p, now, auto) } : at;
+  const auto = watered(at, sprinklers);
+  if (!p.t) return at;
+  return { ...at, t: 1, ...(auto ? { a: 1 } : {}), ...advancePlot(p, now, auto) };
 }
 
-/** Поле для стану гри: { plots: { [№]: { x, y, t?, c?, g?, w } }, unlocked, auto, level }. */
+/** Поле для стану гри: { plots: { [№]: { x, y, t?, a?, c?, g?, w } } }. */
 export async function getFarm(userId) {
   const f = await fieldOf(userId);
   const h = await getRedis().hGetAll(farmKey(f.owner));
@@ -105,27 +126,26 @@ export async function getFarm(userId) {
   const plots = {};
   for (const [i, raw] of Object.entries(h)) {
     const n = Number(i);
-    const bed = Number.isInteger(n) && n >= 0 && n < FIELD_PLOTS ? bedNow(raw, now, f.auto) : null;
+    const bed = Number.isInteger(n) && n >= 0 && n < BED_MAX ? bedNow(raw, now, f.sprinklers) : null;
     if (bed) plots[n] = bed;
   }
-  return { plots, unlocked: f.unlocked, auto: f.auto, level: f.level };
+  return { plots, max: BED_MAX };
 }
 
 /** Грядка для дії: перевірка номера, замок від подвійного тапу, поточний стан. */
 async function plotFor(userId, plot) {
   const i = Number(plot);
-  if (!Number.isInteger(i) || i < 0 || i >= FIELD_PLOTS) throw badRequest("Невідома грядка.");
+  if (!Number.isInteger(i) || i < 0 || i >= BED_MAX) throw badRequest("Невідома грядка.");
   const f = await fieldOf(userId);
-  if (i >= f.unlocked) throw conflict("locked", "Ця ділянка ще заросла бур'яном — покращ «Город», щоб її розчистити.");
   if (!(await takeCooldown(`${f.owner}:${i}`, "farm", 300))) {
     throw new GameError(429, "cooldown", "Секунду — ще працюєш на цій грядці.");
   }
   const raw = await getRedis().hGet(farmKey(f.owner), String(i));
   const now = Date.now();
-  const bed = raw == null ? null : bedNow(raw, now, f.auto);
+  const bed = raw == null ? null : bedNow(raw, now, f.sprinklers);
   if (!bed) throw new GameError(404, "not_found", "Тут немає грядки — постав її в режимі будівництва.");
-  const { x, y, t, ...p } = bed;
-  return { ...f, i, now, at: { x, y }, tilled: !!t, p };
+  const { x, y, t, a, ...p } = bed;
+  return { ...f, i, now, at: { x, y }, tilled: !!t, auto: !!a, p };
 }
 
 /** Зберегти стан грядки, не губляючи, де вона стоїть. */
@@ -209,22 +229,15 @@ async function bedLock(owner) {
 /** Поставити нову ділянку під грядку на перше вільне місце в межах рівня «Городу». */
 export async function placeBed(userId, x, y) {
   const at = bedCoords(x, y);
-  const f = await fieldOf(userId);
-  await bedLock(f.owner);
+  const { owner } = await homeOwner(userId);
+  await bedLock(owner);
   const r = getRedis();
-  const used = new Set(await r.hKeys(farmKey(f.owner)));
-  const count = [...used].filter((k) => Number(k) < f.unlocked).length;
-  if (count >= f.unlocked) {
-    const more = FIELD_UNLOCK.findIndex((n) => n > f.unlocked);
-    throw conflict(
-      "full",
-      more > 0 ? `Більше ${f.unlocked} грядок не доглянеш — покращ «Город» до ${more}-го рівня.` : `Уже ${f.unlocked} грядок — це максимум.`
-    );
-  }
-  const i = Array.from({ length: f.unlocked }, (_, k) => k).find((k) => !used.has(String(k)));
+  const used = new Set(await r.hKeys(farmKey(owner)));
+  if (used.size >= BED_MAX) throw conflict("full", `Уже ${BED_MAX} грядок — більше острів не вмістить.`);
+  const i = Array.from({ length: BED_MAX }, (_, k) => k).find((k) => !used.has(String(k)));
   // Нова грядка — одразу скопана (суха земля): лишається посадити й полити.
   // hSetNX — двоє одночасно не займуть один номер.
-  if (i == null || !(await r.hSetNX(farmKey(f.owner), String(i), JSON.stringify({ ...at, t: 1, w: 0 })))) throw conflict("busy", "Спробуй ще раз.");
+  if (i == null || !(await r.hSetNX(farmKey(owner), String(i), JSON.stringify({ ...at, t: 1, w: 0 })))) throw conflict("busy", "Спробуй ще раз.");
   return { plot: i };
 }
 
@@ -232,7 +245,7 @@ export async function placeBed(userId, x, y) {
 export async function moveBed(userId, plot, x, y) {
   const at = bedCoords(x, y);
   const i = Number(plot);
-  if (!Number.isInteger(i) || i < 0 || i >= FIELD_PLOTS) throw badRequest("Невідома грядка.");
+  if (!Number.isInteger(i) || i < 0 || i >= BED_MAX) throw badRequest("Невідома грядка.");
   const { owner } = await homeOwner(userId);
   await bedLock(owner);
   const r = getRedis();
@@ -245,7 +258,7 @@ export async function moveBed(userId, plot, x, y) {
 /** Прибрати грядку з острова (усе, що на ній росло, пропадає). */
 export async function removeBed(userId, plot) {
   const i = Number(plot);
-  if (!Number.isInteger(i) || i < 0 || i >= FIELD_PLOTS) throw badRequest("Невідома грядка.");
+  if (!Number.isInteger(i) || i < 0 || i >= BED_MAX) throw badRequest("Невідома грядка.");
   const { owner } = await homeOwner(userId);
   await bedLock(owner);
   if ((await getRedis().hDel(farmKey(owner), String(i))) !== 1) throw new GameError(404, "not_found", "Цієї грядки вже немає.");
@@ -262,8 +275,6 @@ export async function buySeeds(userId, cropId, count) {
   const crop = typeof cropId === "string" ? getCrop(cropId) : null;
   if (!crop) throw badRequest("Невідоме насіння.");
   const n = countOf(count, MAX_BUY);
-  const { level } = await fieldOf(userId);
-  if (crop.garden > level) throw conflict("locked", `Це насіння з'явиться, коли «Город» стане ${crop.garden}-го рівня.`);
   if (!(await takeCooldown(userId, "farmshop", 250))) throw new GameError(429, "cooldown", "Секунду…");
   const price = crop.seedPrice * n;
   if ((await getBalance(userId)) < price) throw conflict("not_enough", `Потрібно ${price} ✨.`);
@@ -287,5 +298,5 @@ export async function sellCrops(userId, cropId, count) {
 
 /** Для каталогу: культури й правила поля. */
 export function farmCatalog() {
-  return { crops: CROPS, plots: FIELD_PLOTS, unlock: FIELD_UNLOCK, sprinklerLevel: SPRINKLER_LEVEL, emptyWetMin: EMPTY_WET_MS / 60_000 };
+  return { crops: CROPS, maxBeds: BED_MAX, sprinklerR: SPRINKLER_R, emptyWetMin: EMPTY_WET_MS / 60_000 };
 }

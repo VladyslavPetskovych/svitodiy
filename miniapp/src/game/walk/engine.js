@@ -4,14 +4,14 @@ import homeAtlas from './home-atlas.json'
 import decorAtlas from './home-decor.json'
 import artVersion from './version.json'
 import { createCameraRig } from './camera.js'
-import { BUILDING_GEOM, DECO_GEOM, NODE_GEOM, decoFootprint, geomOf, snapDeco } from './decor.js'
+import { BUILDING_GEOM, DECO_GEOM, NODE_GEOM, SPRINKLER_R, decoFootprint, geomOf, snapDeco } from './decor.js'
 import { DOGS, PET_RANGE } from './companion.js'
 import { createDog } from './dog.js'
 import rudkoMeta from './dog.json'
 import sirkoMeta from './sirko.json'
 
 const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
-import { beamTexture, blobTexture, bubbleTexture, createParticles, dropHeight, glowTexture, popScale, waterMaterial } from './fx.js'
+import { beamTexture, blobTexture, bubbleTexture, createParticles, crispPixels, crispTexture, dropHeight, glowTexture, popScale, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
 import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
 import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
@@ -68,9 +68,8 @@ export function loadAssets() {
     const a = Object.fromEntries(pairs)
     for (const tex of Object.values(a)) {
       tex.colorSpace = THREE.SRGBColorSpace
-      tex.magFilter = THREE.NearestFilter
-      tex.minFilter = THREE.NearestFilter
-      tex.generateMipmaps = false
+      // Лінійний фільтр + crispPixels у матеріалах: пікселі різкі, але не тремтять, коли камера пливе.
+      crispTexture(tex)
     }
     // Альфа атласів — щоб тап по спрайту влучав лише в непрозорі пікселі.
     a.alpha = Object.fromEntries(SHEETS.map((sh) => [sh.tex, alphaOf(a[sh.tex].image)]))
@@ -112,12 +111,14 @@ function effectsFor(home, deco) {
   if (lamp && l) lights.push(at(l.x, l.y, l.x + lamp[0], l.y + lamp[1], { r: 16 + levels.lighthouse * 6, beam: levels.lighthouse >= 3, uid: 'b:lighthouse' }))
   if (levels.pier >= 2) for (const dx of [-15, 15]) lights.push(at(PIER.x + dx, 372, PIER.x + dx, 357, { r: 9 }))
   const fires = []
+  const sprays = []
   for (const d of deco) {
     const g = DECO_GEOM[d.k]
     if (g?.light) lights.push(at(d.x, d.y, d.x, d.y + g.light.dy, { r: g.light.r, uid: d.id, warm: g.fire }))
     if (g?.fire) fires.push(at(d.x, d.y, d.x, d.y - 5, { uid: d.id }))
+    if (g?.spray) sprays.push(at(d.x, d.y, d.x, d.y - 9, { uid: d.id }))
   }
-  return { smoke, lights, fires }
+  return { smoke, lights, fires, sprays }
 }
 
 /** Світло в хатинці — від речей, що його дають (піч, лампа на столі), де б вони не стояли. */
@@ -141,11 +142,6 @@ function farmPlacements(view) {
   for (const v of view ?? []) {
     // Грядка — це предмет пісочниці «bed»: її можна вибрати, перенести й прибрати.
     const bed = { plot: v.i, uid: `bed:${v.i}`, kind: 'bed', occupies: [plotRect(v)] }
-    if (v.locked) {
-      out.push({ s: 'plot_mark', x: v.x, y: v.y, layer: 'floor', soil: true, ...bed })
-      out.push({ s: `weeds_${(v.i * 7 + 3) % 3}`, x: v.x, y: v.y - 2, layer: 'obj', plot: v.i, uid: bed.uid, kind: 'bed' })
-      continue
-    }
     out.push({ s: v.tilled ? (v.wet ? 'soil_wet' : 'soil_dry') : 'plot_mark', x: v.x, y: v.y, layer: 'floor', soil: true, ...bed })
     if (v.crop) out.push({ s: `crop_${v.crop.id}_${Math.min(v.stage, v.crop.stages)}`, x: v.x, y: v.y - 3, layer: 'obj', plot: v.i, uid: bed.uid, kind: 'bed', crop: v.crop.id, ready: v.ready })
   }
@@ -221,17 +217,17 @@ export function createWalk(canvas, assets, cb) {
     geoCache.set(key, g)
     return g
   }
-  const spriteMat = new THREE.MeshBasicMaterial({ map: assets.sprites, transparent: true, alphaTest: 0.5, depthWrite: false })
+  const spriteMat = crispPixels(new THREE.MeshBasicMaterial({ map: assets.sprites, transparent: true, alphaTest: 0.5, depthWrite: false }))
   /** Матеріал на кожен аркуш: спрайт малюється тим, де лежить його кадр. */
   const sheetMats = Object.fromEntries(
-    SHEETS.map((sh) => [sh.tex, sh.tex === 'sprites' ? spriteMat : new THREE.MeshBasicMaterial({ map: assets[sh.tex], transparent: true, alphaTest: 0.5, depthWrite: false })])
+    SHEETS.map((sh) => [sh.tex, sh.tex === 'sprites' ? spriteMat : crispPixels(new THREE.MeshBasicMaterial({ map: assets[sh.tex], transparent: true, alphaTest: 0.5, depthWrite: false }))])
   )
   const matOf = (name) => sheetMats[frameOf(name)?.sheet.tex] ?? spriteMat
   // Привид напівпрозорий, а alphaTest порівнює альфу вже з opacity — тож поріг майже нульовий
   // (альфа піксель-арту й так 0 або 1), інакше блідий привид зникав би повністю.
   const ghostMats = Object.fromEntries(
     Object.entries(sheetMats).map(([k, m]) => {
-      const g = m.clone()
+      const g = crispPixels(m.clone())
       g.alphaTest = 0.01
       return [k, g]
     })
@@ -255,7 +251,7 @@ export function createWalk(canvas, assets, cb) {
   water.renderOrder = -30
   scene3.add(water)
 
-  const groundMat = new THREE.MeshBasicMaterial({ map: assets.ground, transparent: true, depthWrite: false })
+  const groundMat = crispPixels(new THREE.MeshBasicMaterial({ map: assets.ground, transparent: true, depthWrite: false }))
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), groundMat)
   ground.renderOrder = -20
   scene3.add(ground)
@@ -265,7 +261,7 @@ export function createWalk(canvas, assets, cb) {
   foamTex.needsUpdate = true
   const foam = new THREE.Mesh(
     new THREE.PlaneGeometry(MAP.w, MAP.h).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ map: foamTex, transparent: true, depthWrite: false })
+    crispPixels(new THREE.MeshBasicMaterial({ map: foamTex, transparent: true, depthWrite: false }))
   )
   foam.position.set(MAP.w / 2, 0.05, MAP.h / 2)
   foam.renderOrder = -19
@@ -276,7 +272,7 @@ export function createWalk(canvas, assets, cb) {
    * стіну, з-за якої дивиться камера (передню), ховаємо (розріз, як у ляльковому будиночку), тож
    * завжди видно, що всередині. Речі на стінах (layer 'wall') ховаються разом зі стіною.
    */
-  const wallMat = new THREE.MeshBasicMaterial({ map: assets['home-walls'], transparent: true, alphaTest: 0.5, depthWrite: false })
+  const wallMat = crispPixels(new THREE.MeshBasicMaterial({ map: assets['home-walls'], transparent: true, alphaTest: 0.5, depthWrite: false }))
   const WS = homeAtlas.walls
   const midX = (FLOOR.x0 + FLOOR.x1) / 2
   const midY = (FLOOR.y0 + FLOOR.y1) / 2
@@ -324,7 +320,7 @@ export function createWalk(canvas, assets, cb) {
   const floorGeo = new THREE.PlaneGeometry(FLOOR_CELL.w, FLOOR_CELL.h).rotateX(-Math.PI / 2)
   const floorMesh = new THREE.Mesh(
     floorGeo,
-    new THREE.MeshBasicMaterial({ map: assets['home-floors'], transparent: true, depthWrite: false })
+    crispPixels(new THREE.MeshBasicMaterial({ map: assets['home-floors'], transparent: true, depthWrite: false }))
   )
   floorMesh.position.set((FLOOR.x0 + FLOOR.x1) / 2, 0, (FLOOR.y0 + FLOOR.y1) / 2)
   floorMesh.renderOrder = -18
@@ -649,6 +645,14 @@ export function createWalk(canvas, assets, cb) {
   const ghostFoot = makeFootprint()
   const selFoot = makeFootprint()
   const plotFoot = makeFootprint() // рамка грядки, з якою зараз працюватимеш
+  // Скільки поливає дощувач — коло під привидом чи вибраним дощувачем.
+  const reach = new THREE.Mesh(
+    new THREE.RingGeometry(SPRINKLER_R - 1.2, SPRINKLER_R, 48).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x9fd6ff, transparent: true, opacity: 0.8, depthWrite: false })
+  )
+  reach.renderOrder = -8
+  reach.visible = false
+  scene3.add(reach)
 
   // Над мандрівником — інструмент, яким щойно попрацював (мотика, лійка…).
   const toolSprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: false }))
@@ -725,6 +729,7 @@ export function createWalk(canvas, assets, cb) {
       }
     }
     for (const s of fx.smoke) emitters.push({ e: s, kind: 'smoke', acc: Math.random() })
+    for (const s of fx.sprays ?? []) emitters.push({ e: s, kind: 'spray', acc: Math.random() })
     for (const f of fx.fires) emitters.push({ e: f, kind: 'fire', acc: 0 })
     if (mode === 'build') drawGrid()
   }
@@ -913,7 +918,7 @@ export function createWalk(canvas, assets, cb) {
 
   /** Поле змінилось (скопали, полили, виросло) — перебудувати й «попнути» змінені грядки. */
   function setFarm(view) {
-    const key = JSON.stringify(view.map((v) => [v.i, v.x, v.y, v.locked, v.tilled, v.wet, v.crop?.id ?? null, v.stage]))
+    const key = JSON.stringify(view.map((v) => [v.i, v.x, v.y, v.auto, v.tilled, v.wet, v.crop?.id ?? null, v.stage]))
     if (key === farmKey) return
     const prev = farmView && new Map(farmView.map((v) => [v.i, v]))
     farmView = view
@@ -930,7 +935,7 @@ export function createWalk(canvas, assets, cb) {
         if (o.x !== v.x || o.y !== v.y) juice.set(`plot:${v.i}`, { t0: t, power: 0.7, drop: 0 })
         const grew = o.crop && v.crop && v.stage > o.stage
         const planted = !o.crop && v.crop
-        if (grew || planted || o.tilled !== v.tilled || o.locked !== v.locked) juice.set(`plot:${v.i}`, { t0: t, power: grew ? 0.9 : 0.6, drop: 0 })
+        if (grew || planted || o.tilled !== v.tilled) juice.set(`plot:${v.i}`, { t0: t, power: grew ? 0.9 : 0.6, drop: 0 })
         if (grew) {
           const c = plotCenter(v)
           particles.leaves(c.x, c.y + 3, 4)
@@ -1602,7 +1607,6 @@ export function createWalk(canvas, assets, cb) {
     const fi = hero.moving ? HERO_SEQ[Math.floor(hero.step * 9) % 4] : 0
     heroMesh.geometry = spriteGeo(`hero_${hero.dir}_${fi}`)
     heroMesh.position.set(hero.x, 0, hero.y)
-    if (hero.moving && fi !== 0) heroMesh.position.addScaledVector(camUp, 1)
     heroMesh.quaternion.copy(camera.quaternion)
     heroMesh.visible = true
     heroBlob.position.set(hero.x, 0.2, hero.y)
@@ -1640,11 +1644,12 @@ export function createWalk(canvas, assets, cb) {
     // Дим і вогонь — частинки в просторі, тож дим справді піднімається вгору.
     for (const em of emitters) {
       if (em.e.uid && ghost?.uid === em.e.uid) continue
-      em.acc += dt * (em.kind === 'smoke' ? 2.2 : 14)
+      em.acc += dt * (em.kind === 'smoke' ? 2.2 : em.kind === 'spray' ? 6 : 14)
       while (em.acc >= 1) {
         em.acc -= 1
         const p = anchored(em.e)
-        if (em.kind === 'smoke') particles.smoke(p.x, p.y, p.z)
+        if (em.kind === 'spray') particles.dust(em.e.ax + (Math.random() - 0.5) * 10, em.e.ay - 3 + (Math.random() - 0.5) * 6, 2, 0.5, [0.6, 0.82, 1])
+        else if (em.kind === 'smoke') particles.smoke(p.x, p.y, p.z)
         else particles.fire(p.x, p.y, p.z)
       }
     }
@@ -1680,6 +1685,14 @@ export function createWalk(canvas, assets, cb) {
     const sel = mode === 'build' && selected && !ghost && list.find((p) => p.uid === selected)
     if (sel && sel.layer !== 'wall') selFoot.set(footOf(sel.kind, sel.x, sel.y), 0xffdc5a, 0.25 * blink, 0xffe678, blink)
     else selFoot.group.visible = false
+
+    // Дощувач: коло, у якому він поливає грядки (центр грядки на 8 px вище її якоря).
+    const sprink = mode === 'build' && scene.outdoor && (ghost?.kind === 'sprinkler' ? ghost : sel?.kind === 'sprinkler' ? sel : null)
+    reach.visible = !!sprink
+    if (sprink) {
+      reach.position.set(sprink.x, 0.16, sprink.y + 8)
+      reach.material.opacity = 0.55 + blink * 0.3
+    }
 
     // Рамка грядки, з якою працюватимеш.
     const nearPlot = mode === 'walk' && scene.outdoor && near?.startsWith('plot:') ? plotById(Number(near.slice(5))) : null
@@ -1967,7 +1980,7 @@ export function createWalk(canvas, assets, cb) {
       const dogsInfo = Object.fromEntries(
         dogs.map((d) => [d.id, { x: d.body.x, y: d.body.y, state: d.state, mode: d.mode, scene: d.sceneId, visible: d.visible, dist: dogDist(d) }])
       )
-      return { player: { x: body.x, y: body.y }, dogs: dogsInfo, near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count }
+      return { player: { x: body.x, y: body.y }, hero: { x: hero.x, y: hero.y, dir: hero.dir, moving: hero.moving, my: heroMesh.position.y }, focus: { ...rig.focus }, dogs: dogsInfo, near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count }
     },
     destroy() {
       renderer.setAnimationLoop(null)

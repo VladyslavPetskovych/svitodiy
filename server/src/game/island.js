@@ -14,6 +14,23 @@ export const ISLAND_VERSION = 2;
 
 const DECOR_BY_ID = new Map(DECOR.map((d) => [d.id, d]));
 
+/**
+ * Будівля «Город» з версії 1 (рівні відкривали грядки й насіння). Тепер грядок скільки завгодно,
+ * тож будівлі немає — лишились лише її ціни, щоб повернути вкладене.
+ */
+const OLD_GARDEN = {
+  id: "garden",
+  placeable: true,
+  startLevel: 0,
+  levels: [
+    null,
+    { cost: { balance: 15, twig: 5, stone: 2 } },
+    { cost: { balance: 40, plank: 4, seaweed: 4 } },
+    { cost: { balance: 100, plank: 8, fish_bone: 4 } },
+  ],
+};
+const REFUNDED = [...BUILDINGS, OLD_GARDEN];
+
 const add = (into, from) => {
   for (const [id, n] of Object.entries(from)) into[id] = (into[id] ?? 0) + n;
   return into;
@@ -42,7 +59,7 @@ export async function ensureIsland(userId) {
   if (fresh) return;
 
   // Спершу врожай за старими рівнями — інакше комора згоріла б разом з будівлями.
-  const levels = Object.fromEntries(BUILDINGS.map((b) => [b.id, Number(h[`lvl:${b.id}`] ?? b.startLevel)]));
+  const levels = Object.fromEntries(REFUNDED.map((b) => [b.id, Number(h[`lvl:${b.id}`] ?? b.startLevel)]));
   let carry = {};
   try {
     carry = JSON.parse(h.carry ?? "{}");
@@ -54,7 +71,7 @@ export async function ensureIsland(userId) {
   /** @type {Record<string, number>} */
   const refund = {};
   const tx = r.multi();
-  for (const b of BUILDINGS) {
+  for (const b of REFUNDED) {
     if (!b.placeable || !(levels[b.id] > 0)) continue;
     add(refund, spentOn(b, levels[b.id]));
     tx.hSet(key, `lvl:${b.id}`, "0");

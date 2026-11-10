@@ -60,18 +60,18 @@ const FARM_TABS = [
 ]
 
 export function FarmSheet({ tab, setTab, onClose }) {
-  const { catalog, state } = useGame()
-  const farm = state.farm
-  const level = farm?.level ?? 0
+  const { state } = useGame()
+  const beds = Object.values(state.farm?.plots ?? {})
+  const sprinkled = beds.filter((b) => b.a).length
   return (
     <Sheet open={!!tab} onClose={onClose} title="🌱 Комора городника">
       <div className="flex flex-col gap-2.5">
         <p className="text-center text-[12px] text-ink-soft">
-          Город {level}-го рівня · відкрито {farm?.unlocked ?? 0}/{catalog.farm?.plots ?? 15} грядок
-          {farm?.auto ? ' · 💦 дощувач поливає сам' : ''} · у тебе {state.balance} ✨
+          Грядок на острові: {beds.length}
+          {sprinkled ? ` · 💦 під дощувачем: ${sprinkled}` : ''} · у тебе {state.balance} ✨
         </p>
         <Segmented options={FARM_TABS} value={tab ?? 'seeds'} onChange={setTab} />
-        {tab === 'seeds' && <SeedShop level={level} />}
+        {tab === 'seeds' && <SeedShop />}
         {tab === 'sell' && <SellCrops />}
         {tab === 'guide' && <FarmGuide />}
       </div>
@@ -79,7 +79,7 @@ export function FarmSheet({ tab, setTab, onClose }) {
   )
 }
 
-function SeedShop({ level }) {
+function SeedShop() {
   const { catalog, state, items, act, toast } = useGame()
   const [busy, setBusy] = useState(false)
   const buy = async (crop, count) => {
@@ -94,10 +94,9 @@ function SeedShop({ level }) {
   return (
     <div className="flex flex-col gap-1.5">
       {(catalog.farm?.crops ?? []).map((c) => {
-        const locked = c.garden > level
         const owned = state.inventory[`seed_${c.id}`] ?? 0
         return (
-          <div key={c.id} className={`px-slot flex items-center gap-2 p-1.5 ${locked ? 'opacity-55' : ''}`}>
+          <div key={c.id} className="px-slot flex items-center gap-2 p-1.5">
             <ItemIcon item={itemOf(items, `crop_${c.id}`)} size={36} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-extrabold text-ink">
@@ -109,22 +108,14 @@ function SeedShop({ level }) {
                 {c.dogFood ? ' · 🐶 смакота' : ''}
               </p>
             </div>
-            {locked ? (
-              <span className="shrink-0 rounded-sm bg-ink/10 px-1.5 py-1 text-center text-[10px] leading-tight font-extrabold text-ink-soft">
-                🔒 Город
-                <br />
-                рів. {c.garden}
-              </span>
-            ) : (
-              <div className="flex shrink-0 flex-col gap-1">
-                <PxButton size="sm" variant="green" disabled={busy || state.balance < c.seedPrice} onClick={() => buy(c, 1)}>
-                  ×1 · {c.seedPrice}✨
-                </PxButton>
-                <PxButton size="sm" variant="paper" disabled={busy || state.balance < c.seedPrice * 5} onClick={() => buy(c, 5)}>
-                  ×5 · {c.seedPrice * 5}✨
-                </PxButton>
-              </div>
-            )}
+            <div className="flex shrink-0 flex-col gap-1">
+              <PxButton size="sm" variant="green" disabled={busy || state.balance < c.seedPrice} onClick={() => buy(c, 1)}>
+                ×1 · {c.seedPrice}✨
+              </PxButton>
+              <PxButton size="sm" variant="paper" disabled={busy || state.balance < c.seedPrice * 5} onClick={() => buy(c, 5)}>
+                ×5 · {c.seedPrice * 5}✨
+              </PxButton>
+            </div>
           </div>
         )
       })}
@@ -177,9 +168,8 @@ function SellCrops() {
 
 function FarmGuide() {
   const { catalog } = useGame()
-  const unlock = catalog.farm?.unlock ?? []
   const steps = [
-    ['⛏️', 'Скопай', 'Підійди до ділянки й торкнись її — мандрівник візьме мотику.'],
+    ['🟫', 'Постав грядки', '«Будувати» → «Будова» → «Грядка». Скільки хочеш і де хочеш — переносиш будь-коли.'],
     ['🌱', 'Посади', 'Обери пакетик у рядку під панеллю — наступний тап по грядці посадить його.'],
     ['💧', 'Полий', 'Кожен полив — одна стадія росту. Виросло — земля пересохла, поливай знову.'],
     ['🧺', 'Збери', 'Стиглі рослини поблискують. Помідори й полуниця плодоносять ще раз.'],
@@ -196,8 +186,8 @@ function FarmGuide() {
         </div>
       ))}
       <p className="text-center text-[11px] leading-snug text-ink-soft">
-        «Город» вищого рівня розчищає нові грядки ({unlock.join(' → ')}) і відкриває насіння. На {catalog.farm?.sprinklerLevel ?? 3}-му рівні над
-        полем ставлять дощувач — далі все поливається само.
+        Дощувач 💦 (теж у «Будова») поливає сам усі грядки на {Math.round((catalog.farm?.sprinklerR ?? 40) / 16)} клітинки довкола — там рослини
+        ростуть без перерви. Дощ поливає весь острів.
       </p>
     </div>
   )

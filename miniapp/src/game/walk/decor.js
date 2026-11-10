@@ -31,6 +31,8 @@ export const DECO_GEOM = {
   // Споруди для виживання: з ними можна взаємодіяти (act — що відкриває тап).
   workbench: { sprite: 'workbench', fw: 3, fh: 1, act: 'workbench' },
   seed_stand: { sprite: 'seed_stand', fw: 3, fh: 1, act: 'farmshop' },
+  // Дощувач поливає грядки довкола (радіус — catalog.farm.sprinklerR), бризкає водою.
+  sprinkler: { sprite: 'sprinkler', fw: 1, fh: 1, spray: true },
 }
 
 /**
@@ -39,10 +41,12 @@ export const DECO_GEOM = {
  * smoke — димар відносно якоря (dx, висота).
  */
 export const BUILDING_GEOM = {
-  garden: { fw: 8, fh: 4, sprite: (l) => `garden_${l}` },
   workshop: { fw: 6, fh: 3, sprite: (l) => `workshop_${l}`, smoke: [15, 64], smokeLevel: 2 },
   lighthouse: { fw: 6, fh: 3, sprite: (l) => `lighthouse_${l}` },
 }
+
+/** Скільки px від дощувача до центру грядки він поливає — як SPRINKLER_R у server/src/game/farm.js. */
+export const SPRINKLER_R = 40
 
 /** Грядка: клаптик землі 16×16, по ньому ходять. */
 export const BED_GEOM = { sprite: 'soil_dry', fw: 2, fh: 2, floor: true }

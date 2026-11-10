@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { crispPixels } from './fx.js'
 import { accelerate, createBody, followPath, move, teleport } from './physics.js'
 
 /**
@@ -111,7 +112,7 @@ export function createDog({ meta, trait, texture, alpha, scene, canStand, findPa
     geos.set(key, g)
     return g
   }
-  const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, alphaTest: 0.5, depthWrite: false })
+  const mat = crispPixels(new THREE.MeshBasicMaterial({ map: texture, transparent: true, alphaTest: 0.5, depthWrite: false }))
   const mesh = new THREE.Mesh(frameGeo(0, 0), mat)
   mesh.scale.setScalar(SCALE) // дрібніший піксель (Сірко) — показуємо меншим
   scene.add(mesh)

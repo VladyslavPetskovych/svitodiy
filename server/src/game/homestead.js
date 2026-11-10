@@ -43,21 +43,6 @@ export const BUILDINGS = [
     ],
   },
   {
-    id: "garden",
-    name: "Город",
-    emoji: "🥕",
-    description: "Живопліт і старі пеньки дають гілочки й інколи колоду. Чим вищий рівень, тим більше грядок можна скопати.",
-    startLevel: 0,
-    placeable: true,
-    foot: [8, 4],
-    levels: [
-      null,
-      { produces: { twig: 1 }, cost: { balance: 15, twig: 5, stone: 2 } },
-      { produces: { twig: 1.5, log: 0.25 }, cost: { balance: 40, plank: 4, seaweed: 4 } },
-      { produces: { twig: 2, log: 0.5 }, cost: { balance: 100, plank: 8, fish_bone: 4 } },
-    ],
-  },
-  {
     id: "workshop",
     name: "Майстерня",
     emoji: "🛠",

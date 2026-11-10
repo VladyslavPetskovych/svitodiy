@@ -8,8 +8,10 @@ import { moveDecor, placeDecor, removeDecor } from "./game/decor.js";
 import { commandDog, feedDog, petDog } from "./game/dogs.js";
 import { GameError } from "./game/errors.js";
 import { moveInterior, placeInterior, removeInterior, setFloor } from "./game/interior.js";
-import { buySeeds, clearPlot, harvestPlot, plantPlot, sellCrops, tillPlot, waterPlot } from "./game/farm.js";
-import { collectHome, upgradeBuilding } from "./game/homestead.js";
+import { craftRecipe, craftTool } from "./game/craft.js";
+import { buySeeds, clearPlot, harvestPlot, moveBed, placeBed, plantPlot, removeBed, sellCrops, tillPlot, waterPlot } from "./game/farm.js";
+import { ackReset, collectHome, demolishBuilding, moveBuilding, placeBuilding, upgradeBuilding } from "./game/homestead.js";
+import { gatherNode } from "./game/nodes.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
 import {
   answerQuiz,
@@ -94,6 +96,11 @@ export function buildApiRouter(botToken) {
   // Рідний острів: будівлі й комора
   api.post("/home/collect", handler((req) => collectHome(uid(req))));
   api.post("/home/:id/upgrade", handler((req) => upgradeBuilding(uid(req), req.params.id)));
+  // Будівлі, які гравець ставить сам: поставити, перенести, розібрати (з поверненням усього витраченого).
+  api.post("/home/reset/ack", handler((req) => ackReset(uid(req))));
+  api.post("/home/:id/place", handler((req) => placeBuilding(uid(req), req.params.id, body(req).x, body(req).y)));
+  api.post("/home/:id/move", handler((req) => moveBuilding(uid(req), req.params.id, body(req).x, body(req).y)));
+  api.delete("/home/building/:id", handler((req) => demolishBuilding(uid(req), req.params.id)));
 
   // Пісочниця: декор на острові
   api.post("/home/deco", handler((req) => placeDecor(uid(req), body(req).kind, body(req).x, body(req).y)));
@@ -114,6 +121,14 @@ export function buildApiRouter(botToken) {
   api.post("/farm/:plot/clear", handler((req) => clearPlot(uid(req), req.params.plot)));
   api.post("/farm/seeds", handler((req) => buySeeds(uid(req), body(req).crop, body(req).count)));
   api.post("/farm/sell", handler((req) => sellCrops(uid(req), body(req).crop, body(req).count)));
+  api.post("/farm/beds", handler((req) => placeBed(uid(req), body(req).x, body(req).y)));
+  api.post("/farm/beds/:plot/move", handler((req) => moveBed(uid(req), req.params.plot, body(req).x, body(req).y)));
+  api.delete("/farm/beds/:plot", handler((req) => removeBed(uid(req), req.params.plot)));
+
+  // Виживання: дерева й каміння на острові, верстат
+  api.post("/island/nodes/:id/gather", handler((req) => gatherNode(uid(req), req.params.id)));
+  api.post("/craft/tool", handler((req) => craftTool(uid(req), body(req).tool)));
+  api.post("/craft/recipe", handler((req) => craftRecipe(uid(req), body(req).recipe, body(req).count)));
 
   // Пси-компаньйони
   api.post("/dogs/:id/feed", handler((req) => feedDog(uid(req), req.params.id, body(req).item)));

@@ -15,7 +15,7 @@ import { farmArt } from './farm-art.mjs'
 import { homeArt } from './home-art.mjs'
 import { decorArt } from './decor-art.mjs'
 import { floorSheet } from './floor-art.mjs'
-import { BEDS, BOARDWALK, CELL, DECOR, INTERACT, LAND, MAP, PATH, PIER, PLAZA, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
+import { BEDS, BOARDWALK, CELL, INTERACT, LAND, MAP, PATH, PIER, PLAZA, RESERVED, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_PUBLIC = join(ROOT, 'public/game/walk')
@@ -687,42 +687,6 @@ function groundImage(t) {
     }
   }
 
-  // Під деревами: тінь крони на траві, опале листя, яблука й гриби.
-  for (const d of DECOR) {
-    if (d.s !== 'oak' && d.s !== 'birch') continue
-    const R = d.s === 'oak' ? 24 : 15
-    for (let y = -R; y <= R; y++)
-      for (let x = -R; x <= R; x++) {
-        const px = d.x + x
-        const py = d.y - 4 + y * 0.5
-        const r = Math.hypot(x, y) / R
-        if (r > 1 || !okGrass(px, Math.round(py), 0)) continue
-        // Суцільна тінь крони з нерівним краєм.
-        if (r < 0.82 + (hash(px, Math.round(py), 402) - 0.5) * 0.2) img.set(px, Math.round(py), '#0f3a1e', 0.26)
-      }
-    for (let k = 0; k < 10; k++) {
-      const x = Math.round(d.x + (hash(k, d.x, 401) - 0.5) * R * 1.8)
-      const y = Math.round(d.y - 2 + (hash(k, d.y, 401) - 0.5) * R * 0.7)
-      if (!okGrass(x, y, 1)) continue
-      if (d.s === 'oak' && k < 3) {
-        img.set(x, y, '#d64a3a')
-        img.set(x, y - 1, '#ff8a6a')
-      } else if (d.s === 'birch') img.set(x, y, '#e9c94a')
-      else img.set(x, y, '#c58a3a')
-    }
-    if (d.s === 'oak')
-      for (let k = 0; k < 2; k++) {
-        const x = Math.round(d.x + (k ? 14 : -16) + hash(k, d.x, 411) * 4)
-        const y = Math.round(d.y + 4 + hash(k, d.y, 411) * 3)
-        if (!okGrass(x, y, 1)) continue
-        img.set(x, y, '#efe6d2')
-        img.set(x, y - 1, '#efe6d2')
-        img.hline(x - 1, x + 1, y - 2, '#c8372d')
-        img.hline(x - 1, x + 1, y - 3, '#e2533f')
-        img.set(x, y - 3, '#ffffff')
-      }
-  }
-
   // Камінчики в траві.
   for (let k = 0; k < 90; k++) {
     const x = Math.floor(hash(k, 1, 221) * w)
@@ -732,29 +696,6 @@ function groundImage(t) {
     img.set(x + 1, y, '#7a746b')
     img.set(x, y - 1, '#c8c2b6')
     img.set(x + 1, y + 1, '#2f5a2a')
-  }
-
-  // Кам'яні плити по піску до причалу.
-  const pts = PATH.points
-  const [ax, ay] = pts.at(-2)
-  const [bx, by] = pts.at(-1)
-  for (let s = 0; s <= 1; s += 0.02) {
-    const x = ax + (bx - ax) * s
-    const y = ay + (by - ay) * s
-    const i = idx(Math.round(x), Math.round(y))
-    if (cls[i] !== SAND || dEdge[i] < 3 || y > PIER.y0 - 2) continue
-    const k = Math.round(s * 50)
-    if (k % 5) continue
-    const ox = Math.round(x + ((k / 5) % 2 ? 4 : -4) + (hash(k, 1, 601) - 0.5) * 2)
-    const oy = Math.round(y)
-    img.ellipse(ox + 1, oy + 2, 6, 3, '#6b5130', 0.35)
-    for (let yy = -3; yy <= 3; yy++)
-      for (let xx = -6; xx <= 6; xx++) {
-        const r = (xx / 6) ** 2 + (yy / 3.2) ** 2
-        if (r > 1) continue
-        const light = -(xx / 6) * 0.4 - (yy / 3.2) * 0.7
-        img.set(ox + xx, oy + yy, ramp(STONE_PALS[k % 3], 0.5 + light * 0.45 + (r > 0.75 ? -0.15 : 0), ox + xx, oy + yy))
-      }
   }
 
   // Морські дрібнички: мушлі, зірки, корч.
@@ -877,6 +818,31 @@ function walkGrid(t) {
     }
     out.push(line)
   }
+  return out
+}
+
+/**
+ * Місця, де самі виростають ресурси (server/src/game/island-slots.json): трава, пісок і скелі.
+ * Шахматка з кроком 16 px; якір — низ по центру, довкола нього вся земля прохідна.
+ * Двір перед хатинкою, дорогу до причалу й скриню (RESERVED) лишаємо вільними.
+ */
+function nodeSlots(t) {
+  const { w } = MAP
+  const walk = walkGrid(t)
+  const ok = (x, y) => walk[Math.floor(y / CELL)]?.[Math.floor(x / CELL)] === '1'
+  const reserved = (x, y) => RESERVED.some(([rx, ry, rw, rh]) => x >= rx - 10 && x <= rx + rw + 10 && y >= ry - 4 && y <= ry + rh + 14)
+  const out = { grass: [], sand: [], rock: [] }
+  for (let y = 24; y < MAP.h - 8; y += 16)
+    for (let x = 16; x < MAP.w - 16; x += 16) {
+      const ax = x + ((y / 16) % 2 ? 8 : 0)
+      if (reserved(ax, y)) continue
+      if (![[-8, -8], [8, -8], [-8, -1], [8, -1], [0, -12], [0, 4]].every(([dx, dy]) => ok(ax + dx, y + dy))) continue
+      const i = (y - 2) * w + ax
+      const c = t.cls[i]
+      if (c === GRASS && t.dEdge[i] > 6) out.grass.push([ax, y])
+      else if (c === ROCK) out.rock.push([ax, y])
+      else if (c === SAND && t.dWater[i] > 4) out.sand.push([ax, y])
+    }
   return out
 }
 
@@ -1166,6 +1132,76 @@ function shell() {
   const img = new Img(6, 5)
   img.rows(['..WW..', '.WpWW.', 'WpWpWW', 'WWpWW.', '.WWW..'], 0, 0, { W: '#fbeee0', p: '#f2a7a0' })
   return img
+}
+
+/** Камінчик, який можна підняти руками. */
+function pebble() {
+  const img = new Img(10, 7)
+  shadow(img, 5, 5, 4, 1.5, 0.25)
+  img.rows(['...ss.....', '..sHhs.ss.', '.sHhhmshhs', '.shhmmsmms', '..smmms.s.'], 0, 1, { s: '#5e574f', H: '#d8d1c4', h: '#b8b0a3', m: '#8f877c' })
+  return img
+}
+
+/** Корч, прибитий хвилями: вибілена сонцем гілляка. */
+function driftwood() {
+  const img = new Img(22, 9)
+  shadow(img, 11, 7, 10, 1.6, 0.25)
+  const pal = { k: '#4a3a2c', l: '#e6dccb', m: '#c9bba3', d: '#9c8c74' }
+  img.rows(
+    [
+      '.................kk...',
+      '...............kkllk..',
+      '..kk.........kkllmk...',
+      '.klmkkkkkkkkkllmmdk...',
+      'klllllmmmmmmmmmddk....',
+      '.kmmmddddddddddkk.....',
+      '..kkkkkkkkkkkkk.......',
+    ],
+    0,
+    1,
+    pal
+  )
+  return img
+}
+
+/** Купка водоростей на піску. */
+function seaweedPile() {
+  const img = new Img(14, 8)
+  shadow(img, 7, 6, 6, 1.5, 0.22)
+  img.rows(['...g....g.....', '..gG..gGg..g..', '.gGd.gGdGg.Gg.', 'gGddgGdddGgGdg', '.dddddddddddd.', '..dd.dd..ddd..'], 0, 1, { g: '#7fb04a', G: '#4f8a34', d: '#2f5a2a' })
+  return img
+}
+
+/** Верстат: товста стільниця на ніжках, лещата, пилка й рубанок, під низом — тріски. */
+function workbench() {
+  const img = new Img(28, 22)
+  shadow(img, 14, 20, 13, 2.5)
+  // Ніжки й поперечка.
+  for (const x of [3, 22]) {
+    img.rect(x, 10, 3, 10, C.wood)
+    img.vline(x, 10, 19, C.woodLo)
+  }
+  img.rect(5, 15, 17, 2, C.woodLo)
+  // Стільниця.
+  img.rect(1, 7, 26, 4, C.woodPale)
+  img.hline(1, 26, 7, '#e2bb84')
+  img.hline(1, 26, 10, C.wood)
+  img.rect(1, 11, 26, 1, C.woodLo)
+  // Лещата ліворуч.
+  img.rect(2, 4, 5, 3, '#6f675c')
+  img.hline(2, 6, 4, '#aaa196')
+  img.rect(3, 2, 1, 2, '#6f675c')
+  // Пилка.
+  img.rect(11, 5, 9, 2, '#cfc8bb')
+  img.hline(11, 19, 6, '#8f877c')
+  for (let x = 11; x <= 19; x += 2) img.set(x, 7, '#8f877c')
+  img.rect(20, 4, 3, 3, C.red)
+  // Рубанок праворуч.
+  img.rect(23, 5, 3, 2, C.wood)
+  img.set(24, 4, C.woodHi)
+  // Тріски на землі.
+  for (const [x, y] of [[8, 20], [12, 21], [17, 20], [20, 21]]) img.set(x, y, C.woodPale)
+  return img.outline(C.K, 0.9)
 }
 
 function crates() {
@@ -2923,6 +2959,10 @@ function buildSprites(farm, room) {
     flowers_p: flowers('#f28ab0'),
     tuft: tuft(),
     shell: shell(),
+    pebble: pebble(),
+    driftwood: driftwood(),
+    seaweed_pile: seaweedPile(),
+    workbench: workbench(),
     crates: crates(),
     barrel: barrel(),
     clothesline: clothesline(),
@@ -3009,7 +3049,14 @@ function preview(ground, foam, water, sprites, levels, scale, debugWalk) {
     }
   img.blit(ground, 0, 0)
   img.blit(foam, 0, 0)
-  const list = placements(levels, false)
+  // Будівлі — там, де їх міг би поставити гравець; ресурси — на кожному третьому місці.
+  const pos = { garden: { x: 360, y: 236 }, workshop: { x: 430, y: 290 }, lighthouse: { x: 92, y: 274 } }
+  const slots = nodeSlots(terrain())
+  const kinds = { grass: ['oak', 'birch', 'pine', 'bush', 'rock', 'berry_bush', 'pebble'], sand: ['driftwood', 'shell', 'seaweed', 'pebble'], rock: ['boulder', 'rock'] }
+  const nodes = Object.entries(slots).flatMap(([where, list]) =>
+    list.filter((_, i) => i % 3 === 0).map(([x, y], i) => ({ id: `${where}${i}`, k: kinds[where][i % kinds[where].length], x, y }))
+  )
+  const list = placements({ levels, pos }, false, [], nodes)
   list.push({ s: 'hero_down_0', x: 256, y: 200, layer: 'obj' })
   const sorted = [...list.filter((p) => p.layer === 'floor'), ...list.filter((p) => p.layer !== 'floor').sort((a, b) => a.y - b.y)]
   for (const p of sorted) {
@@ -3076,6 +3123,10 @@ writeFileSync(join(OUT_PUBLIC, 'home-walls.png'), encodePng(walls.image))
 const wallsMeta = { size: { w: walls.image.w, h: walls.image.h }, ...walls.rects }
 writeFileSync(OUT_HOME_ATLAS, JSON.stringify({ size: { w: interior.atlas.w, h: interior.atlas.h }, frames: interior.frames, walls: wallsMeta }) + '\n')
 writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid() }) + '\n')
+// Де можуть вирости дерева, каміння й дари моря — сервер сам садить їх (server/src/game/nodes.js).
+const slots = nodeSlots(t)
+writeFileSync(join(ROOT, '../server/src/game/island-slots.json'), JSON.stringify(slots) + '\n')
+console.log(`місця для ресурсів: трава ${slots.grass.length}, пісок ${slots.sand.length}, скелі ${slots.rock.length}`)
 console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів), хатинка ${interior.atlas.w}×${interior.atlas.h} (${Object.keys(interior.frames).length})`)
 // Іконки врожаю й насіння для рюкзака (public/game/items/<id>.png).
 const OUT_ITEMS = join(ROOT, 'public/game/items')

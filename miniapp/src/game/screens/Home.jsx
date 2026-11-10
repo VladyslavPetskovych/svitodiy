@@ -302,7 +302,7 @@ function LevelPips({ level, max, className = '' }) {
 /* ───────── Шторка будівлі: зараз → після покращення ───────── */
 
 export function BuildingSheet({ building: b, onClose }) {
-  const { state, catalog, items, act, toast } = useGame()
+  const { state, catalog, items, act, toast, go, nav } = useGame()
   const [busy, setBusy] = useState(false)
   const open = !!b
   const lvl = b ? state.home.levels[b.id] : 0
@@ -360,10 +360,26 @@ export function BuildingSheet({ building: b, onClose }) {
                   )
                 })}
               </div>
-              <PxButton variant="green" size="lg" className="w-full" disabled={!affordable || busy} onClick={upgrade}>
-                {lvl === 0 ? '🔨 Збудувати' : `🔨 Покращити до ${lvl + 1}`}
-              </PxButton>
-              {!affordable && <p className="text-center text-xs text-ink-soft">Матеріали — з рибалки, готування, алхімії й островів на мапі.</p>}
+              {b.placeable && lvl === 0 ? (
+                // Будівлю спершу ставлять на острові — там і вибирають місце.
+                <PxButton
+                  variant="green"
+                  size="lg"
+                  className="w-full"
+                  onClick={() => {
+                    onClose()
+                    if (nav.stack.at(-1)?.screen !== 'walk') go('walk')
+                  }}
+                >
+                  🏝️ Поставити на острові
+                </PxButton>
+              ) : (
+                <PxButton variant="green" size="lg" className="w-full" disabled={!affordable || busy} onClick={upgrade}>
+                  {`🔨 Покращити до ${lvl + 1}`}
+                </PxButton>
+              )}
+              {b.placeable && lvl === 0 && <p className="text-center text-xs text-ink-soft">Зійди на острів → «Будувати» → «Будова» й обери місце.</p>}
+              {!affordable && <p className="text-center text-xs text-ink-soft">Матеріали — рубай і добувай на своєму острові, рибаль, готуй, плавай на інші острови.</p>}
             </>
           ) : (
             <p className="text-center font-pixel text-[10px] text-[#2d6b18]">НАЙВИЩИЙ РІВЕНЬ</p>

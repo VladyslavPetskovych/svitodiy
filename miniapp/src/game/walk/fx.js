@@ -8,7 +8,13 @@ import * as THREE from 'three'
 
 /* ───────── Частинки ───────── */
 
-export const P = { smoke: 0, fire: 1, dust: 2, puff: 3, leaf: 4 }
+const SMOKE = [0.93, 0.93, 0.91]
+const PUFF = [0.96, 0.95, 0.9]
+const RAIN = [0.72, 0.84, 1]
+const FIREFLY = [0.92, 1, 0.45]
+const rand = (a) => (Math.random() * 2 - 1) * a
+
+export const P = { smoke: 0, fire: 1, dust: 2, puff: 3, leaf: 4, rain: 5, firefly: 6 }
 
 const FIRE = [
   [1, 0.95, 0.66],
@@ -22,7 +28,7 @@ const FIRE = [
  * колір і прозорість на кожну частинку. Живі частинки тримаються щільно на початку
  * буфера (видалення — обміном з останньою), тож малюємо лише [0, count).
  */
-export function createParticles(max = 600) {
+export function createParticles(max = 900) {
   const pos = new Float32Array(max * 3)
   const col = new Float32Array(max * 4)
   const size = new Float32Array(max)
@@ -34,6 +40,8 @@ export function createParticles(max = 600) {
   const s1 = new Float32Array(max)
   const tint = new Float32Array(max * 3)
   let count = 0
+  /** Колір неба: частинки, що не світяться самі, темніють разом зі сценою (див. sky.js). */
+  let sky = [1, 1, 1]
 
   const geo = new THREE.BufferGeometry()
   const aPos = new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage)
@@ -51,17 +59,25 @@ export function createParticles(max = 600) {
       attribute vec4 color;
       uniform float uScale;
       varying vec4 vColor;
+      varying float vStreak;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = max(1.0, size * uScale / -mv.z);
+        // Від'ємний розмір — крапля дощу: малюємо не квадрат, а косу риску.
+        gl_PointSize = max(1.0, abs(size) * uScale / -mv.z);
         gl_Position = projectionMatrix * mv;
         vColor = color;
+        vStreak = size < 0.0 ? 1.0 : 0.0;
       }`,
     // Кольори вже в sRGB — пишемо як є (без перетворення простору кольорів).
     fragmentShader: /* glsl */ `
       varying vec4 vColor;
+      varying float vStreak;
       void main() {
         if (vColor.a < 0.02) discard;
+        if (vStreak > 0.5) {
+          vec2 p = gl_PointCoord - 0.5;
+          if (abs(p.x + p.y * 0.25) > 0.09) discard;
+        }
         gl_FragColor = vColor;
       }`,
     transparent: true,
@@ -107,6 +123,21 @@ export function createParticles(max = 600) {
       }
       const k = kind[i]
       const o = i * 3
+      if (k === P.rain && pos[o + 1] <= 0.6) {
+        // Крапля впала — інколи маленький сплеск.
+        if (Math.random() < 0.5) emit(P.dust, pos[o], 0.6, pos[o + 2], rand(10), 9 + rand(3), rand(6), 0.2, 1.4, 0.6, RAIN)
+        kill(i)
+        continue
+      }
+      if (k === P.firefly) {
+        vel[o] += rand(40) * dt
+        vel[o + 1] += rand(30) * dt
+        vel[o + 2] += rand(40) * dt
+        const drag = Math.exp(-0.8 * dt)
+        vel[o] *= drag
+        vel[o + 1] *= drag
+        vel[o + 2] *= drag
+      }
       if (k === P.dust || k === P.leaf) {
         vel[o + 1] -= (k === P.leaf ? 18 : 40) * dt // гравітація
         const drag = Math.exp(-(k === P.leaf ? 2 : 5) * dt)
@@ -117,6 +148,7 @@ export function createParticles(max = 600) {
       pos[o + 1] = Math.max(0.2, pos[o + 1] + vel[o + 1] * dt)
       pos[o + 2] += vel[o + 2] * dt
       size[i] = s0[i] + (s1[i] - s0[i]) * t
+      if (k === P.rain) size[i] = -size[i]
       const c = i * 4
       if (k === P.fire) {
         const f = FIRE[Math.min(3, Math.floor(t * 4))]
@@ -124,11 +156,17 @@ export function createParticles(max = 600) {
         col[c + 1] = f[1]
         col[c + 2] = f[2]
         col[c + 3] = t > 0.75 ? 0.5 : 1
-      } else {
+      } else if (k === P.firefly) {
+        // Світлячок світиться сам: без кольору неба, блимає й тане на початку й наприкінці.
         col[c] = tint[o]
         col[c + 1] = tint[o + 1]
         col[c + 2] = tint[o + 2]
-        col[c + 3] = (k === P.smoke ? 0.75 : 0.85) * (1 - t)
+        col[c + 3] = Math.sin(t * Math.PI) * (0.55 + 0.45 * Math.sin(age[i] * 7 + i))
+      } else {
+        col[c] = tint[o] * sky[0]
+        col[c + 1] = tint[o + 1] * sky[1]
+        col[c + 2] = tint[o + 2] * sky[2]
+        col[c + 3] = k === P.rain ? 0.6 : (k === P.smoke ? 0.75 : 0.85) * (1 - t)
       }
       i++
     }
@@ -138,9 +176,6 @@ export function createParticles(max = 600) {
     aSize.needsUpdate = true
   }
 
-  const SMOKE = [0.93, 0.93, 0.91]
-  const PUFF = [0.96, 0.95, 0.9]
-  const rand = (a) => (Math.random() * 2 - 1) * a
 
   return {
     points,
@@ -176,6 +211,19 @@ export function createParticles(max = 600) {
         const g = 0.45 + Math.random() * 0.25
         emit(P.leaf, x + rand(5), 4 + Math.random() * 8, z + rand(2), rand(14), 14 + Math.random() * 10, rand(6), 0.8, 2, 1.5, [0.35, g + 0.2, 0.25])
       }
+    },
+    /** Крапля дощу: падає з висоти навскіс (вітер), на землі — сплеск. */
+    rain(x, z, wind = -14) {
+      const h = 50 + Math.random() * 30
+      emit(P.rain, x, h, z, wind, -180 - Math.random() * 30, 4, h / 170 + 0.2, 5, 5, RAIN)
+    },
+    /** Світлячок: повільно кружляє над землею кілька секунд. */
+    firefly(x, z) {
+      emit(P.firefly, x, 3 + Math.random() * 8, z, rand(6), rand(3), rand(6), 3 + Math.random() * 2, 1.6, 1.6, FIREFLY)
+    },
+    /** Колір неба [r, g, b] — множник для частинок, що не світяться. */
+    setSky(rgb) {
+      sky = rgb
     },
     clear() {
       count = 0

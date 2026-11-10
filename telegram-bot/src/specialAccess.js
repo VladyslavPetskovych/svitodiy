@@ -51,6 +51,14 @@ export async function hasNastiaAccess(telegramUserId) {
 const SHARED_HOME_PHONES = ["+380 98 340 55 78", "+371 277 48107"];
 const SHARED_HOME_DIGITS = new Set(SHARED_HOME_PHONES.map(normalizePhone));
 const SHARED_HOME_ID = "shared-1";
+/** Чий острів став спільним: господар. Решта приходять у гості на його острів. */
+const SHARED_HOME_HOST = normalizePhone("+380 98 340 55 78");
+
+/** Чи гравець — господар спільного острова. @returns {Promise<boolean>} */
+export async function isSharedHomeHost(telegramUserId) {
+  if (telegramUserId == null) return false;
+  return normalizePhone(await getUserPhone(telegramUserId)) === SHARED_HOME_HOST;
+}
 
 /** id спільного дому або null, якщо в гравця свій. @returns {Promise<string|null>} */
 export async function sharedHomeId(telegramUserId) {

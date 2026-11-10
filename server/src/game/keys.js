@@ -39,3 +39,5 @@ export const farmKey = (id) => `svitodiy:farm:${id}`; // город: № гря�
 export const interiorKey = (id) => `svitodiy:indeco:${id}`; // хатинка: id речі → JSON { k, x, y } або { k, w, a, h }
 export const floorKey = (id) => `svitodiy:infloor:${id}`; // підлога хатинки: { p — візерунок, c — колір, own — куплені візерунки через кому }
 export const dogsKey = (id) => `svitodiy:dogs:${id}`; // пси: id пса → JSON { love, fedDay, petDay, mode, sit }
+export const nodesKey = (id) => `svitodiy:nodes:${id}`; // ресурси острова: id → JSON { k, x, y, w } і _t — коли виріс останній
+export const toolsKey = (id) => `svitodiy:tools:${id}`; // інструменти гравця: axe / pickaxe → рівень

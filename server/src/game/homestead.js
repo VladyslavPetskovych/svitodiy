@@ -9,6 +9,11 @@ import { homeKey, takeCooldown } from "./keys.js";
  *
  * levels[n] — будівля на рівні n: cost — ціна, щоб до нього дійти,
  * produces — скільки за годину дає (✨ або ресурси). levels[0] — ще не збудовано.
+ *
+ * Хатинка й причал стоять на своїх місцях. Решту (placeable) гравець ставить сам, де хоче,
+ * переносить і може розібрати — тоді повертається все, що на неї витрачено.
+ * foot — «ніжки» в клітинках 8 px [ширина, висота], як BUILDING_GEOM у miniapp/src/game/walk/decor.js.
+ * Де стоїть — поле pos:<id> = "x,y" у hash дому.
  */
 export const BUILDINGS = [
   {
@@ -41,8 +46,10 @@ export const BUILDINGS = [
     id: "garden",
     name: "Город",
     emoji: "🥕",
-    description: "Грядки, живопліт і старі пеньки: гілочки й інколи колода.",
+    description: "Живопліт і старі пеньки дають гілочки й інколи колоду. Чим вищий рівень, тим більше грядок можна скопати.",
     startLevel: 0,
+    placeable: true,
+    foot: [8, 4],
     levels: [
       null,
       { produces: { twig: 1 }, cost: { balance: 15, twig: 5, stone: 2 } },
@@ -54,8 +61,10 @@ export const BUILDINGS = [
     id: "workshop",
     name: "Майстерня",
     emoji: "🛠",
-    description: "Хатинка на палях. Розбирає прибитий хвилями мотлох на метал і скло.",
+    description: "Розбирає прибитий хвилями мотлох на метал і скло.",
     startLevel: 0,
+    placeable: true,
+    foot: [6, 3],
     levels: [
       null,
       { produces: { metal_scrap: 0.25 }, cost: { balance: 40, log: 4, stone: 6 } },
@@ -69,6 +78,8 @@ export const BUILDINGS = [
     emoji: "🗼",
     description: "Кораблі, що йдуть на світло, платять за прохід ✨.",
     startLevel: 0,
+    placeable: true,
+    foot: [6, 3],
     levels: [
       null,
       { produces: { balance: 1 }, cost: { balance: 60, stone: 10, glass_shard: 3 } },
@@ -112,20 +123,33 @@ export async function getHome(userId) {
     h = await r.hGetAll(key);
   }
   const levels = Object.fromEntries(BUILDINGS.map((b) => [b.id, Number(h[`lvl:${b.id}`] ?? b.startLevel)]));
+  /** @type {Record<string, { x: number, y: number }>} */
+  const pos = {};
+  for (const b of BUILDINGS) {
+    const m = b.placeable && levels[b.id] > 0 ? /^(\d+),(\d+)$/.exec(h[`pos:${b.id}`] ?? "") : null;
+    if (m) pos[b.id] = { x: Number(m[1]), y: Number(m[2]) };
+    else if (b.placeable) levels[b.id] = 0; // збудована, але без місця (старий острів до скидання) — ніби немає
+  }
   let carry = {};
   try {
     carry = JSON.parse(h.carry ?? "{}");
   } catch {
     /* зіпсований carry — просто почнемо з нуля */
   }
-  return { levels, collectedAt: Number(h.collectedAt), carry, owner, shared };
+  let reset = null;
+  try {
+    reset = h.resetNote ? JSON.parse(h.resetNote) : null;
+  } catch {
+    /* зіпсована примітка — не показуємо */
+  }
+  return { levels, pos, collectedAt: Number(h.collectedAt), carry, owner, shared, version: Number(h.v) || 1, reset };
 }
 
 /**
  * Забрати врожай у рюкзак: цілі одиниці йдуть гравцю, дробові залишки (carry)
  * чекають наступного разу — інакше повільні будівлі ніколи б нічого не дали.
  */
-async function harvest(userId, home) {
+export async function harvest(userId, home) {
   const now = Date.now();
   const total = accrued(home.levels, now - home.collectedAt);
   for (const [id, v] of Object.entries(home.carry)) total[id] = (total[id] ?? 0) + v;
@@ -171,6 +195,7 @@ export async function upgradeBuilding(userId, buildingId) {
   await lock(userId);
 
   const home = await getHome(userId);
+  if (b.placeable && home.levels[b.id] === 0) throw conflict("not_placed", "Спершу постав її на острові — у режимі будівництва.");
   const next = b.levels[home.levels[b.id] + 1];
   if (!next) throw conflict("max", "Це вже найвищий рівень.");
 
@@ -188,4 +213,86 @@ export async function upgradeBuilding(userId, buildingId) {
   const level = home.levels[b.id] + 1;
   await getRedis().hSet(homeKey(home.owner), `lvl:${b.id}`, String(level));
   return { building: b.id, level, got };
+}
+
+/* ───────── Будівлі, які ставить гравець ───────── */
+
+/** Межі мапи острова в пікселях арту — як MAP у miniapp/src/game/walk/layout.js. */
+const MAP_W = 512;
+const MAP_H = 448;
+
+function placeable(buildingId) {
+  const b = typeof buildingId === "string" ? BY_ID.get(buildingId) : null;
+  if (!b?.placeable) throw badRequest("Цю будівлю не переносять.");
+  return b;
+}
+
+function coords(x, y) {
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x > MAP_W || y > MAP_H) {
+    throw badRequest("Сюди поставити не вийде.");
+  }
+  return `${x},${y}`;
+}
+
+/** Що витрачено, щоб дійти до рівня level (усі ступені разом, ✨ теж). */
+export function spentOn(b, level) {
+  /** @type {Record<string, number>} */
+  const out = {};
+  for (let l = 1; l <= level; l++) for (const [id, n] of Object.entries(b.levels[l]?.cost ?? {})) out[id] = (out[id] ?? 0) + n;
+  return out;
+}
+
+/** Поставити будівлю (1-й рівень) у точці x, y. */
+export async function placeBuilding(userId, buildingId, x, y) {
+  const b = placeable(buildingId);
+  const at = coords(x, y);
+  await lock(userId);
+  const home = await getHome(userId);
+  if (home.levels[b.id] > 0) throw conflict("built", `${b.emoji} ${b.name} уже стоїть на острові — її можна перенести.`);
+  const { balance: price = 0, ...resources } = b.levels[1].cost ?? {};
+  if ((await getBalance(userId)) < price) throw conflict("not_enough", `Потрібно ${price} ✨.`);
+  const got = await harvest(userId, home);
+  if (!(await consumeResources(userId, resources))) throw conflict("not_enough", "Не вистачає матеріалів.");
+  if (price > 0) await addBalance(userId, -price);
+  await getRedis().hSet(homeKey(home.owner), { [`lvl:${b.id}`]: "1", [`pos:${b.id}`]: at });
+  return { building: b.id, level: 1, got };
+}
+
+/** Перенести будівлю — безкоштовно. */
+export async function moveBuilding(userId, buildingId, x, y) {
+  const b = placeable(buildingId);
+  const at = coords(x, y);
+  await lock(userId);
+  const home = await getHome(userId);
+  if (!(home.levels[b.id] > 0)) throw new GameError(404, "not_found", "Цієї будівлі на острові немає.");
+  await getRedis().hSet(homeKey(home.owner), `pos:${b.id}`, at);
+  return { building: b.id, x, y };
+}
+
+/** Розібрати будівлю: спершу врожай, потім повертаємо все, що на неї пішло. */
+export async function demolishBuilding(userId, buildingId) {
+  const b = placeable(buildingId);
+  await lock(userId);
+  const home = await getHome(userId);
+  const level = home.levels[b.id];
+  if (!(level > 0)) throw new GameError(404, "not_found", "Цієї будівлі на острові немає.");
+  const got = await harvest(userId, home);
+  const r = getRedis();
+  // Скидаємо рівень лише якщо його ніхто не змінив паралельно (спільний острів).
+  const key = homeKey(home.owner);
+  if ((await r.hGet(key, `lvl:${b.id}`)) !== String(level)) throw conflict("busy", "Острів щойно змінився — спробуй ще раз.");
+  await r.multi().hSet(key, `lvl:${b.id}`, "0").hDel(key, `pos:${b.id}`).exec();
+  const refund = spentOn(b, level);
+  for (const [id, n] of Object.entries(refund)) {
+    if (id === "balance") await addBalance(userId, n);
+    else await addResourceToInventory(userId, id, n);
+  }
+  return { building: b.id, refund, got };
+}
+
+/** Прибрати примітку про скидання острова (гравець її прочитав). */
+export async function ackReset(userId) {
+  const { owner } = await homeOwner(userId);
+  await getRedis().hDel(homeKey(owner), "resetNote");
+  return {};
 }

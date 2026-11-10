@@ -11,6 +11,9 @@ import { decoKey, takeCooldown } from "./keys.js";
  * У спільному домі декор теж спільний: платить той, хто ставить, повертається тому, хто прибирає.
  */
 export const DECOR = [
+  // Виживання: з цим можна працювати (верстат — інструменти й дошки, комора — насіння й продаж урожаю).
+  { id: "workbench", cat: "survival", name: "Верстат", emoji: "🪚", cost: { twig: 4, stone: 2 } },
+  { id: "seed_stand", cat: "survival", name: "Комора городника", emoji: "🌱", cost: { twig: 3 } },
   { id: "wildflowers", cat: "plants", name: "Польові квіти", emoji: "🌼", cost: {} },
   { id: "flower_bed", cat: "plants", name: "Клумба", emoji: "🌷", cost: { twig: 1 } },
   { id: "sunflowers", cat: "plants", name: "Соняшники", emoji: "🌻", cost: { seaweed: 1 } },

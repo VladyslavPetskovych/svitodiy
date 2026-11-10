@@ -129,6 +129,10 @@ export function canAfford(cost = {}, balance, inventory) {
 
 /** Де взяти ресурс — для підказок у рюкзаку й алхімії. */
 export function sourceOf(catalog, id) {
+  // Що росте на рідному острові: дерева, каміння, кущі, дари моря.
+  const node = catalog.nodes?.find((n) => n.loot[0] === id)
+  if (node) return `Добувай на своєму острові: ${node.name.toLowerCase()}${node.tool ? (node.tool === 'axe' ? ' (сокирою)' : ' (кайлом)') : ''}`
+  if (id === 'plank') return 'Зроби на верстаті з колод'
   if (catalog.cookDrops.includes(id)) return 'Готуй рибу в рюкзаку'
   const island = catalog.islands.find((i) => i.gather?.resourceId === id)
   if (island) return `Добувай на острові: ${island.name}`

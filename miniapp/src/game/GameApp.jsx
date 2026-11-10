@@ -97,7 +97,8 @@ function Playing() {
             animate="center"
             exit="exit"
             transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="mx-auto w-full max-w-md px-3 pt-3 pb-6"
+            // Екрани з `fill` (острів) займають рівно висоту між шапкою і таб-баром — без прокрутки під час гри.
+            className={`mx-auto w-full max-w-md px-3 pt-3 ${Screen.fill ? 'flex h-full flex-col pb-3' : 'pb-6'}`}
           >
             <Screen {...current.params} />
           </motion.div>

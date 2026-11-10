@@ -2,32 +2,46 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { canAfford, formatAmounts, homeStorage, itemOf } from '../data.js'
 import { useGame, useNow } from '../context.js'
-import { fieldView, ownedSeeds, plotSpot, plotView } from '../farm.js'
+import { bedCount, fieldView, ownedSeeds, plotSpot, plotView } from '../farm.js'
 import { haptic, useBackButton } from '../tg.js'
 import { ItemIcon, PxButton, ScreenTitle, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
 import homeAtlas from '../walk/home-atlas.json'
 import decorAtlas from '../walk/home-decor.json'
 import artVersion from '../walk/version.json'
-import { DECO_GEOM } from '../walk/decor.js'
+import { geomOf } from '../walk/decor.js'
 import { INTERIOR_GEOM, interiorInteract } from '../walk/interior.js'
 import { DEFAULT_FLOOR, FLOOR_COLORS, FLOOR_SHEET, floorRect } from '../walk/floors.js'
 import { DOGS, dogById } from '../walk/companion.js'
 import { INTERACT } from '../walk/layout.js'
+import { skyAt, skyOverrideFromUrl } from '../walk/sky.js'
 import { BuildingSheet, DailySheet } from './Home.jsx'
 import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
+import { CraftSheet, ResetSheet } from './islandCraft.jsx'
 
 const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити' }
+/** Ресурси на острові — «node:<id>». */
+const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
+/** Чим добувати: кнопка дії. */
+const GATHER = { axe: '🪓 Рубати', pickaxe: '⛏️ Добути', hand: '🤲 Зібрати' }
 /** Пси-компаньйони — не будівлі, тож їхні «точки» для панелі дії мають id «dog:<ім'я>». */
 const dogOf = (id) => (id?.startsWith('dog:') ? dogById(id.slice(4)) : null)
 /** Грядки на полі — «plot:<№>». */
 const plotOf = (id) => (id?.startsWith('plot:') ? Number(id.slice(5)) : null)
+
+/** Підказка по тапу на небо: що зараз і чим це корисно. */
+function skyHint(sky) {
+  const wet = sky.weather.id === 'rain' || sky.weather.id === 'storm'
+  const time = sky.part.id === 'night' ? 'Ніч — маяк і ліхтарі світять яскравіше.' : `${sky.part.name} за твоїм місцевим часом.`
+  const weather = wet ? 'Дощ сам поливає город 🌱' : 'Погода спільна для всіх острівців.'
+  return `${sky.part.emoji} ${time} ${sky.weather.emoji} ${weather}`
+}
 /** Дія в хаті «bed:<id речі>» → «bed» (у хаті може бути кілька ліжок чи полиць). */
 const actOf = (id) => id?.split(':')[0]
 const FEED_TEXT = [(n) => `😋 ${n} уминає за обидві щоки!`, (n) => `😋 Хрум-хрум! ${n} задоволений.`]
@@ -38,6 +52,7 @@ const DOG_PETS = [
   (n) => `🐶 ${n} лизнув тобі руку.`,
 ]
 const CATS = [
+  { value: 'build', label: '🏗 Будова' },
   { value: 'plants', label: '🌿 Рослини' },
   { value: 'stone', label: '🪨 Камінь' },
   { value: 'wood', label: '🪵 Дерево' },
@@ -76,6 +91,8 @@ export default function IslandWalk() {
   const [farmTab, setFarmTab] = useState(null) // шторка комори: 'seeds' | 'sell' | 'guide' | null
   const [seed, setSeed] = useState(null) // яке насіння садити наступним тапом
   const [dogSheet, setDogSheet] = useState(null) // id пса, чия шторка відкрита
+  const [craft, setCraft] = useState(false) // шторка верстата
+  const gathering = useRef(false) // добування в процесі — другий тап не почне нове
   const working = useRef(new Set()) // грядки, на яких дія ще в дорозі до сервера
   const clearArmed = useRef(null) // «викопати» — другий тап підтверджує
   const now = useNow()
@@ -84,10 +101,33 @@ export default function IslandWalk() {
   const interior = state.interior ?? NO_DECO
   const floor = state.floor ?? DEFAULT_FLOOR_STATE
   const houseLevel = Math.max(1, home.levels.house ?? 1)
-  /** Пісочниця: острів (декор) чи хатинка (меблі й речі на стінах). */
+  const nodes = state.nodes ?? NO_DECO
+  const tools = state.tools ?? {}
+  /**
+   * Що можна поставити на острові: будівлі (будуються одразу на місці), грядки, верстат і комора,
+   * декор. Будівля — «b:<id>», грядка — «bed»; усе інше — декор за id.
+   */
+  const islandDefs = useMemo(
+    () => [
+      ...catalog.buildings.filter((b) => b.placeable).map((b) => ({ id: `b:${b.id}`, cat: 'build', name: b.name, emoji: b.emoji, cost: b.levels[1].cost ?? {}, building: b.id })),
+      { id: 'bed', cat: 'build', name: 'Грядка', emoji: '🟫', cost: {} },
+      ...(catalog.decor ?? []).map((d) => (d.cat === 'survival' ? { ...d, cat: 'build' } : d)),
+    ],
+    [catalog]
+  )
+  /** Що вже стоїть на острові в тому ж вигляді, що й декор: { id, k, x, y }. */
+  const islandPlaced = useMemo(
+    () => [
+      ...Object.entries(home.pos ?? {}).map(([id, p]) => ({ id: `b:${id}`, k: `b:${id}`, x: p.x, y: p.y, building: id })),
+      ...Object.entries(state.farm?.plots ?? {}).map(([i, p]) => ({ id: `bed:${i}`, k: 'bed', x: p.x, y: p.y, plot: Number(i), crop: p.c ?? null })),
+      ...deco,
+    ],
+    [home.pos, state.farm, deco]
+  )
+  /** Пісочниця: острів (будівлі, грядки, декор) чи хатинка (меблі й речі на стінах). */
   const sandbox = indoors
     ? { base: '/home/interior', placed: interior, defs: catalog.interior ?? [] }
-    : { base: '/home/deco', placed: deco, defs: catalog.decor ?? [] }
+    : { base: '/home/deco', placed: islandPlaced, defs: islandDefs }
   const name = state.user.firstName || 'Мандрівника'
 
   const collecting = useRef(false)
@@ -160,6 +200,40 @@ export default function IslandWalk() {
     if (await act('POST', `/farm/${i}/clear`)) haptic('success')
   }
 
+  /* ───── Виживання: добування ───── */
+
+  /** Інструмент, яким добувають ресурс, і чи він у тебе є. */
+  const toolFor = (def) => {
+    if (!def?.tool) return { kind: 'hand', ok: true, tier: 0 }
+    const tier = tools[def.tool] ?? 0
+    const t = catalog.craft?.tools.find((x) => x.id === def.tool)
+    return { kind: def.tool, ok: tier >= def.tier, tier, need: t?.levels[def.tier - 1]?.name ?? 'інструмент' }
+  }
+  const nodeDef = (id) => {
+    const n = nodes.find((x) => x.id === id)
+    return n ? catalog.nodes?.find((d) => d.id === n.k) : null
+  }
+
+  /** Зрубати / розбити / підняти: кілька замахів у рушії, потім сервер видає здобич. */
+  const gather = async (id) => {
+    const def = nodeDef(id)
+    if (!def || gathering.current) return
+    const tool = toolFor(def)
+    if (!tool.ok) {
+      haptic('warning')
+      toast(`${def.emoji} Потрібна ${tool.need.toLowerCase()} — зроби на верстаті 🪚`, 'error')
+      return
+    }
+    gathering.current = true
+    const hits = Math.max(1, def.hits - (tool.tier > def.tier ? 1 : 0))
+    await engine.current?.gatherFx(id, hits, tool.kind)
+    const res = await act('POST', `/island/nodes/${id}/gather`)
+    gathering.current = false
+    if (!res) return
+    haptic('success')
+    toast(Object.keys(res.got).length ? `${def.emoji} Здобуто: ${formatAmounts(items, res.got)}` : `${def.emoji} Нічого цікавого`)
+  }
+
   /* ───── Пси ───── */
 
   const petDog = (dog) => {
@@ -214,7 +288,9 @@ export default function IslandWalk() {
     const plot = plotOf(id)
     if (dog) petDog(dog)
     else if (plot != null) farmAction(plot)
-    else if (id === 'farmshop') setFarmTab('seeds')
+    else if (nodeOf(id)) gather(nodeOf(id))
+    else if (actOf(id) === 'workbench') setCraft(true)
+    else if (actOf(id) === 'farmshop') setFarmTab('seeds')
     else if (id === 'house') goScene('home')
     else if (id === 'exit') goScene('island')
     else if (BUILDINGS.has(id)) setSheet(id)
@@ -257,6 +333,24 @@ export default function IslandWalk() {
   }
 
   const choose = (d) => {
+    if (d.building && home.levels[d.building] > 0) {
+      haptic('select')
+      toast(`${d.emoji} ${d.name} уже стоїть — вибрано, можна перенести`)
+      setPick(null)
+      showGhost(null)
+      select(d.id)
+      engine.current?.lookAt?.(home.pos?.[d.building])
+      return
+    }
+    if (d.id === 'bed') {
+      const { used, max } = bedCount(state.farm)
+      if (used >= max) {
+        haptic('warning')
+        const next = (catalog.farm?.unlock ?? []).findIndex((n) => n > max)
+        toast(next > 0 ? `🟫 Більше ${max} грядок не доглянеш — покращ «Город» до ${next}-го рівня` : `🟫 Уже ${max} грядок — максимум`, 'error')
+        return
+      }
+    }
     if (indoors && d.level > houseLevel) {
       haptic('warning')
       toast(`🔒 Відкриється, коли хатинка стане ${d.level}-го рівня`, 'error')
@@ -276,16 +370,27 @@ export default function IslandWalk() {
     if (!ghost?.ok || busy) return
     setBusy(true)
     const pos = ghost.wall ? { wall: ghost.wall, at: ghost.at, h: ghost.h } : { x: ghost.x, y: ghost.y }
-    const res = ghost.uid
-      ? await act('POST', `${sandbox.base}/${ghost.uid}/move`, pos)
-      : await act('POST', sandbox.base, { kind: ghost.kind, ...pos })
+    const kind = ghost.kind
+    const building = !indoors && kind.startsWith('b:') ? kind.slice(2) : null
+    const bed = !indoors && kind === 'bed'
+    let res
+    if (building) res = await act('POST', `/home/${building}/${ghost.uid ? 'move' : 'place'}`, pos)
+    else if (bed) res = ghost.uid ? await act('POST', `/farm/beds/${ghost.uid.slice(4)}/move`, pos) : await act('POST', '/farm/beds', pos)
+    else res = ghost.uid ? await act('POST', `${sandbox.base}/${ghost.uid}/move`, pos) : await act('POST', sandbox.base, { kind, ...pos })
     setBusy(false)
     if (!res) return
     haptic('success')
     showGhost(null)
-    if (ghost.uid) select(res.item.id)
+    const def = sandbox.defs.find((d) => d.id === kind)
+    if (building && !ghost.uid) toast(`${def.emoji} ${def.name} збудовано! Торкнись її, щоб перенести`)
+    if (ghost.uid) select(building || bed ? ghost.uid : res.item.id)
+    else if (building) setPick(null)
+    else if (bed) {
+      const { used, max } = bedCount(res.state.farm)
+      if (used >= max) setPick(null)
+    }
     // Новий предмет: лишаємо його вибраним — наступний тап поставить ще один.
-    else if (!canAfford(sandbox.defs.find((d) => d.id === ghost.kind).cost, res.state.balance, res.state.inventory)) setPick(null)
+    else if (!canAfford(def.cost, res.state.balance, res.state.inventory)) setPick(null)
   }
 
   const startMove = () => {
@@ -296,15 +401,31 @@ export default function IslandWalk() {
     showGhost(d.wall ? { kind: d.k, wall: d.wall, at: d.at, h: d.h, uid: d.id } : { kind: d.k, x: d.x, y: d.y, uid: d.id })
   }
 
+  const removeArmed = useRef(null) // розібрати будівлю чи грядку з урожаєм — другий тап підтверджує
   const remove = async () => {
     if (!sel || busy) return
+    const item = sandbox.placed.find((x) => x.id === sel)
+    const building = !indoors && sel.startsWith('b:') ? sel.slice(2) : null
+    const bed = !indoors && sel.startsWith('bed:') ? sel.slice(4) : null
+    if ((building || (bed && item?.crop)) && (removeArmed.current?.id !== sel || Date.now() - removeArmed.current.at > 2500)) {
+      removeArmed.current = { id: sel, at: Date.now() }
+      haptic('warning')
+      toast(building ? 'Тапни 🗑 ще раз — будівлю розберемо, усе витрачене повернеться' : 'Тапни 🗑 ще раз — грядку приберемо разом з рослиною')
+      return
+    }
+    removeArmed.current = null
     setBusy(true)
-    const res = await act('DELETE', `${sandbox.base}/${sel}`)
+    const res = building
+      ? await act('DELETE', `/home/building/${building}`)
+      : bed
+        ? await act('DELETE', `/farm/beds/${bed}`)
+        : await act('DELETE', `${sandbox.base}/${sel}`)
     setBusy(false)
     if (!res) return
     haptic('success')
     select(null)
-    toast(Object.keys(res.refund).length ? `Прибрано. Повернуто: ${formatAmounts(items, res.refund)}` : 'Прибрано')
+    const refund = res.refund ?? {}
+    toast(Object.keys(refund).length ? `${building ? 'Розібрано' : 'Прибрано'}. Повернуто: ${formatAmounts(items, refund)}` : 'Прибрано')
   }
 
   /* ───── Підлога ───── */
@@ -355,7 +476,7 @@ export default function IslandWalk() {
 
   const enterBuild = () => {
     haptic('medium')
-    setCat(indoors ? 'furniture' : 'plants')
+    setCat(indoors ? 'furniture' : 'build')
     setBuild(true)
     engine.current?.setMode('build')
   }
@@ -415,14 +536,21 @@ export default function IslandWalk() {
   // Рівні будівель, скриня й декор → що стоїть на острові.
   const chestOpen = state.daily.claimedToday
   useEffect(() => {
-    engine.current?.setWorld(home.levels, chestOpen, deco, interior)
-  }, [ready, home.levels, chestOpen, deco, interior])
+    engine.current?.setWorld({ home: { levels: home.levels, pos: home.pos ?? {} }, chestOpen, deco, interior, nodes })
+  }, [ready, home.levels, home.pos, chestOpen, deco, interior, nodes])
 
   // Поле: що де росте (оновлюється й саме — волога грядка дорослішає без запитів).
   const field = useMemo(() => fieldView(catalog, state.farm, now), [catalog, state.farm, now])
   useEffect(() => {
     if (ready) engine.current?.setFarm(field)
   }, [ready, field])
+
+  // Небо: справжній час доби там, де гравець, і спільна погода світу.
+  const skyOverride = useMemo(() => skyOverrideFromUrl(), [])
+  const sky = useMemo(() => skyAt(now, skyOverride), [now, skyOverride])
+  useEffect(() => {
+    if (ready) engine.current?.setSky(sky)
+  }, [ready, sky])
 
   // Команди псам, збережені на сервері (сидить там-то, чекає вдома).
   useEffect(() => {
@@ -447,36 +575,49 @@ export default function IslandWalk() {
   const nearPlot = indoors ? null : plotOf(near)
   const plotV = nearPlot != null ? field[nearPlot] : null
   const plotInfo = plotV ? plotSpot(catalog, state.farm, plotV, now) : null
+  const nearNode = indoors ? null : nodeDef(nodeOf(near))
+  const nodeTool = nearNode ? toolFor(nearNode) : null
   const spot = nearDog
     ? { id: near, label: `Песик ${nearDog.name}` }
     : plotV
       ? { id: near, label: plotInfo.label }
-      : (indoors ? interiorInteract(interior) : INTERACT).find((i) => i.id === near)
-  const showSeeds = !build && !indoors && (plotV ? plotV.action === 'plant' || plotV.action === 'till' : near === 'farmshop')
+      : nearNode
+        ? { id: near, label: nearNode.name }
+        : indoors
+          ? interiorInteract(interior).find((i) => i.id === near)
+          : islandSpot(catalog, near)
+  const showSeeds = !build && !indoors && (plotV ? plotV.action === 'plant' || plotV.action === 'till' : actOf(near) === 'farmshop')
+  const hasBench = deco.some((d) => d.k === 'workbench')
   const dogInfo = nearDog ? state.dogs?.[nearDog.id] : null
   const building = catalog.buildings.find((b) => b.id === sheet)
+  // Звістка про острів «з нуля» — раз; сервер забуває її після «Будуймо!».
+  const [resetSeen, setResetSeen] = useState(false)
+  const ackReset = () => {
+    setResetSeen(true)
+    act('POST', '/home/reset/ack', {}, { silent: true })
+  }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <ScreenTitle
         title={build ? (indoors ? '🔨 Облаштовуємо хату' : '🔨 Будуємо острів') : indoors ? '🏠 Хатинка' : `🏝️ ${home.shared ? 'Спільний острів' : `Острів ${name}`}`}
+        // Під час гри підказка вже є в панелі під полотном — тут не забираємо висоту в острова.
         subtitle={
           build
             ? indoors
               ? 'Обери річ і торкнись підлоги чи стіни, перетягни привид, куди треба. У «Підлозі» — візерунок і колір.'
               : 'Тягни пальцем, щоб роззирнутися. Обери предмет, торкнись місця — і перетягни привид, куди треба.'
-            : indoors
-              ? 'Твоя хатинка — облаштуй її як хочеш. Двері внизу ведуть надвір.'
-              : 'Торкнись землі — підеш туди. Двома пальцями — наближення.'
+            : null
         }
       />
 
       <div
-        className={`relative overflow-hidden rounded-sm border-4 bg-[#3b7fd0] shadow-[0_6px_0_#0006] transition-colors ${
+        className={`relative min-h-[240px] flex-1 overflow-hidden rounded-sm border-4 bg-[#3b7fd0] shadow-[0_6px_0_#0006] transition-colors ${
           build ? 'border-gold' : 'border-wood-dark'
         }`}
       >
-        <canvas ref={canvas} className="block aspect-[5/6] w-full touch-none" />
+        {/* Полотно заповнює весь вільний простір; рушій сам підлаштовує камеру під розмір. */}
+        <canvas ref={canvas} className="absolute inset-0 block h-full w-full touch-none" />
         {ready && <CameraControls engine={engine} onWhistle={whistle} />}
         {!ready && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f2a3d]/60 text-center">
@@ -497,11 +638,34 @@ export default function IslandWalk() {
               : `ДЕКОР ${deco.length}/${catalog.decorMax ?? 150}`
             : indoors ? 'ХАТИНКА' : home.shared ? 'СПІЛЬНИЙ ОСТРІВ' : `ОСТРІВ ${name.toUpperCase()}`}
         </p>
+        {!build && !indoors && (
+          <p className="pointer-events-none absolute top-8 left-2 flex gap-1.5 rounded-sm bg-black/35 px-2 py-0.5 font-pixel text-[9px] text-cream drop-shadow">
+            {(catalog.craft?.tools ?? []).map((t) => (
+              <span key={t.id} className={tools[t.id] ? '' : 'opacity-40 grayscale'}>
+                {t.emoji}
+                {tools[t.id] ? tools[t.id] : '–'}
+              </span>
+            ))}
+          </p>
+        )}
+        {!build && (
+          <button
+            type="button"
+            onClick={() => toast(skyHint(sky))}
+            className="absolute top-12 right-2 flex items-center gap-1 rounded-sm bg-black/35 px-2 py-1 font-pixel text-[9px] text-cream drop-shadow"
+          >
+            <span className="text-xs">{sky.part.emoji}</span>
+            {sky.part.name.toUpperCase()} · <span className="text-xs">{sky.weather.emoji}</span>
+            {sky.weather.name.toUpperCase()}
+          </button>
+        )}
       </div>
 
       {build ? (
         <BuildPanel
           indoor={indoors}
+          defs={sandbox.defs}
+          placed={sandbox.placed}
           houseLevel={houseLevel}
           cat={cat}
           setCat={(c) => {
@@ -547,14 +711,16 @@ export default function IslandWalk() {
                   {plotV ? (
                     <PlotIcon v={plotV} items={items} />
                   ) : (
-                    <span className="text-2xl">{nearDog ? '🐶' : spotIcon(catalog, spot.id)}</span>
+                    <span className="text-2xl">{nearDog ? '🐶' : nearNode ? nearNode.emoji : spotIcon(catalog, spot.id)}</span>
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-extrabold">{spot.label}</p>
                     {dogInfo ? (
                       <Hearts hearts={dogInfo.hearts} love={dogInfo.love} size={10} />
                     ) : (
-                      <p className="truncate text-[11px] text-cream/75">{plotInfo ? plotInfo.hint : spotHint(catalog, home.levels, chestOpen, spot.id)}</p>
+                      <p className={`truncate text-[11px] ${nodeTool && !nodeTool.ok ? 'text-[#ffb3a6]' : 'text-cream/75'}`}>
+                        {plotInfo ? plotInfo.hint : nearNode ? nodeHint(items, nearNode, nodeTool) : spotHint(catalog, home.levels, chestOpen, spot.id)}
+                      </p>
                     )}
                   </div>
                   {plotV ? (
@@ -573,6 +739,10 @@ export default function IslandWalk() {
                         {plotV.action === 'plant' && seedToPlant() ? `🌱 ${seedToPlant().name}` : plotInfo.button}
                       </PxButton>
                     </>
+                  ) : nearNode ? (
+                    <PxButton size="sm" variant={nodeTool.ok ? 'yellow' : 'paper'} className={nodeTool.ok ? '' : 'opacity-60'} onClick={() => interact(spot.id)}>
+                      {GATHER[nodeTool.kind]}
+                    </PxButton>
                   ) : (
                     <PxButton size="sm" variant="green" onClick={() => interact(spot.id)}>
                       {nearDog ? 'Погладити' : (ACTION[actOf(spot.id)] ?? 'Відкрити')}
@@ -600,7 +770,7 @@ export default function IslandWalk() {
                 >
                   {indoors
                     ? interior.length ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.' : 'Хата порожня — натисни «Облаштувати» й постав, що хочеш.'
-                    : 'Тапни будівлю чи грядку — мандрівник сам дійде. На ПК — WASD, E — дія, коліщатко — зум.'}
+                    : survivalHint(state, hasBench, tools)}
                 </motion.p>
               )}
             </AnimatePresence>
@@ -617,7 +787,7 @@ export default function IslandWalk() {
             </div>
           ) : (
             <PxButton variant="yellow" size="lg" className="w-full" disabled={!ready} onClick={enterBuild}>
-              🔨 Будувати на острові
+              🔨 Будувати
             </PxButton>
           )}
         </>
@@ -627,9 +797,14 @@ export default function IslandWalk() {
       <DailySheet open={daily} onClose={() => setDaily(false)} />
       <FarmSheet tab={farmTab} setTab={setFarmTab} onClose={() => setFarmTab(null)} />
       <DogSheet dog={dogSheet ? dogById(dogSheet) : null} onClose={() => setDogSheet(null)} onCommand={commandDog} onFeed={feedDog} />
+      <CraftSheet open={craft} onClose={() => setCraft(false)} />
+      <ResetSheet note={resetSeen ? null : home.reset} onClose={ackReset} />
     </div>
   )
 }
+
+/** GameApp дає цьому екрану рівно висоту вікна: полотно розтягується, кнопки — під ним, без прокрутки. */
+IslandWalk.fill = true
 
 /* ───────── Камера: поворот і зум для тих, хто не користується двома пальцями ───────── */
 
@@ -659,11 +834,11 @@ function CameraControls({ engine, onWhistle }) {
 
 /* ───────── Панель пісочниці ───────── */
 
-function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, onDone, floor, floorTry, onFloor, onBuyFloor, onCancelFloor }) {
+function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, onDone, floor, floorTry, onFloor, onBuyFloor, onCancelFloor }) {
   const { catalog, state, items } = useGame()
-  const decor = (indoor ? catalog.interior : catalog.decor) ?? []
-  const placed = (indoor ? state.interior : state.deco) ?? []
+  const decor = defs
   const defOf = (kind) => decor.find((d) => d.id === kind)
+  const beds = bedCount(state.farm)
   const selItem = sel && placed.find((d) => d.id === sel)
   const active = ghost ? defOf(ghost.kind) : pick ? defOf(pick) : null
   const where = (d) => (indoor ? (d.wall ? 'на стіні, де повісити' : 'на підлозі, де поставити') : 'на острові, де поставити')
@@ -723,14 +898,19 @@ function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, o
     )
   } else if (selItem) {
     const d = defOf(selItem.k)
-    const refund = selItem.free ? {} : (d?.cost ?? {})
+    const b = selItem.building && catalog.buildings.find((x) => x.id === selItem.building)
+    const refund = b ? spentOn(b, state.home.levels[b.id]) : selItem.free ? {} : (d?.cost ?? {})
     context = (
       <>
         <DecoIcon kind={selItem.k} box={34} indoor={indoor} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-extrabold">{d?.name}</p>
           <p className="truncate text-[11px] text-cream/75">
-            {Object.keys(refund).length ? `Прибереш — повернеться: ${costText(items, refund)}` : selItem.free ? 'Була в хаті від початку' : 'Безкоштовна прикраса'}
+            {selItem.k === 'bed'
+              ? selItem.crop ? 'Переносиш разом з рослиною' : 'Перенеси, куди зручно'
+              : Object.keys(refund).length
+                ? `${b ? 'Розбереш' : 'Прибереш'} — повернеться: ${costText(items, refund)}`
+                : selItem.free ? 'Була в хаті від початку' : 'Безкоштовна прикраса'}
           </p>
         </div>
         <PxButton size="sm" variant="blue" disabled={busy} onClick={onMove}>
@@ -744,7 +924,7 @@ function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, o
   } else {
     context = (
       <p className="flex-1 text-center text-[12px] text-cream/80">
-        Обери {indoor ? 'річ' : 'предмет'} нижче або торкнись {indoor ? 'речі в хаті' : 'своєї прикраси'}, щоб пересунути чи прибрати.
+        Обери {indoor ? 'річ' : 'будівлю чи предмет'} нижче або торкнись {indoor ? 'речі в хаті' : 'того, що вже стоїть'}, щоб перенести чи прибрати.
       </p>
     )
   }
@@ -762,8 +942,10 @@ function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, o
         {decor
           .filter((d) => d.cat === cat)
           .map((d) => {
+            const built = d.building && state.home.levels[d.building] > 0
             const locked = indoor && d.level > houseLevel
-            const affordable = !locked && canAfford(d.cost, state.balance, state.inventory)
+            const full = d.id === 'bed' && beds.used >= beds.max
+            const affordable = !locked && !full && (built || canAfford(d.cost, state.balance, state.inventory))
             const chosen = (ghost?.kind ?? pick) === d.id && !ghost?.uid
             return (
               <motion.button
@@ -780,7 +962,13 @@ function BuildPanel({ indoor, houseLevel, cat, setCat, pick, ghost, sel, busy, o
                 {locked && <span className="absolute top-0.5 right-1 font-pixel text-[9px] text-ink">🔒{d.level}</span>}
                 <span className="w-full truncate px-1 text-center text-[10px] leading-tight font-extrabold text-ink">{d.name}</span>
                 <span className="flex min-h-[14px] flex-wrap justify-center gap-x-1 px-0.5 text-[9px] leading-tight text-ink-soft">
-                  {Object.keys(d.cost).length
+                  {built ? (
+                    <span className="text-[#2f6b1f]">✓ стоїть</span>
+                  ) : d.id === 'bed' ? (
+                    <span className={full ? 'text-[#9a2f1d]' : ''}>
+                      {beds.used}/{beds.max}
+                    </span>
+                  ) : Object.keys(d.cost).length
                     ? Object.entries(d.cost).map(([id, n]) => {
                         const have = id === 'balance' ? state.balance : (state.inventory[id] ?? 0)
                         return (
@@ -906,7 +1094,7 @@ const ICON_SHEETS = [
 
 /** Спрайт декору чи речі для хати, вписаний у квадрат box×box (пікселі лишаються чіткими). */
 function DecoIcon({ kind, box, indoor = false }) {
-  const sprite = (indoor ? INTERIOR_GEOM : DECO_GEOM)[kind]?.sprite
+  const sprite = indoor ? INTERIOR_GEOM[kind]?.sprite : geomOf(kind)?.sprite
   const sheet = ICON_SHEETS.find((sh) => sh.atlas.frames[sprite])
   if (!sheet) return null
   const f = sheet.atlas.frames[sprite]
@@ -925,6 +1113,13 @@ function DecoIcon({ kind, box, indoor = false }) {
   )
 }
 
+/** Що витрачено на будівлю до рівня level (усі ступені) — повернеться, якщо розібрати. */
+function spentOn(b, level) {
+  const out = {}
+  for (let l = 1; l <= level; l++) for (const [id, n] of Object.entries(b.levels[l]?.cost ?? {})) out[id] = (out[id] ?? 0) + n
+  return out
+}
+
 /** «2 дошки · 1 камінь» — назви, бо в гілочки, дошки й колоди однакове емодзі. */
 function costText(items, cost, inventory) {
   const parts = Object.entries(cost)
@@ -939,6 +1134,31 @@ function PlotIcon({ v, items }) {
   return <span className="text-2xl">{v.locked ? '🌿' : v.tilled ? (v.wet ? '💧' : '🟫') : '🌾'}</span>
 }
 
+/** Що стоїть на острові під цим id: будівля, верстат, комора чи те, що є завжди. */
+function islandSpot(catalog, id) {
+  if (!id) return null
+  const b = catalog.buildings.find((x) => x.id === id)
+  if (b) return { id, label: b.name }
+  if (actOf(id) === 'workbench') return { id, label: 'Верстат' }
+  if (actOf(id) === 'farmshop') return { id, label: 'Комора городника' }
+  return INTERACT.find((i) => i.id === id) ?? null
+}
+
+/** Підказка біля ресурсу: що з нього буде або чого бракує. */
+function nodeHint(items, def, tool) {
+  if (!tool.ok) return `Потрібна ${tool.need.toLowerCase()} — зроби на верстаті`
+  return `Дасть: ${def.loot.map((id) => itemOf(items, id).name.toLowerCase()).join(', ')}`
+}
+
+/** Підказка, що робити далі: від порожнього острова до сокири й кайла. */
+function survivalHint(state, hasBench, tools) {
+  if (!hasBench) return 'Збирай руками кущі, камінчики й корчі на березі. 4 гілочки й 2 камені — і став верстат 🪚 у «Будувати».'
+  if (!tools.axe) return 'Біля верстата 🪚 зроби кам\'яну сокиру — і рубай дерева на колоди.'
+  if (!tools.pickaxe) return 'Зроби на верстаті кайло ⛏️ — каміння дасть більше каменю.'
+  if (!Object.keys(state.farm?.plots ?? {}).length) return 'Постав грядки й комору городника в «Будувати» — і вирощуй урожай 🌱'
+  return 'Тапни дерево, камінь чи будівлю — мандрівник сам дійде. На ПК — WASD, E — дія.'
+}
+
 function spotIcon(catalog, id) {
   if (ICONS[actOf(id)]) return ICONS[actOf(id)]
   return catalog.buildings.find((b) => b.id === id)?.emoji ?? ICONS[id] ?? '❔'
@@ -947,7 +1167,8 @@ function spotIcon(catalog, id) {
 function spotHint(catalog, levels, chestOpen, id) {
   if (id.startsWith('dog:')) return 'Вірний пес — ходить за тобою слідом'
   if (id === 'exit') return 'Повернутися на острів'
-  if (id === 'farmshop') return 'Насіння, продаж урожаю й поради'
+  if (actOf(id) === 'farmshop') return 'Насіння, продаж урожаю й поради'
+  if (actOf(id) === 'workbench') return 'Інструменти й дошки з колод'
   if (actOf(id) === 'bed') return 'Перина й вишита ковдра'
   if (actOf(id) === 'stove') return 'Готують рибу — у рюкзаку'
   if (actOf(id) === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'

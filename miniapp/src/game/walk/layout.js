@@ -1,4 +1,4 @@
-import { DECO_GEOM, decoFootprint } from './decor.js'
+import { BUILDING_GEOM, DECO_GEOM, NODE_GEOM, decoFootprint, nodeFootprint } from './decor.js'
 
 /**
  * Рідний острів «зсередини»: розміри мапи, рельєф і де що стоїть.
@@ -26,33 +26,25 @@ export const LAND = {
   rocks: [{ x: 84, y: 262, rx: 40, ry: 30 }],
 }
 
-/** Бруківка від дверей хатинки до причалу (ламана), ширина px. */
-export const PATH = { points: [[256, 150], [256, 214], [250, 260], [256, 344]], w: 20 }
+/**
+ * Острів починається порожнім: стоїть лише хатинка, причал із човном і скриня.
+ * Решту — будівлі, грядки, декор — гравець ставить і переносить сам, а дерева, каміння
+ * й дари моря виростають самі (server/src/game/nodes.js).
+ * Стежок і квітників у землі більше немає: генератор лишає траву й пісок чистими.
+ */
+export const PATH = { points: [], w: 0 }
+export const TRAILS = []
+export const BEDS = []
 
-/** Майданчик із бруківки перед дверима хатинки. */
-export const PLAZA = { x: 256, y: 160, r: 15 }
-
-/** Протоптані стежки по траві: від бруківки до городу й до містка майстерні. */
-export const TRAILS = [
-  { points: [[258, 214], [292, 222], [330, 236], [372, 240]], w: 8 },
-  { points: [[372, 240], [392, 252], [400, 268], [406, 282]], w: 7 },
-]
-
-/** Квітники обабіч дверей (запечені в землю, на них не стають). */
-export const BEDS = [
-  { x: 218, y: 150, w: 20, h: 7 },
-  { x: 274, y: 150, w: 20, h: 7 },
-]
+/** Утоптаний майданчик перед дверима хатинки. */
+export const PLAZA = { x: 256, y: 160, r: 12 }
 
 /** Причал — дощаті мостки у воду. */
 export const PIER = { x: 256, y0: 338, y1: 428, w: 28 }
 
-/** Де стоять будівлі (якір — низ по центру). */
+/** Те, що стоїть на своєму місці завжди (якір — низ по центру). */
 export const SPOTS = {
   house: { x: 256, y: 150 },
-  garden: { x: 372, y: 222 },
-  workshop: { x: 468, y: 300 },
-  lighthouse: { x: 84, y: 270 },
   pier: { x: 256, y: 338 },
 }
 
@@ -62,98 +54,48 @@ export const SPOTS = {
  */
 export const LIGHTHOUSE_LAMP = { 1: [3, -60], 2: [-3, -80], 3: [0, -97] }
 
-/** Місток із берега до майстерні на палях. */
+/** Місток для старої майстерні на палях — лише для генератора спрайтів. */
 export const BOARDWALK = { x0: 404, x1: 442, y: 281, h: 14 }
 
-/**
- * Город (поле грядок) на захід від бруківки: 5×3 грядки по 16 px.
- * Нумерація — стовпцями (0–2 — перший стовпець, 3–5 — другий…): «Город» вищого рівня
- * розчищає поле стовпець за стовпцем. Сервер знає лише номери (server/src/game/farm.js).
- */
-export const FIELD = { x: 152, y: 236, cols: 5, rows: 3, tile: 16 }
-export const FIELD_PLOTS = FIELD.cols * FIELD.rows
+/** Грядка з якорем (x, y) — низ по центру — займає 16×16. */
+export const PLOT = 16
 
 /** Прямокутник грядки [x, y, w, h]. */
-export function plotRect(i) {
-  const t = FIELD.tile
-  return [FIELD.x + Math.floor(i / FIELD.rows) * t, FIELD.y + (i % FIELD.rows) * t, t, t]
+export function plotRect(p) {
+  return [p.x - PLOT / 2, p.y - PLOT, PLOT, PLOT]
 }
 
 /** Центр грядки. */
-export function plotCenter(i) {
-  const [x, y, w, h] = plotRect(i)
-  return { x: x + w / 2, y: y + h / 2 }
+export function plotCenter(p) {
+  return { x: p.x, y: p.y - PLOT / 2 }
 }
-
-/** Яка грядка під точкою (або -1). */
-export function plotAt(x, y) {
-  const cx = Math.floor((x - FIELD.x) / FIELD.tile)
-  const cy = Math.floor((y - FIELD.y) / FIELD.tile)
-  if (cx < 0 || cy < 0 || cx >= FIELD.cols || cy >= FIELD.rows) return -1
-  return cx * FIELD.rows + cy
-}
-
-/** Комора городника — ятка з насінням ліворуч від поля. */
-export const SEED_STAND = { x: 134, y: 258 }
 
 export const CHEST = { x: 200, y: 336 }
 export const BOAT = { x: 300, y: 392 }
 export const START = { x: 256, y: 186 }
 
 /**
- * Прикраси: дерева, кущі, каміння, квіти.
- * block — ширина×висота «ніжок» під якорем, що не пускають; blocks — довільні [dx, dy, w, h] від якоря.
+ * Куди не ростуть дерева й каміння: двір перед хатинкою, дорога до причалу, скриня.
+ * [x, y, w, h] — те саме знає генератор місць для ресурсів (island-slots.json на сервері).
  */
-export const DECOR = [
-  { s: 'oak', x: 176, y: 146, block: [14, 8] },
-  { s: 'oak', x: 150, y: 206, block: [14, 8] },
-  { s: 'birch', x: 326, y: 124, block: [8, 6] },
-  { s: 'birch', x: 120, y: 160, block: [8, 6] },
-  { s: 'oak', x: 300, y: 98, block: [14, 8] },
-  { s: 'clothesline', x: 322, y: 160, blocks: [[-24, -4, 4, 4], [20, -4, 4, 4]] },
-  { s: 'bush', x: 206, y: 160, block: [14, 6] },
-  { s: 'bush_berry', x: 308, y: 172, block: [14, 6] },
-  { s: 'bush_berry', x: 420, y: 186, block: [14, 6] },
-  { s: 'bush', x: 230, y: 96, block: [14, 6] },
-  { s: 'stump', x: 210, y: 210, block: [10, 6] },
-  { s: 'rock', x: 140, y: 300, block: [10, 6] },
-  { s: 'rock_big', x: 400, y: 340, block: [16, 8] },
-  { s: 'rock', x: 330, y: 352, block: [10, 6] },
-  { s: 'rock', x: 118, y: 96, block: [10, 6] },
-  { s: 'rock_big', x: 410, y: 108, block: [16, 8] },
-  { s: 'crates', x: 286, y: 344, block: [14, 6] },
-  { s: 'barrel', x: 228, y: 340, block: [8, 4] },
-  { s: 'flowers', x: 222, y: 182 },
-  { s: 'flowers', x: 290, y: 196 },
-  { s: 'flowers_w', x: 182, y: 226 },
-  { s: 'flowers', x: 330, y: 260 },
-  { s: 'flowers_w', x: 268, y: 236 },
-  { s: 'flowers_p', x: 128, y: 290 },
-  { s: 'flowers_p', x: 380, y: 160 },
-  { s: 'tuft', x: 240, y: 230 },
-  { s: 'tuft', x: 340, y: 186 },
-  { s: 'tuft', x: 186, y: 190 },
-  { s: 'tuft', x: 300, y: 270 },
-  { s: 'tuft', x: 396, y: 250 },
-  { s: 'tuft', x: 168, y: 120 },
-  { s: 'shell', x: 190, y: 356 },
-  { s: 'shell', x: 352, y: 334 },
+export const RESERVED = [
+  [214, 70, 84, 112],
+  [236, 182, 40, 160],
+  [184, 318, 32, 26],
 ]
 
 /**
- * Що стоїть на острові при таких рівнях будівель.
+ * Що стоїть на острові.
  * layer: 'floor' — під гравцем (мостки, грядки), 'obj' — сортується з гравцем за y.
  * blocks — прямокутники [x, y, w, h], куди не можна ступити; walk — куди можна попри воду.
+ * uid / kind — для пісочниці: що це за предмет і як його вибрати («b:<будівля>» для будівель).
+ * @param {{ levels: object, pos?: object }} home рівні будівель і де вони стоять
  * @returns {{ s: string, x: number, y: number, layer: 'floor'|'obj', blocks?: number[][], walk?: number[] }[]}
  */
-export function placements(levels, chestOpen, deco = []) {
+export function placements(home, chestOpen, deco = [], nodes = []) {
+  const { levels } = home
   const out = []
   const add = (s, x, y, extra = {}) => out.push({ s, x, y, layer: 'obj', ...extra })
-
-  for (const d of DECOR) {
-    const rel = d.blocks ?? (d.block ? [[-d.block[0] / 2, -d.block[1], ...d.block]] : [])
-    add(d.s, d.x, d.y, { blocks: rel.map(([dx, dy, w, h]) => [d.x + dx, d.y + dy, w, h]) })
-  }
 
   // Хатинка: завжди є, рівень 1..3.
   const h = SPOTS.house
@@ -168,36 +110,29 @@ export function placements(levels, chestOpen, deco = []) {
   if (levels.pier >= 3) add('sailboat', 196, 420)
   add('boat', BOAT.x, BOAT.y, { layer: 'floor' })
 
-  // Город.
-  const g = SPOTS.garden
-  if (levels.garden > 0) add(`garden_${levels.garden}`, g.x, g.y, { blocks: [[g.x - 30, g.y - 34, 60, 32]] })
-  else add('plot_grass', g.x, g.y, { blocks: [[g.x - 5, g.y - 6, 10, 6]] })
-
-  // Майстерня на палях + місток.
-  const w = SPOTS.workshop
-  const bw = BOARDWALK
-  out.push({ s: 'boardwalk', x: (bw.x0 + bw.x1) / 2, y: bw.y + bw.h / 2, layer: 'floor', walk: [bw.x0, bw.y - bw.h / 2, bw.x1 - bw.x0, bw.h] })
-  // Поміст: дошки y 258..288, спереду — вільна смуга, куди можна стати.
-  out.push({ s: 'deck', x: w.x, y: w.y + 4, layer: 'floor', walk: [w.x - 26, w.y - 32, 52, 20] })
-  if (levels.workshop > 0) add(`workshop_${levels.workshop}`, w.x, w.y - 26, { blocks: [[w.x - 22, w.y - 40, 44, 10]] })
-  else add('sign', w.x, w.y - 22, { blocks: [[w.x - 4, w.y - 26, 8, 4]] })
-
-  // Маяк на скелях.
-  const l = SPOTS.lighthouse
-  // Маяк стоїть на власному кам'яному острівці — заступає і його.
-  add(`lighthouse_${Math.max(0, levels.lighthouse)}`, l.x, l.y, { blocks: [[l.x - 24, l.y - 24, 48, 20]] })
-
   add(chestOpen ? 'chest_open' : 'chest', CHEST.x, CHEST.y, { blocks: [[CHEST.x - 7, CHEST.y - 6, 14, 6]] })
 
-  // Комора городника; на 3-му рівні «Городу» над полем — дощувач.
-  add('seed_stand', SEED_STAND.x, SEED_STAND.y, { blocks: [[SEED_STAND.x - 10, SEED_STAND.y - 6, 20, 6]] })
-  if (levels.garden >= 3) add('sprinkler', FIELD.x + (FIELD.cols * FIELD.tile) / 2, FIELD.y - 1, { blocks: [] })
+  // Будівлі, які гравець поставив сам.
+  for (const [id, g] of Object.entries(BUILDING_GEOM)) {
+    const p = home.pos?.[id]
+    if (!p || !(levels[id] > 0)) continue
+    const kind = `b:${id}`
+    add(g.sprite(levels[id]), p.x, p.y, { uid: kind, kind, building: id, blocks: [decoFootprint(kind, p.x, p.y)] })
+  }
 
   // Декор гравця з пісочниці. Підлога не заважає ходити, решта — так.
   for (const d of deco) {
     const g = DECO_GEOM[d.k]
     if (!g) continue
     out.push({ s: g.sprite, x: d.x, y: d.y, layer: g.floor ? 'floor' : 'obj', uid: d.id, kind: d.k, blocks: g.floor ? [] : [decoFootprint(d.k, d.x, d.y)] })
+  }
+
+  // Дерева, каміння, кущі й дари моря.
+  for (const n of nodes) {
+    const g = NODE_GEOM[n.k]
+    if (!g) continue
+    const fp = nodeFootprint(n.k, n.x, n.y)
+    add(g.sprite, n.x, n.y, { node: n.id, nodeKind: n.k, blocks: fp ? [fp] : [] })
   }
   return out
 }
@@ -225,15 +160,12 @@ export function walkGrid(base, list) {
 }
 
 /**
- * Куди можна підійти й що там зробити. near — точка, куди йде гравець; r — радіус «поруч».
- * box — область на екрані, тап по якій веде сюди.
+ * Куди можна підійти й що там зробити — те, що стоїть завжди. Будівлі, верстат, комору
+ * й ресурси рушій додає сам, бо вони стоять там, де їх поставив гравець.
+ * near — точка, куди йде гравець; r — радіус «поруч»; box — область на екрані, тап по якій веде сюди.
  */
 export const INTERACT = [
   { id: 'house', label: 'Хатинка', near: [256, 160], r: 18, box: [222, 84, 68, 70] },
-  { id: 'garden', label: 'Город', near: [372, 234], r: 20, box: [340, 176, 64, 50] },
-  { id: 'workshop', label: 'Майстерня', near: [468, 282], r: 20, box: [436, 212, 64, 80] },
-  { id: 'lighthouse', label: 'Маяк', near: [84, 284], r: 20, box: [50, 140, 68, 132] },
-  { id: 'farmshop', label: 'Комора городника', near: [134, 268], r: 14, box: [122, 232, 24, 27] },
   { id: 'chest', label: 'Скриня', near: [200, 324], r: 16, box: [188, 318, 24, 22] },
   { id: 'pier', label: 'Причал', near: [256, 352], r: 14, box: [240, 344, 32, 30] },
   { id: 'fishing', label: 'Рибалити', near: [256, 418], r: 14, box: [240, 396, 32, 34] },

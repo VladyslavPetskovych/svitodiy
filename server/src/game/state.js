@@ -17,6 +17,9 @@ import { getFarm } from "./farm.js";
 import { getFloor, getInterior } from "./interior.js";
 import { grantAdminResources } from "./admin.js";
 import { getHome } from "./homestead.js";
+import { getTools } from "./craft.js";
+import { ensureIsland, takenBoxes } from "./island.js";
+import { getNodes } from "./nodes.js";
 import { dailyClaimKey, jobKey, kyivDay, previousDay, quizRewardKey, userKey } from "./keys.js";
 
 /**
@@ -76,6 +79,7 @@ async function getJob(userId) {
 /** Усе про гравця одним запитом — після кожної дії клієнт просто замінює стан. */
 export async function getState(userId) {
   await grantAdminResources(userId);
+  await ensureIsland(userId);
   const r = getRedis();
   const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, deco, goal, farm, dogs, interior, floor] = await Promise.all([
     r.hGetAll(userKey(userId)),
@@ -94,6 +98,8 @@ export async function getState(userId) {
     getInterior(userId),
     getFloor(userId),
   ]);
+  // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
+  const [nodes, tools] = await Promise.all([getNodes(userId, takenBoxes(home, deco, farm)), getTools(userId)]);
 
   for (const k of Object.keys(inventory)) {
     if (inventory[k] <= 0) delete inventory[k];
@@ -126,6 +132,8 @@ export async function getState(userId) {
     dogs,
     interior,
     floor,
+    nodes,
+    tools,
     // phone — чи є номер узагалі: без нього персональні розділи не відкрити.
     access: { nastia: access[0], admin: access[1], phone: access[2] != null },
     daily: await getDailyState(userId, h),

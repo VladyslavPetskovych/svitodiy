@@ -4,7 +4,7 @@ import homeAtlas from './home-atlas.json'
 import decorAtlas from './home-decor.json'
 import artVersion from './version.json'
 import { createCameraRig } from './camera.js'
-import { DECO_GEOM, decoFootprint, snapDeco } from './decor.js'
+import { BUILDING_GEOM, DECO_GEOM, NODE_GEOM, decoFootprint, geomOf, snapDeco } from './decor.js'
 import { DOGS, PET_RANGE } from './companion.js'
 import { createDog } from './dog.js'
 import rudkoMeta from './dog.json'
@@ -17,7 +17,7 @@ import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
 import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
 import { INTERIOR_GEOM, dogBedSpot, interiorFootprint, interiorInteract, interiorLights, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
 import { createInput } from './input.js'
-import { CELL, FIELD, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotAt, plotCenter, plotRect, walkGrid } from './layout.js'
+import { CELL, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotCenter, plotRect, walkGrid } from './layout.js'
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
 
 /**
@@ -94,16 +94,22 @@ function alphaOf(img) {
  * Кожен ефект прив'язаний до якоря спрайта (ax, ay), бо спрайт стоїть у 3D і обертається
  * разом із камерою: точку (x, y) з 2D-арту перераховуємо в простір цього спрайта.
  */
-function effectsFor(levels, deco) {
+function effectsFor(home, deco) {
+  const { levels } = home
   const h = SPOTS.house
-  const w = SPOTS.workshop
-  const l = SPOTS.lighthouse
+  const w = home.pos?.workshop
+  const l = home.pos?.lighthouse
   const at = (ax, ay, x, y, extra = {}) => ({ ax, ay, dx: x - ax, h: ay - y, ...extra })
   const smoke = [at(h.x, h.y, h.x + 21, h.y - 84)]
-  if (levels.workshop >= 2) smoke.push(at(w.x, w.y - 26, w.x + 15, w.y - 90))
+  const ws = BUILDING_GEOM.workshop
+  if (w && levels.workshop >= ws.smokeLevel) smoke.push(at(w.x, w.y, w.x + ws.smoke[0], w.y - ws.smoke[1], { uid: 'b:workshop' }))
   const lights = []
+  // Вікна хатинки (пікселі з house_N у sprites.png): світяться лише вночі.
+  const house = Math.max(1, levels.house)
+  const windows = [[-19, -23], ...(house >= 2 ? [[20, -23]] : []), ...(house >= 3 ? [[0.5, -54]] : [])]
+  for (const [dx, dy] of windows) lights.push(at(h.x, h.y, h.x + dx, h.y + dy, { r: dy < -40 ? 8 : 10, warm: true, night: true }))
   const lamp = LIGHTHOUSE_LAMP[levels.lighthouse]
-  if (lamp) lights.push(at(l.x, l.y, l.x + lamp[0], l.y + lamp[1], { r: 16 + levels.lighthouse * 6, beam: levels.lighthouse >= 3 }))
+  if (lamp && l) lights.push(at(l.x, l.y, l.x + lamp[0], l.y + lamp[1], { r: 16 + levels.lighthouse * 6, beam: levels.lighthouse >= 3, uid: 'b:lighthouse' }))
   if (levels.pier >= 2) for (const dx of [-15, 15]) lights.push(at(PIER.x + dx, 372, PIER.x + dx, 357, { r: 9 }))
   const fires = []
   for (const d of deco) {
@@ -121,37 +127,44 @@ function homeEffects(interior) {
 
 /** До якої будівлі / точки належить спрайт — для «попу» при покращенні. */
 function keyOf(p) {
-  if (p.uid) return p.uid
   if (p.plot != null) return `plot:${p.plot}`
-  if (p.s === 'plot_grass') return 'garden'
-  if (p.s === 'sign') return 'workshop'
+  if (p.uid) return p.uid
+  if (p.node) return `node:${p.node}`
   if (p.s.startsWith('chest')) return 'chest'
-  const m = /^(house|garden|workshop|lighthouse)_\d$/.exec(p.s)
-  return m ? m[1] : null
+  if (p.s.startsWith('house_')) return 'house'
+  return null
 }
 
 /** Поле: що лежить і росте на кожній грядці (з fieldView у src/game/farm.js). */
 function farmPlacements(view) {
   const out = []
   for (const v of view ?? []) {
-    const [x, y, w, h] = plotRect(v.i)
-    const cx = x + w / 2
+    // Грядка — це предмет пісочниці «bed»: її можна вибрати, перенести й прибрати.
+    const bed = { plot: v.i, uid: `bed:${v.i}`, kind: 'bed', occupies: [plotRect(v)] }
     if (v.locked) {
-      out.push({ s: `weeds_${(v.i * 7 + 3) % 3}`, x: cx, y: y + h - 2, layer: 'obj', plot: v.i })
+      out.push({ s: 'plot_mark', x: v.x, y: v.y, layer: 'floor', soil: true, ...bed })
+      out.push({ s: `weeds_${(v.i * 7 + 3) % 3}`, x: v.x, y: v.y - 2, layer: 'obj', plot: v.i, uid: bed.uid, kind: 'bed' })
       continue
     }
-    out.push({ s: v.tilled ? (v.wet ? 'soil_wet' : 'soil_dry') : 'plot_mark', x: cx, y: y + h, layer: 'floor', plot: v.i, soil: true })
-    if (v.crop) out.push({ s: `crop_${v.crop.id}_${Math.min(v.stage, v.crop.stages)}`, x: cx, y: y + h - 3, layer: 'obj', plot: v.i, crop: v.crop.id, ready: v.ready })
+    out.push({ s: v.tilled ? (v.wet ? 'soil_wet' : 'soil_dry') : 'plot_mark', x: v.x, y: v.y, layer: 'floor', soil: true, ...bed })
+    if (v.crop) out.push({ s: `crop_${v.crop.id}_${Math.min(v.stage, v.crop.stages)}`, x: v.x, y: v.y - 3, layer: 'obj', plot: v.i, uid: bed.uid, kind: 'bed', crop: v.crop.id, ready: v.ready })
   }
   return out
 }
 
 /** Чи перетинаються прямокутники [x, y, w, h]. */
 const overlaps = (a, b) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
-const FIELD_RECT = [FIELD.x, FIELD.y, FIELD.cols * FIELD.tile, FIELD.rows * FIELD.tile]
 
-/** Що показати над мандрівником під час роботи на городі. */
-const TOOL_EMOJI = { till: '⛏️', plant: '🌱', water: '💧', harvest: '🧺', clear: '🧹' }
+/** Що показати над мандрівником під час роботи на городі й добування. */
+const TOOL_EMOJI = { till: '⛏️', plant: '🌱', water: '💧', harvest: '🧺', clear: '🧹', axe: '🪓', pickaxe: '⛏️', hand: '🤲' }
+/** Чим сиплеться ресурс під час добування: тріски, листя чи кам'яний пил. */
+const CHIPS = {
+  oak: 'wood', birch: 'wood', pine: 'wood', driftwood: 'wood',
+  bush: 'leaf', berry_bush: 'leaf', seaweed: 'leaf',
+  rock: 'stone', boulder: 'stone', pebble: 'stone', shell: 'stone',
+}
+/** Будівлі, які гравець ставить сам — підписи для панелі дії рушій не знає, лише id. */
+const PLACED_BUILDINGS = Object.keys(BUILDING_GEOM)
 
 const SCENES = {
   island: { id: 'island', map: MAP, walk: atlas.walk, bg: 'ground', outdoor: true, spawn: { x: SPOTS.house.x, y: SPOTS.house.y + 12, dir: 'down' } },
@@ -349,6 +362,100 @@ export function createWalk(canvas, assets, cb) {
     return m
   })
 
+  /* ───── Небо: колір доби й погоди поверх світу (sky.js) ─────
+   * Повноекранний квад множить усе, що намальовано до нього (renderOrder ≤ 2: земля, спрайти,
+   * мандрівник, пси), на колір неба. Вогні (6), вогонь і бульбашки малюються пізніше — тож
+   * уночі вони яскраві на темному тлі. Другий квад — серпанок туману й спалах блискавки.
+   */
+  const screenQuad = new THREE.PlaneGeometry(2, 2)
+  const screenVert = /* glsl */ `void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`
+  const tintMat = new THREE.ShaderMaterial({
+    uniforms: { color: { value: new THREE.Vector3(1, 1, 1) } },
+    vertexShader: screenVert,
+    fragmentShader: /* glsl */ `uniform vec3 color; void main() { gl_FragColor = vec4(color, 1.0); }`,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.DstColorFactor,
+    blendDst: THREE.ZeroFactor,
+  })
+  const veilMat = new THREE.ShaderMaterial({
+    uniforms: { color: { value: new THREE.Vector3(1, 1, 1) }, alpha: { value: 0 } },
+    vertexShader: screenVert,
+    fragmentShader: /* glsl */ `uniform vec3 color; uniform float alpha; void main() { gl_FragColor = vec4(color, alpha); }`,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const tintQuad = new THREE.Mesh(screenQuad, tintMat)
+  const veilQuad = new THREE.Mesh(screenQuad, veilMat)
+  tintQuad.frustumCulled = veilQuad.frustumCulled = false
+  tintQuad.renderOrder = 4
+  veilQuad.renderOrder = 4.5
+  scene3.add(tintQuad, veilQuad)
+  const FOG = [0.86, 0.9, 0.94]
+  const INDOOR_NIGHT = [0.68, 0.58, 0.6]
+  /** Що показуємо зараз (плавно тягнеться до skyWant). */
+  const skyNow = { tint: [1, 1, 1], night: 0, clouds: 0.12, rain: 0, fog: 0 }
+  let skyWant = null
+  let storm = false
+  let flash = 0
+  let nextFlash = 0
+  let rainAcc = 0
+  let flyAcc = 0
+
+  /** Крок неба: колір, туман, блискавка, дощ і світлячки. */
+  function skyStep(dt) {
+    if (skyWant) {
+      const k = 1 - Math.exp(-1.2 * dt)
+      for (let i = 0; i < 3; i++) skyNow.tint[i] += (skyWant.tint[i] - skyNow.tint[i]) * k
+      for (const f of ['night', 'clouds', 'rain', 'fog']) skyNow[f] += (skyWant[f] - skyNow[f]) * k
+    }
+    const out = scene.outdoor
+    const n = skyNow.night
+    // У хаті погоди не видно: уночі там тепло й притемнено, а піч і лампи світять.
+    const tint = out ? [...skyNow.tint] : [0, 1, 2].map((i) => 1 + (INDOOR_NIGHT[i] - 1) * n)
+
+    if (out && storm && t >= nextFlash) {
+      flash = 1
+      nextFlash = t + 6 + Math.random() * 12
+    }
+    flash = Math.max(0, flash - dt * 3)
+    const fl = out ? flash * flash : 0
+    for (let i = 0; i < 3; i++) tint[i] += (1 - tint[i]) * fl * 0.7
+
+    tintMat.uniforms.color.value.set(tint[0], tint[1], tint[2])
+    tintQuad.visible = tint.some((v) => v < 0.995)
+    const fogA = out ? skyNow.fog : 0
+    const flashA = fl * 0.35
+    if (flashA > fogA) veilMat.uniforms.color.value.set(1, 1, 1)
+    else veilMat.uniforms.color.value.set(FOG[0] * tint[0], FOG[1] * tint[1], FOG[2] * tint[2])
+    veilMat.uniforms.alpha.value = Math.max(fogA, flashA)
+    veilQuad.visible = veilMat.uniforms.alpha.value > 0.005
+    particles.setSky(tint)
+    cloudMat.opacity = skyNow.clouds
+
+    if (!out) return
+    const spread = 1.1 * rig.zoom
+    if (skyNow.rain > 0.02) {
+      rainAcc += dt * 260 * skyNow.rain * spread * spread
+      while (rainAcc >= 1) {
+        rainAcc -= 1
+        particles.rain(rig.focus.x + (Math.random() - 0.5) * 340 * spread, rig.focus.y + (Math.random() - 0.5) * 320 * spread)
+      }
+    }
+    // Світлячки — тихими ночами, без дощу.
+    if (n > 0.6 && skyNow.rain < 0.2) {
+      flyAcc += dt * 3 * (n - 0.6) * 2.5
+      while (flyAcc >= 1) {
+        flyAcc -= 1
+        particles.firefly(rig.focus.x + (Math.random() - 0.5) * 220, rig.focus.y + (Math.random() - 0.5) * 200)
+      }
+    }
+  }
+
   /* ───── Стан ───── */
 
   let scene = SCENES.island
@@ -381,6 +488,8 @@ export function createWalk(canvas, assets, cb) {
   const juice = new Map()
   let prevDeco = null
   let prevLevels = null
+  let prevPos = null
+  let prevNodes = null
   let prevChest = null
 
   /* ───── Об'єкти сцени ───── */
@@ -646,11 +755,11 @@ export function createWalk(canvas, assets, cb) {
 
   function rebuild() {
     if (!world) return
-    const { levels, chestOpen, deco, interior } = world
+    const { home, chestOpen, deco, interior, nodes } = world
     if (scene.outdoor) {
-      list = [...placements(levels, chestOpen, deco), ...farmPlacements(farmView)]
-      interact = INTERACT
-      fx = effectsFor(levels, deco)
+      list = [...placements(home, chestOpen, deco, nodes), ...farmPlacements(farmView)]
+      interact = islandInteract()
+      fx = effectsFor(home, deco)
     } else {
       list = homePlacements(interior, INTERIOR_GEOM, interiorFootprint)
       interact = interiorInteract(interior)
@@ -658,13 +767,75 @@ export function createWalk(canvas, assets, cb) {
     }
     grid = walkGrid(scene.walk, list)
     if (selected && !list.some((p) => p.uid === selected)) selected = null
-    if (!geo.canStand(grid, body.x, body.y)) teleport(body, scene.spawn.x, scene.spawn.y)
+    // Щось виросло чи стало просто під ногами — відступаємо на найближче вільне місце, а не до дверей.
+    if (!geo.canStand(grid, body.x, body.y)) {
+      const free = nearestFree(body.x, body.y)
+      teleport(body, free.x, free.y)
+    }
     buildItems()
   }
 
+  /** Найближча точка, де можна стати (по спіралі клітинок), або точка входу в сцену. */
+  function nearestFree(x, y) {
+    for (let r = 1; r <= 8; r++)
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+          const px = x + dx * CELL
+          const py = y + dy * CELL
+          if (geo.canStand(grid, px, py)) return { x: px, y: py }
+        }
+    return scene.spawn
+  }
+
+  /**
+   * Куди можна підійти на острові: те, що стоїть завжди, будівлі, верстат і комора гравця, ресурси.
+   * Область тапу — прямокутник спрайта (тап по непрозорому пікселю дає точку арту в ньому).
+   */
+  function islandInteract() {
+    const out = [...INTERACT]
+    const boxOf = (p) => {
+      const f = frames[p.s]
+      return f ? [p.x - f.w / 2, p.y - f.h, f.w, f.h] : [p.x - 8, p.y - 16, 16, 16]
+    }
+    for (const p of list) {
+      if (p.building) out.push({ id: p.building, near: [p.x, p.y + 10], r: 22, box: boxOf(p) })
+      else if (p.uid && DECO_GEOM[p.kind]?.act) out.push({ id: `${DECO_GEOM[p.kind].act}:${p.uid}`, near: [p.x, p.y + 9], r: 16, box: boxOf(p) })
+      else if (p.node) {
+        const small = !NODE_GEOM[p.nodeKind]?.block
+        out.push({ id: `node:${p.node}`, node: true, near: [p.x, p.y + (small ? 2 : 9)], r: small ? 12 : 16, box: grow(boxOf(p), small ? 4 : 0) })
+      }
+    }
+    return out
+  }
+
+  /** Грядка за номером (з поточного поля) і грядка під точкою. */
+  const plotById = (i) => farmView?.find((v) => v.i === i) ?? null
+  function plotAt(x, y) {
+    for (const v of farmView ?? []) {
+      const [rx, ry, rw, rh] = plotRect(v)
+      if (x >= rx && x < rx + rw && y >= ry && y < ry + rh) return v.i
+    }
+    return -1
+  }
+
   /** Сік на зміни світу: новий предмет падає й «попає», прибраний — пуф, покращена будівля — поп. */
-  function celebrate(levels, chestOpen, deco) {
+  function celebrate(home, chestOpen, deco, nodes) {
+    const { levels } = home
     if (!scene.outdoor) return
+    if (prevNodes) {
+      // Ресурс зник — розсипався трісками/листям; новий — виріс із землі.
+      const now = new Set(nodes.map((n) => n.id))
+      for (const [id, n] of prevNodes)
+        if (!now.has(id)) {
+          const chips = CHIPS[n.k]
+          if (chips === 'leaf') particles.leaves(n.x, n.y - 6, 8)
+          else particles.dust(n.x, n.y - 2, 12, 1, chips === 'wood' ? [0.62, 0.45, 0.28] : [0.66, 0.63, 0.58])
+          particles.puff(n.x, n.y - 3, 6)
+        }
+      for (const n of nodes) if (!prevNodes.has(n.id)) juice.set(`node:${n.id}`, { t0: t, power: 0.8, drop: 0 })
+    }
+    prevNodes = new Map(nodes.map((n) => [n.id, n]))
     if (prevDeco) {
       const next = new Map(deco.map((d) => [d.id, d]))
       let kick = 0
@@ -689,13 +860,20 @@ export function createWalk(canvas, assets, cb) {
       if (kick) rig.addTrauma(kick)
     }
     if (prevLevels)
-      for (const id of Object.keys(levels))
-        if (levels[id] !== prevLevels[id]) {
-          juice.set(id, { t0: t, power: 1.2, drop: 0 })
-          const s = SPOTS[id]
+      for (const id of Object.keys(levels)) {
+        const s = home.pos?.[id] ?? SPOTS[id]
+        const was = prevPos?.[id]
+        const moved = s && was && (was.x !== s.x || was.y !== s.y)
+        if (levels[id] !== prevLevels[id] || moved) {
+          juice.set(PLACED_BUILDINGS.includes(id) ? `b:${id}` : id, { t0: t, power: moved ? 0.8 : 1.2, drop: moved || !prevLevels[id] ? 12 : 0 })
           if (s) particles.dust(s.x, s.y, 16, 2)
-          rig.addTrauma(0.25)
+          rig.addTrauma(moved ? 0.12 : 0.25)
+        } else if (prevLevels[id] > 0 && !levels[id] && was) {
+          particles.puff(was.x, was.y - 8, 16)
+          rig.addTrauma(0.1)
         }
+      }
+    prevPos = { ...home.pos }
     if (prevChest !== null && prevChest !== chestOpen) juice.set('chest', { t0: t, power: 1, drop: 0 })
     prevDeco = new Map(deco.map((d) => [d.id, d]))
     prevLevels = { ...levels }
@@ -721,10 +899,11 @@ export function createWalk(canvas, assets, cb) {
     prevInterior = new Map(interior.map((d) => [d.id, d]))
   }
 
-  function setWorld(levels, chestOpen, deco = [], interior = []) {
-    celebrate(levels, chestOpen, deco)
+  /** Стан острова: { home: { levels, pos }, chestOpen, deco, interior, nodes }. */
+  function setWorld({ home, chestOpen, deco = [], interior = [], nodes = [] }) {
+    celebrate(home, chestOpen, deco, nodes)
     celebrateInterior(interior)
-    world = { levels, chestOpen, deco, interior }
+    world = { home, chestOpen, deco, interior, nodes }
     rebuild()
     if (!dogPlaced) {
       dogPlaced = true
@@ -734,20 +913,26 @@ export function createWalk(canvas, assets, cb) {
 
   /** Поле змінилось (скопали, полили, виросло) — перебудувати й «попнути» змінені грядки. */
   function setFarm(view) {
-    const key = JSON.stringify(view.map((v) => [v.locked, v.tilled, v.wet, v.crop?.id ?? null, v.stage]))
+    const key = JSON.stringify(view.map((v) => [v.i, v.x, v.y, v.locked, v.tilled, v.wet, v.crop?.id ?? null, v.stage]))
     if (key === farmKey) return
-    const prev = farmView
+    const prev = farmView && new Map(farmView.map((v) => [v.i, v]))
     farmView = view
     farmKey = key
     if (prev && scene.outdoor)
       for (const v of view) {
-        const o = prev[v.i]
-        if (!o) continue
+        const o = prev.get(v.i)
+        if (!o) {
+          // Нова ділянка під грядку.
+          juice.set(`plot:${v.i}`, { t0: t, power: 0.8, drop: 0 })
+          particles.dust(v.x, v.y - 4, 10, 1, [0.45, 0.3, 0.18])
+          continue
+        }
+        if (o.x !== v.x || o.y !== v.y) juice.set(`plot:${v.i}`, { t0: t, power: 0.7, drop: 0 })
         const grew = o.crop && v.crop && v.stage > o.stage
         const planted = !o.crop && v.crop
         if (grew || planted || o.tilled !== v.tilled || o.locked !== v.locked) juice.set(`plot:${v.i}`, { t0: t, power: grew ? 0.9 : 0.6, drop: 0 })
         if (grew) {
-          const c = plotCenter(v.i)
+          const c = plotCenter(v)
           particles.leaves(c.x, c.y + 3, 4)
         }
       }
@@ -862,6 +1047,17 @@ export function createWalk(canvas, assets, cb) {
     }
     if (raycaster.ray.intersectPlane(groundPlane, hitPoint)) out.ground = { x: hitPoint.x, y: hitPoint.z }
     out.wall = scene.outdoor ? null : wallHit()
+    // Грядка під пальцем, але її заступає вищий спрайт перед нею (будівля, дерево) — грядка важливіша:
+    // вона маленька, а будівлю легко тапнути деінде.
+    if (best && scene.outdoor && out.ground) {
+      const i = plotAt(out.ground.x, out.ground.y)
+      const front = best.object.userData.item
+      if (i >= 0 && front.p.plot == null && front.p.y > plotById(i).y) {
+        out.plot = i
+        out.item = items.find((x) => x.flat && x.p.plot === i) ?? null
+        return out
+      }
+    }
     if (best) {
       const it = best.object.userData.item
       const { f, sheet } = frameOf(it.p.s)
@@ -943,37 +1139,52 @@ export function createWalk(canvas, assets, cb) {
   /** Геометрія привида: спрайт, чи лежить, чи висить. */
   function ghostGeom(kind) {
     if (scene.outdoor) {
-      const g = DECO_GEOM[kind]
+      const g = geomOf(kind, levelOf(kind))
       return g && { sprite: g.sprite, floor: !!g.floor, wall: false }
     }
     const g = INTERIOR_GEOM[kind]
     return g && { sprite: g.sprite, floor: g.layer === 'floor', wall: g.layer === 'wall' }
   }
   const footOf = (kind, x, y) => (scene.outdoor ? decoFootprint(kind, x, y) : interiorFootprint(kind, x, y))
+  /** Рівень будівлі «b:<id>» — щоб привид, який переносять, мав її справжній вигляд. */
+  const levelOf = (kind) => (kind?.startsWith('b:') ? world?.home.levels[kind.slice(2)] || 1 : 1)
   /** Місце привида як рядок — щоб знати, чи він зрушив. */
   const ghostKey = (g) => (g.wall ? `${g.wall}:${g.at}:${g.h}` : `${g.x},${g.y}`)
 
+  /**
+   * Чи можна поставити декор, будівлю чи грядку: на суші, не на зайнятому місці
+   * й так, щоб до хатинки, причалу, будівель і верстата лишався прохід.
+   * Дерева й каміння теж займають місце — спершу зрубай.
+   */
   function canPlace(kind, x, y, ignoreUid = null) {
-    const g = DECO_GEOM[kind]
+    const g = geomOf(kind, levelOf(kind))
     if (!g) return { ok: false, reason: 'Невідомий предмет' }
     const fp = decoFootprint(kind, x, y)
     const cells = geo.cellsOf(fp)
     if (!scene.outdoor || cells.some((c) => c < 0 || !land[c])) return { ok: false, reason: 'Тут будувати не можна' }
-    if (overlaps(fp, FIELD_RECT)) return { ok: false, reason: 'Тут город' }
     const others = list.filter((p) => !p.uid || p.uid !== ignoreUid)
     const busy = new Uint8Array(geo.cols * geo.rows)
+    let tree = false
     for (const p of others) {
-      for (const b of p.blocks ?? []) for (const c of geo.cellsOf(b)) if (c >= 0) busy[c] = 1
-      // Підлогу на підлогу не кладемо.
-      if (g.floor && p.uid && DECO_GEOM[p.kind]?.floor)
-        for (const c of geo.cellsOf(decoFootprint(p.kind, p.x, p.y))) if (c >= 0) busy[c] = 1
+      // Дрібниці на піску (мушля, корч) не заважають ходити, але місце під будівлю теж займають.
+      const nodeSpot = p.node && !p.blocks?.length ? [[p.x - 5, p.y - 5, 10, 5]] : []
+      for (const b of [...(p.blocks ?? []), ...nodeSpot]) {
+        const hit = geo.cellsOf(b).filter((c) => c >= 0)
+        for (const c of hit) busy[c] = 1
+        if (p.node && hit.some((c) => cells.includes(c))) tree = true
+      }
+      // Підлогу (настил, грядку) на підлогу не кладемо, а будівлю чи лавку — на грядку.
+      const floorish = p.occupies ?? (p.uid && DECO_GEOM[p.kind]?.floor ? [decoFootprint(p.kind, p.x, p.y)] : [])
+      for (const b of floorish) for (const c of geo.cellsOf(b)) if (c >= 0) busy[c] = 1
     }
-    if (cells.some((c) => busy[c])) return { ok: false, reason: 'Місце зайняте' }
+    if (cells.some((c) => busy[c])) return { ok: false, reason: tree ? 'Спершу розчисть місце' : 'Місце зайняте' }
     if (!g.floor) {
       const test = walkGrid(atlas.walk, [...others, { blocks: [fp] }])
       const me = geo.cellOf(body.x, body.y)
       if (!test[me]) return { ok: false, reason: 'Тут стоїть мандрівник' }
-      if (!geo.allReachable(test, me, interact)) return { ok: false, reason: 'Це перекриє прохід' }
+      // Ресурси не рахуємо: заросле дерево можна й зрубати.
+      const must = interact.filter((it) => !it.node && it.id !== ignoreUid?.slice(2) && !it.id.endsWith(`:${ignoreUid}`))
+      if (!geo.allReachable(test, me, must)) return { ok: false, reason: 'Це перекриє прохід' }
     }
     return { ok: true }
   }
@@ -1017,8 +1228,9 @@ export function createWalk(canvas, assets, cb) {
       return
     }
     if (g.startsWith('plot:')) {
-      const c = plotCenter(Number(g.slice(5)))
-      if (Math.hypot(body.x - c.x, body.y - c.y) <= 24) {
+      const v = plotById(Number(g.slice(5)))
+      const c = v && plotCenter(v)
+      if (c && Math.hypot(body.x - c.x, body.y - c.y) <= 24) {
         faceToward(c.x, c.y)
         near = g
         cb.onNear(g)
@@ -1045,7 +1257,7 @@ export function createWalk(canvas, assets, cb) {
 
   /** Куди стати, щоб працювати на грядці: на сусідній клітинці, переважно знизу (як у Stardew). */
   function plotStand(i) {
-    const c = plotCenter(i)
+    const c = plotCenter(plotById(i))
     for (const [dx, dy] of [[0, 12], [0, -12], [-12, 0], [12, 0], [0, 0]]) if (geo.canStand(grid, c.x + dx, c.y + dy)) return { x: c.x + dx, y: c.y + dy }
     return c
   }
@@ -1071,9 +1283,9 @@ export function createWalk(canvas, assets, cb) {
       }
       return
     }
-    if (p.plot != null) {
+    if (p.plot != null && plotById(p.plot)) {
       const id = `plot:${p.plot}`
-      const c = plotCenter(p.plot)
+      const c = plotCenter(plotById(p.plot))
       if (Math.hypot(body.x - c.x, body.y - c.y) <= 20) {
         path = []
         goal = null
@@ -1339,7 +1551,7 @@ export function createWalk(canvas, assets, cb) {
         let pi = plotAt(body.x + face.x * 10, body.y + face.y * 10)
         if (pi < 0) pi = plotAt(body.x, body.y)
         if (pi >= 0) {
-          const c = plotCenter(pi)
+          const c = plotCenter(plotById(pi))
           const d = Math.hypot(body.x - c.x, body.y - c.y) * 0.7
           if (d < bestD) {
             found = `plot:${pi}`
@@ -1436,18 +1648,23 @@ export function createWalk(canvas, assets, cb) {
         else particles.fire(p.x, p.y, p.z)
       }
     }
+    skyStep(dt)
     particles.update(dt)
 
-    // Вогні: маяк, ліхтарі на причалі й декор гравця.
+    // Вогні: маяк, ліхтарі на причалі й декор гравця. Уночі — яскравіші й ширші.
+    const glowBoost = 1 + skyNow.night * 0.8
     for (const { l, sprite } of glows) {
       sprite.visible = !(l.uid && ghost?.uid === l.uid)
       anchored(l, sprite.position)
       const pulse = l.warm ? 0.8 + Math.sin(t * 11 + l.ax) * 0.12 + Math.sin(t * 17) * 0.08 : 0.75 + Math.sin(t * 3 + l.ax) * 0.25
-      sprite.material.opacity = 0.55 * pulse
+      sprite.material.opacity = Math.min(1, 0.55 * pulse * glowBoost) * (l.night ? skyNow.night : 1)
+      const r = l.r * 2 * (1 + skyNow.night * 0.45)
+      sprite.scale.set(r, r, 1)
     }
     if (beam) {
       anchored(beam.userData.l, beam.position)
       beam.rotation.y = -t * 1.2
+      beam.material.opacity = 0.6 + skyNow.night * 0.4
     }
 
     // Вода, прибій і тіні хмар — лише надворі.
@@ -1465,8 +1682,9 @@ export function createWalk(canvas, assets, cb) {
     else selFoot.group.visible = false
 
     // Рамка грядки, з якою працюватимеш.
-    if (mode === 'walk' && scene.outdoor && near?.startsWith('plot:')) {
-      const r = plotRect(Number(near.slice(5)))
+    const nearPlot = mode === 'walk' && scene.outdoor && near?.startsWith('plot:') ? plotById(Number(near.slice(5))) : null
+    if (nearPlot) {
+      const r = plotRect(nearPlot)
       const pulse = 0.65 + Math.sin(t * 5) * 0.2
       plotFoot.set([r[0] + 0.5, r[1] + 0.5, r[2] - 1, r[3] - 1], 0xfff3b0, 0.1 * pulse, 0xfff7c8, pulse)
     } else plotFoot.group.visible = false
@@ -1620,6 +1838,10 @@ export function createWalk(canvas, assets, cb) {
     zoom(f) {
       rig.zoomBy(f)
     },
+    /** Перевести камеру на точку острова (у будівництві — показати вибрану будівлю). */
+    lookAt(p) {
+      if (p) rig.pan(p.x - rig.focus.x, p.y - 24 - rig.focus.y)
+    },
     /** Підлога хатинки { p, c } — збережена або прев'ю з панелі «Облаштувати». */
     setFloor(f) {
       showFloor(f)
@@ -1659,9 +1881,18 @@ export function createWalk(canvas, assets, cb) {
     },
     /** Поле з fieldView(): грядки, рослини, бур'ян. */
     setFarm,
+    /** Небо зі skyAt() (sky.js): перший раз — одразу, далі зміна тягнеться кілька секунд. */
+    setSky(s) {
+      const first = !skyWant
+      skyWant = { tint: [...s.tint], night: s.night, clouds: s.clouds, rain: s.rain, fog: s.fog }
+      storm = s.storm
+      if (first) Object.assign(skyNow, { ...skyWant, tint: [...s.tint] })
+    },
     /** Сік дії на грядці: пил, листя, бризки, інструмент над головою. */
     farmFx(i, kind) {
-      const c = plotCenter(i)
+      const v = plotById(i)
+      if (!v) return
+      const c = plotCenter(v)
       if (kind === 'till') {
         particles.dust(c.x, c.y + 4, 12, 1.1, [0.45, 0.3, 0.18])
         rig.addTrauma(0.06)
@@ -1683,18 +1914,60 @@ export function createWalk(canvas, assets, cb) {
         toolAt = t
       }
     },
+    /**
+     * Добування ресурсу: мандрівник стає лицем до нього й робить hits замахів (тріски, листя,
+     * кам'яний пил, легка тряска). Повертає Promise, що завершиться разом з останнім замахом.
+     * tool — 'axe' | 'pickaxe' | 'hand' (емодзі над головою).
+     */
+    gatherFx(nodeId, hits, tool) {
+      const n = world?.nodes.find((q) => q.id === nodeId)
+      if (!n) return Promise.resolve()
+      path = []
+      goal = null
+      markerAt = null
+      faceToward(n.x, n.y)
+      const chips = CHIPS[n.k]
+      const swing = () => {
+        juice.set(`node:${nodeId}`, { t0: t, power: 0.45, drop: 0 })
+        if (chips === 'wood') particles.dust(n.x, n.y - 6, 7, 0.9, [0.72, 0.52, 0.3])
+        else if (chips === 'leaf') particles.leaves(n.x, n.y - 6, 4)
+        else particles.dust(n.x, n.y - 3, 8, 0.8, [0.7, 0.67, 0.62])
+        rig.addTrauma(tool === 'hand' ? 0.03 : 0.08)
+        const emoji = TOOL_EMOJI[tool] ?? TOOL_EMOJI.hand
+        if (!bubbleTex.has(emoji)) bubbleTex.set(emoji, bubbleTexture(emoji))
+        toolSprite.material.map = bubbleTex.get(emoji)
+        toolSprite.material.needsUpdate = true
+        toolAt = t
+      }
+      const gap = tool === 'hand' ? 220 : 330
+      return new Promise((resolve) => {
+        let k = 0
+        const step = () => {
+          swing()
+          if (++k >= hits) setTimeout(resolve, 120)
+          else setTimeout(step, gap)
+        }
+        step()
+      })
+    },
     /** Де на екрані (clientX/Y) точка світу — для тестів і підказок поверх канви. */
     screenOf(x, y, h = 0) {
       const v = new THREE.Vector3(x, h, y).project(camera)
       const r = canvas.getBoundingClientRect()
       return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height }
     },
+    /** Що під точкою екрана (для тестів): спрайт, грядка, точка арту й землі. */
+    probe(clientX, clientY) {
+      const p = pick(clientX, clientY)
+      const hit = interact.find((it) => inBox(p.art, it.box)) ?? interact.find((it) => inBox(p.ground, it.box))
+      return { sprite: p.item?.p.s ?? null, plot: p.plot, art: p.art, ground: p.ground, hit: hit?.id ?? null }
+    },
     /** Знімок стану для тестів і налагодження (лише читання). */
     debug() {
       const dogsInfo = Object.fromEntries(
         dogs.map((d) => [d.id, { x: d.body.x, y: d.body.y, state: d.state, mode: d.mode, scene: d.sceneId, visible: d.visible, dist: dogDist(d) }])
       )
-      return { player: { x: body.x, y: body.y }, dogs: dogsInfo, near, mode, scene: scene.id }
+      return { player: { x: body.x, y: body.y }, dogs: dogsInfo, near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count }
     },
     destroy() {
       renderer.setAnimationLoop(null)

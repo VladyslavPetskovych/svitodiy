@@ -14,6 +14,7 @@ import { FLOOR, HOME_MAP, homePlacements } from '../src/game/walk/home.js'
 import { farmArt } from './farm-art.mjs'
 import { homeArt } from './home-art.mjs'
 import { decorArt } from './decor-art.mjs'
+import { modernArt } from './modern-art.mjs'
 import { floorSheet } from './floor-art.mjs'
 import { BEDS, BOARDWALK, CELL, INTERACT, LAND, MAP, PATH, PIER, PLAZA, RESERVED, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
@@ -2981,6 +2982,7 @@ function buildSprites(farm, room) {
     ...farm.sprites,
     ...room.sprites,
     ...decorArt({ Img }),
+    ...modernArt({ Img }),
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)

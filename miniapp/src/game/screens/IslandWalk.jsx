@@ -72,6 +72,7 @@ const CATS_HOME = [
   { value: 'kitchen', label: '🍲 Кухня' },
   { value: 'textile', label: '🧶 Килими' },
   { value: 'wall', label: '🖼 Стіни' },
+  { value: 'modern', label: '✨ Модерн' },
   { value: 'floor', label: '🟫 Підлога' },
 ]
 

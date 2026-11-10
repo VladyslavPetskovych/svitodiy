@@ -106,7 +106,7 @@ function effectsFor(home, deco) {
   // Вікна хатинки (пікселі з house_N у sprites.png): світяться лише вночі.
   const house = Math.max(1, levels.house)
   const windows = [[-19, -23], ...(house >= 2 ? [[20, -23]] : []), ...(house >= 3 ? [[0.5, -54]] : [])]
-  for (const [dx, dy] of windows) lights.push(at(h.x, h.y, h.x + dx, h.y + dy, { r: dy < -40 ? 8 : 10, warm: true, night: true }))
+  for (const [dx, dy] of windows) lights.push(at(h.x, h.y, h.x + dx, h.y + dy, { r: dy < -40 ? 8 : 10, warm: true, night: true, power: 0.5 }))
   const lamp = LIGHTHOUSE_LAMP[levels.lighthouse]
   if (lamp && l) lights.push(at(l.x, l.y, l.x + lamp[0], l.y + lamp[1], { r: 16 + levels.lighthouse * 6, beam: levels.lighthouse >= 3, uid: 'b:lighthouse' }))
   if (levels.pier >= 2) for (const dx of [-15, 15]) lights.push(at(PIER.x + dx, 372, PIER.x + dx, 357, { r: 9 }))
@@ -114,7 +114,7 @@ function effectsFor(home, deco) {
   const sprays = []
   for (const d of deco) {
     const g = DECO_GEOM[d.k]
-    if (g?.light) lights.push(at(d.x, d.y, d.x, d.y + g.light.dy, { r: g.light.r, uid: d.id, warm: g.fire }))
+    if (g?.light) lights.push(at(d.x, d.y, d.x, d.y + g.light.dy, { r: g.light.r, uid: d.id, warm: g.fire, flicker: g.fire }))
     if (g?.fire) fires.push(at(d.x, d.y, d.x, d.y - 5, { uid: d.id }))
     if (g?.spray) sprays.push(at(d.x, d.y, d.x, d.y - 9, { uid: d.id }))
   }
@@ -364,24 +364,76 @@ export function createWalk(canvas, assets, cb) {
     return m
   })
 
+  /* ───── Світло: карта освітлення ─────
+   * Кожен кадр спершу малюємо світло в маленьку текстуру (у LIGHT_DOWN разів менша за кадр —
+   * світло м'яке, різниці не видно, а пікселів у 16 разів менше): заливаємо її кольором неба
+   * (ambient), а зверху додаємо плями від ламп — на підлозі, на стінах і «об'єм» довкола самої
+   * лампи (він освітлює меблі, мандрівника й псів поруч). Потім один повноекранний квад множить
+   * на цю карту все, що намальовано до нього, — тож лампа справді освітлює кімнату довкола,
+   * а не лише світиться сама. Значення в карті — половинні (0…1 ↔ 0…2): так світло може не лише
+   * затемнювати, а й висвітлювати, і для цього вистачає звичайної 8-бітної текстури (працює всюди).
+   */
+  const LIGHT_DOWN = 4
+  const lightRT = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false, generateMipmaps: false })
+  const lightScene = new THREE.Scene()
+  const lightVert = /* glsl */ `varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`
+  // Плавний спад до краю (1 − d²)²: яскраво біля лампи, без різкої межі.
+  const lightFrag = /* glsl */ `varying vec2 vUv; uniform vec3 color;
+    void main() {
+      vec2 p = vUv * 2.0 - 1.0;
+      float d = dot(p, p);
+      if (d >= 1.0) discard;
+      float f = 1.0 - d;
+      gl_FragColor = vec4(color * (f * f * 0.5), 1.0);
+    }`
+  const lightMat = () =>
+    new THREE.ShaderMaterial({
+      uniforms: { color: { value: new THREE.Vector3() } },
+      vertexShader: lightVert,
+      fragmentShader: lightFrag,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+  const lightQuad = new THREE.PlaneGeometry(1, 1)
+  /** Колір світла лампи для карти — сирі значення hex (як і колір неба), без перетворень простору кольорів. */
+  const lightTone = (l) => {
+    const n = parseInt((l.color ?? (l.warm ? '#ffd2a0' : '#ffeeb8')).slice(1), 16)
+    return new THREE.Vector3(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255)
+  }
+  const ambient = new THREE.Color()
+  const savedClear = new THREE.Color()
+
   /* ───── Небо: колір доби й погоди поверх світу (sky.js) ─────
    * Повноекранний квад множить усе, що намальовано до нього (renderOrder ≤ 2: земля, спрайти,
-   * мандрівник, пси), на колір неба. Вогні (6), вогонь і бульбашки малюються пізніше — тож
-   * уночі вони яскраві на темному тлі. Другий квад — серпанок туману й спалах блискавки.
+   * мандрівник), на карту світла: колір неба плюс лампи. Ореоли вогнів (6), вогонь і бульбашки
+   * малюються пізніше — тож уночі вони яскраві на темному тлі. Другий квад — серпанок туману
+   * й спалах блискавки.
    */
   const screenQuad = new THREE.PlaneGeometry(2, 2)
   const screenVert = /* glsl */ `void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`
+  // Змішування dst·src + src·dst = 2·src·dst — половинні значення карти стають множником 0…2.
+  // (Значення в карті понад 1 впираються в межу 8 біт; «коліно» нижче стискає їх ще до того.)
   const tintMat = new THREE.ShaderMaterial({
-    uniforms: { color: { value: new THREE.Vector3(1, 1, 1) } },
+    uniforms: { lightMap: { value: lightRT.texture }, res: { value: new THREE.Vector2(1, 1) } },
     vertexShader: screenVert,
-    fragmentShader: /* glsl */ `uniform vec3 color; void main() { gl_FragColor = vec4(color, 1.0); }`,
+    fragmentShader: /* glsl */ `uniform sampler2D lightMap; uniform vec2 res;
+      void main() {
+        // М'яке «коліно» над 1: кілька ламп поруч не випалюють кімнату в біле (межа ~×1.45).
+        vec3 L = texture2D(lightMap, gl_FragCoord.xy / res).rgb * 2.0;
+        vec3 over = max(L - 1.0, 0.0);
+        L = min(L, 1.0) + over / (1.0 + over * 1.8);
+        gl_FragColor = vec4(L * 0.5, 1.0);
+      }`,
     transparent: true,
     depthTest: false,
     depthWrite: false,
     blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation,
     blendSrc: THREE.DstColorFactor,
-    blendDst: THREE.ZeroFactor,
+    blendDst: THREE.SrcColorFactor,
   })
   const veilMat = new THREE.ShaderMaterial({
     uniforms: { color: { value: new THREE.Vector3(1, 1, 1) }, alpha: { value: 0 } },
@@ -401,6 +453,8 @@ export function createWalk(canvas, assets, cb) {
   const INDOOR_NIGHT = [0.68, 0.58, 0.6]
   /** Що показуємо зараз (плавно тягнеться до skyWant). */
   const skyNow = { tint: [1, 1, 1], night: 0, clouds: 0.12, rain: 0, fog: 0 }
+  /** Чи небо щось фарбує (інакше, без ламп, карту світла можна не малювати зовсім). */
+  let skyLit = false
   let skyWant = null
   let storm = false
   let flash = 0
@@ -428,8 +482,9 @@ export function createWalk(canvas, assets, cb) {
     const fl = out ? flash * flash : 0
     for (let i = 0; i < 3; i++) tint[i] += (1 - tint[i]) * fl * 0.7
 
-    tintMat.uniforms.color.value.set(tint[0], tint[1], tint[2])
-    tintQuad.visible = tint.some((v) => v < 0.995)
+    // Тло карти світла (половинні значення — див. «Світло: карта освітлення»).
+    ambient.setRGB(tint[0] * 0.5, tint[1] * 0.5, tint[2] * 0.5, THREE.LinearSRGBColorSpace)
+    skyLit = tint.some((v) => v < 0.995)
     const fogA = out ? skyNow.fog : 0
     const flashA = fl * 0.35
     if (flashA > fogA) veilMat.uniforms.color.value.set(1, 1, 1)
@@ -812,6 +867,10 @@ export function createWalk(canvas, assets, cb) {
     for (const g of glows) {
       scene3.remove(g.sprite)
       g.sprite.material.dispose()
+      for (const m of g.lit) {
+        lightScene.remove(m)
+        m.material.dispose()
+      }
     }
     if (beam) {
       scene3.remove(beam)
@@ -843,13 +902,31 @@ export function createWalk(canvas, assets, cb) {
       scene3.add(mesh)
     }
     for (const l of fx.lights) {
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: glowTex, color: l.warm ? 0xffaa50 : 0xffe68c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
-      )
+      const hue = new THREE.Color(l.color ?? (l.warm ? '#ffaa50' : '#ffe68c'))
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: hue, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }))
       sprite.scale.set(l.r * 2, l.r * 2, 1)
       sprite.renderOrder = 6
       scene3.add(sprite)
-      glows.push({ l, sprite })
+      // Освітлення в карті світла: пляма на підлозі, «об'єм» довкола лампи, у хаті — ще й на стінах.
+      const tone = lightTone(l)
+      const mk = (geo) => {
+        const m = new THREE.Mesh(geo, lightMat())
+        m.frustumCulled = false
+        lightScene.add(m)
+        return m
+      }
+      const pool = mk(unitPlane)
+      const volume = mk(lightQuad)
+      const washes = scene.outdoor
+        ? []
+        : walls
+            .filter((w) => w.id !== 'front')
+            .map((w) => {
+              const m = mk(lightQuad)
+              m.rotation.y = w.rot
+              return { w, m }
+            })
+      glows.push({ l, sprite, tone, pool, volume, washes, lit: [pool, volume, ...washes.map((x) => x.m)] })
       if (l.beam) {
         const bg = new THREE.BufferGeometry()
         bg.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 90, 0, -10, 90, 0, 10], 3))
@@ -1132,6 +1209,8 @@ export function createWalk(canvas, assets, cb) {
     rig.setAspect(w / h)
     const size = renderer.getDrawingBufferSize(new THREE.Vector2())
     particles.setScale(size.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))))
+    lightRT.setSize(Math.max(1, Math.ceil(size.x / LIGHT_DOWN)), Math.max(1, Math.ceil(size.y / LIGHT_DOWN)))
+    tintMat.uniforms.res.value.copy(size)
   }
 
   /* ───── Вибір того, що під пальцем ───── */
@@ -1652,6 +1731,93 @@ export function createWalk(canvas, assets, cb) {
     return out.set(e.ax, 0, e.ay).addScaledVector(camRight, e.dx).addScaledVector(camUp, e.h)
   }
 
+  /** Де світить лампа: речі на стіні — нерухома точка у світі, решта — від якоря білборда. */
+  function lightAt(l, out) {
+    return l.wall ? out.set(l.wx, l.wy, l.wz) : anchored(l, out)
+  }
+
+  const lampPos = new THREE.Vector3()
+  /** Скільки ламп зараз щось освітлюють (0 — карту світла можна не малювати). */
+  let litCount = 0
+
+  /**
+   * Вогні й освітлення: маяк, ліхтарі, вогнища надворі; піч, лампи, екрани й неон у хаті.
+   * Удень світло ледь помітне (у хаті — тепла пляма, надворі — майже нічого), уночі — на повну.
+   */
+  function updateLights() {
+    const n = skyNow.night
+    const out = scene.outdoor
+    const strength = out ? (0.04 + 0.96 * n) * 0.6 : 0.16 + 0.54 * n
+    const glowBoost = 1 + n * 0.8
+    litCount = 0
+    for (const g of glows) {
+      const { l, sprite } = g
+      const hidden = (l.uid && ghost?.uid === l.uid) || (l.wall && !wallShown[l.wall])
+      // Вогонь і свічки мерехтять, електрика світить рівно, маяк — дихає.
+      const flick = l.flicker ? 0.86 + Math.sin(t * 11 + (l.ax ?? l.wx)) * 0.08 + Math.sin(t * 17.3) * 0.06 : 1
+      const pulse = l.flicker ? flick : l.warm ? 0.92 : 0.75 + Math.sin(t * 3 + (l.ax ?? 0)) * 0.25
+      const on = (l.night ? n : 1) * (hidden ? 0 : 1)
+
+      lightAt(l, lampPos)
+      sprite.visible = on > 0
+      sprite.position.copy(lampPos)
+      // Ореол — лише «сяйво» самої лампи; світить довкола вже карта світла, тож у хаті він скромніший.
+      sprite.material.opacity = Math.min(1, (out ? 0.55 : 0.35) * pulse * glowBoost) * on
+      const r = l.r * (out ? 2 : 1.5) * (1 + n * 0.45)
+      sprite.scale.set(r, r, 1)
+
+      const power = (l.power ?? 1) * strength * flick * on
+      const reach = l.r * (out ? 1.8 + n * 0.4 : 2.6)
+      const live = power > 0.05 // удень надворі ліхтарі не світять — і карту світла не малюємо
+      for (const m of g.lit) m.visible = false
+      if (!live) continue
+      litCount++
+      // Пляма на підлозі — під лампою (у тій самій точці, що й білборд, але на землі).
+      g.pool.visible = true
+      g.pool.material.uniforms.color.value.copy(g.tone).multiplyScalar(power)
+      if (l.wall) g.pool.position.set(l.wx, 0.05, l.wz)
+      else g.pool.position.set(l.ax + camRight.x * l.dx, 0.05, l.ay + camRight.z * l.dx)
+      const pr = reach * (1 + Math.min(lampPos.y, 40) / 80) // з висоти світло розходиться ширше
+      g.pool.scale.set(pr * 2, 1, pr * 2)
+      // «Об'єм»: коло довкола самої лампи — освітлює меблі, мандрівника й псів поруч.
+      g.volume.visible = true
+      g.volume.material.uniforms.color.value.copy(g.tone).multiplyScalar(power * 0.45)
+      g.volume.position.copy(lampPos)
+      g.volume.quaternion.copy(camera.quaternion)
+      g.volume.scale.set(reach * 1.6, reach * 1.6, 1)
+      // Стіни: світла пляма там, куди дістає лампа, — менша й тьмяніша, що далі стіна.
+      for (const { w, m } of g.washes) {
+        if (!wallShown[w.id]) continue
+        const dist = (lampPos.x - w.at[0]) * w.n[0] + (lampPos.z - w.at[1]) * w.n[1]
+        if (dist >= reach) continue
+        const rr = Math.sqrt(reach * reach - dist * dist)
+        m.visible = true
+        m.material.uniforms.color.value.copy(g.tone).multiplyScalar(power * (1 - dist / reach) * 0.55)
+        m.position.set(lampPos.x - w.n[0] * (dist - 0.4), lampPos.y, lampPos.z - w.n[1] * (dist - 0.4))
+        m.scale.set(rr * 2, rr * 2, 1)
+      }
+    }
+    if (beam) {
+      anchored(beam.userData.l, beam.position)
+      beam.rotation.y = -t * 1.2
+      beam.material.opacity = 0.6 + n * 0.4
+    }
+  }
+
+  /** Карта світла: тло — колір неба, зверху — лампи. Без ламп і з ясним небом — не малюємо нічого. */
+  function renderLights() {
+    tintQuad.visible = skyLit || litCount > 0
+    if (!tintQuad.visible) return
+    renderer.getClearColor(savedClear)
+    const savedAlpha = renderer.getClearAlpha()
+    renderer.setRenderTarget(lightRT)
+    renderer.setClearColor(ambient, 1)
+    if (litCount > 0) renderer.render(lightScene, camera)
+    else renderer.clear(true, false, false)
+    renderer.setRenderTarget(null)
+    renderer.setClearColor(savedClear, savedAlpha)
+  }
+
   function update(dt) {
     input.poll()
     if (input.take('zoomIn', 0.2)) rig.zoomBy(0.85)
@@ -1792,21 +1958,7 @@ export function createWalk(canvas, assets, cb) {
     skyStep(dt)
     particles.update(dt)
 
-    // Вогні: маяк, ліхтарі на причалі й декор гравця. Уночі — яскравіші й ширші.
-    const glowBoost = 1 + skyNow.night * 0.8
-    for (const { l, sprite } of glows) {
-      sprite.visible = !(l.uid && ghost?.uid === l.uid)
-      anchored(l, sprite.position)
-      const pulse = l.warm ? 0.8 + Math.sin(t * 11 + l.ax) * 0.12 + Math.sin(t * 17) * 0.08 : 0.75 + Math.sin(t * 3 + l.ax) * 0.25
-      sprite.material.opacity = Math.min(1, 0.55 * pulse * glowBoost) * (l.night ? skyNow.night : 1)
-      const r = l.r * 2 * (1 + skyNow.night * 0.45)
-      sprite.scale.set(r, r, 1)
-    }
-    if (beam) {
-      anchored(beam.userData.l, beam.position)
-      beam.rotation.y = -t * 1.2
-      beam.material.opacity = 0.6 + skyNow.night * 0.4
-    }
+    updateLights()
 
     // Вода, прибій і тіні хмар — лише надворі.
     if (scene.outdoor) {
@@ -1903,6 +2055,7 @@ export function createWalk(canvas, assets, cb) {
     const dt = Math.min(Math.max(timer.getDelta(), 0), 0.1)
     t += dt
     update(dt)
+    renderLights()
     renderer.render(scene3, camera)
   })
 
@@ -2161,6 +2314,9 @@ export function createWalk(canvas, assets, cb) {
       })
       for (const m of [...Object.values(sheetMats), ...Object.values(ghostMats)]) m.dispose() // і ті, якими цього разу не малювали
       for (const tex of [glowTex, blobTex, beamTex, gridTex, foamTex]) tex.dispose()
+      lightScene.traverse((o) => o.material?.dispose())
+      lightQuad.dispose()
+      lightRT.dispose()
       for (const name of ASSETS) assets[name].dispose()
       renderer.dispose()
     },

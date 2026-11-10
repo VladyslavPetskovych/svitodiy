@@ -7,13 +7,15 @@ import { DOG_SPOT, FLOOR, HOME_EXIT, WALL_H } from './home.js'
  * Пісочниця в хатинці: геометрія речей, які гравець сам розставляє (назви, ціни й рівні — з сервера,
  * catalog.interior). layer: 'obj' — стоїть на підлозі (заважає ходити), 'floor' — лежить (килими,
  * по них ходять), 'wall' — висить на стіні. fw × fh — «ніжки» у клітинках сітки підлоги.
- * act — що робить річ (підійти й натиснути): ліжко, піч, полиця; light — світло { dx, h, r }
- * відносно якоря; dogBed — тут сплять пси, яким сказали «Додому».
+ * act — що робить річ (підійти й натиснути): ліжко, піч, полиця; dogBed — тут сплять пси, яким сказали «Додому».
+ * light — світло (або lights — кілька): { dx, h, r, color?, flicker?, power? } відносно якоря спрайта
+ * (у речі на стіні — відносно середини її низу): r — розмір ореолу, освітлює ~2.5·r довкола;
+ * color — колір світла (типово тепле), flicker — мерехтить, як вогонь.
  */
 export const INTERIOR_GEOM = {
   // Колись постійні меблі — тепер такі самі речі.
   bed: { sprite: 'home_bed', layer: 'obj', fw: 4, fh: 5, act: 'bed', label: 'Ліжко' },
-  stove: { sprite: 'home_stove', layer: 'obj', fw: 6, fh: 5, act: 'stove', label: 'Піч', light: { dx: -11, h: 8, r: 26 } },
+  stove: { sprite: 'home_stove', layer: 'obj', fw: 6, fh: 5, act: 'stove', label: 'Піч', light: { dx: -11, h: 8, r: 26, flicker: true } },
   table: { sprite: 'home_table', layer: 'obj', fw: 4, fh: 2 },
   lamp_table: { sprite: 'home_table_3', layer: 'obj', fw: 4, fh: 2, light: { dx: 13, h: 19, r: 18 } },
   stool: { sprite: 'home_stool', layer: 'obj', fw: 1, fh: 1 },
@@ -50,7 +52,7 @@ export const INTERIOR_GEOM = {
   rushnyk: { sprite: 'home_rushnyk', layer: 'wall' },
   photos: { sprite: 'home_photos', layer: 'wall' },
   clock: { sprite: 'home_clock', layer: 'wall' },
-  icon: { sprite: 'home_icon', layer: 'wall' },
+  icon: { sprite: 'home_icon', layer: 'wall', light: { dx: 0, h: 6, r: 9, flicker: true, power: 0.6 } },
   wreath: { sprite: 'home_wreath', layer: 'wall' },
   kobza: { sprite: 'home_kobza', layer: 'wall' },
   mirror: { sprite: 'home_mirror', layer: 'wall' },
@@ -72,12 +74,12 @@ export const INTERIOR_GEOM = {
   kilim: { sprite: 'hd_kilim', layer: 'floor', fw: 4, fh: 3 },
   plates: { sprite: 'hd_plates', layer: 'wall' },
   violin: { sprite: 'hd_violin', layer: 'wall' },
-  candle_shelf: { sprite: 'hd_candle_shelf', layer: 'wall' },
+  candle_shelf: { sprite: 'hd_candle_shelf', layer: 'wall', light: { dx: 0, h: 10, r: 14, flicker: true, power: 0.8 } },
   embroidery: { sprite: 'hd_embroidery', layer: 'wall' },
   island_map: { sprite: 'hd_island_map', layer: 'wall' },
   pike_trophy: { sprite: 'hd_pike_trophy', layer: 'wall' },
   horseshoe: { sprite: 'hd_horseshoe', layer: 'wall' },
-  wall_lamp: { sprite: 'hd_wall_lamp', layer: 'wall' },
+  wall_lamp: { sprite: 'hd_wall_lamp', layer: 'wall', light: { dx: 0, h: 11, r: 18, flicker: true } },
   // Ще партія від локальної моделі (scripts/sd-home-items.mjs → art/home-ai → home-decor.png).
   bookcase: { sprite: 'hd_bookcase', layer: 'obj', fw: 3, fh: 1, act: 'shelf', label: 'Книжкова шафа' },
   easel: { sprite: 'hd_easel', layer: 'obj', fw: 2, fh: 1 },
@@ -94,6 +96,43 @@ export const INTERIOR_GEOM = {
   life_ring: { sprite: 'hd_life_ring', layer: 'wall' },
   sea_painting: { sprite: 'hd_sea_painting', layer: 'wall' },
   ship_bottle: { sprite: 'hd_ship_bottle', layer: 'obj', fw: 2, fh: 1 },
+  // Сучасна колекція (scripts/modern-art.mjs). Лампи, екрани, неон і гірлянди світять.
+  arc_lamp: { sprite: 'hd_arc_lamp', layer: 'obj', fw: 2, fh: 1, light: { dx: 8, h: 27, r: 26, color: '#ffd6a0' } },
+  sofa_modern: { sprite: 'hd_sofa_modern', layer: 'obj', fw: 5, fh: 2 },
+  coffee_table: { sprite: 'hd_coffee_table', layer: 'obj', fw: 4, fh: 1 },
+  tv_console: { sprite: 'hd_tv_console', layer: 'obj', fw: 5, fh: 1, light: { dx: 0, h: 27, r: 20, color: '#9cc4ff', power: 0.75 } },
+  monstera: { sprite: 'hd_monstera', layer: 'obj', fw: 2, fh: 1 },
+  snake_plant: { sprite: 'hd_snake_plant', layer: 'obj', fw: 1, fh: 1 },
+  fridge: { sprite: 'hd_fridge', layer: 'obj', fw: 3, fh: 1 },
+  kitchen: { sprite: 'hd_kitchen', layer: 'obj', fw: 5, fh: 1, act: 'stove', label: 'Кухня' },
+  platform_bed: { sprite: 'hd_platform_bed', layer: 'obj', fw: 5, fh: 4, act: 'bed', label: 'Ліжко' },
+  cube_shelf: { sprite: 'hd_cube_shelf', layer: 'obj', fw: 4, fh: 1, act: 'shelf', label: 'Стелаж із книжками' },
+  lounge_chair: { sprite: 'hd_lounge_chair', layer: 'obj', fw: 3, fh: 1 },
+  bean_bag: { sprite: 'hd_bean_bag', layer: 'obj', fw: 2, fh: 1 },
+  side_lamp: { sprite: 'hd_side_lamp', layer: 'obj', fw: 2, fh: 1, light: { dx: 0, h: 22, r: 20, color: '#ffd09a' } },
+  desk_setup: {
+    sprite: 'hd_desk_setup', layer: 'obj', fw: 5, fh: 1,
+    lights: [{ dx: -12, h: 29, r: 16, color: '#ffe0b0' }, { dx: 0, h: 29, r: 12, color: '#a8c8ff', power: 0.55 }],
+  },
+  cat_tree: { sprite: 'hd_cat_tree', layer: 'obj', fw: 3, fh: 1 },
+  dining_set: { sprite: 'hd_dining_set', layer: 'obj', fw: 5, fh: 2 },
+  record_player: { sprite: 'hd_record_player', layer: 'obj', fw: 3, fh: 1 },
+  fireplace: { sprite: 'hd_fireplace', layer: 'obj', fw: 4, fh: 1, light: { dx: 0, h: 11, r: 30, flicker: true, color: '#ffb466' } },
+  robot_vacuum: { sprite: 'hd_robot_vacuum', layer: 'obj', fw: 1, fh: 1 },
+  geo_rug: { sprite: 'hd_geo_rug', layer: 'floor', fw: 6, fh: 4 },
+  shag_rug: { sprite: 'hd_shag_rug', layer: 'floor', fw: 5, fh: 3 },
+  neon_sign: { sprite: 'hd_neon_sign', layer: 'wall', light: { dx: 0, h: 10, r: 20, color: '#ff78c8', power: 0.85 } },
+  fairy_lights: {
+    sprite: 'hd_fairy_lights', layer: 'wall',
+    lights: [-20, 0, 20].map((dx) => ({ dx, h: 8, r: 15, color: '#ffe2a0', power: 0.7 })),
+  },
+  abstract_art: { sprite: 'hd_abstract_art', layer: 'wall' },
+  gallery: { sprite: 'hd_gallery', layer: 'wall' },
+  float_shelf: { sprite: 'hd_float_shelf', layer: 'wall' },
+  round_mirror: { sprite: 'hd_round_mirror', layer: 'wall' },
+  sconce: { sprite: 'hd_sconce', layer: 'wall', light: { dx: 0, h: 13, r: 22, color: '#ffe0b0' } },
+  clock_modern: { sprite: 'hd_clock_modern', layer: 'wall' },
+  macrame: { sprite: 'hd_macrame', layer: 'wall' },
 }
 
 /** Розмір спрайта речі (px світу). */
@@ -155,12 +194,32 @@ export function interiorInteract(interior = []) {
   return list
 }
 
-/** Світло від речей у хаті (піч, лампа на столі) — у форматі ефектів рушія. */
+/** Відступ світла від площини стіни в кімнату (px світу) — щоб ореол не різала стіна. */
+const WALL_GAP = 3
+
+/**
+ * Світло від речей у хаті (піч, лампи, екрани, неон…) — у форматі ефектів рушія.
+ * Речі на підлозі — білборди: світло прив'язане до якоря (ax, ay) і зсуву dx/h у площині спрайта.
+ * Речі на стіні не обертаються з камерою — їм одразу точка у світі (wx, wy, wz) і стіна (wall),
+ * щоб світло ховалося разом зі стіною.
+ */
 export function interiorLights(interior = []) {
   const lights = []
   for (const d of interior) {
-    const l = INTERIOR_GEOM[d.k]?.light
-    if (l && d.x != null) lights.push({ ax: d.x, ay: d.y, dx: l.dx, h: l.h, r: l.r, warm: true, uid: d.id })
+    const g = INTERIOR_GEOM[d.k]
+    const list = g?.lights ?? (g?.light ? [g.light] : null)
+    if (!list) continue
+    for (const l of list) {
+      const extra = { r: l.r, warm: true, uid: d.id, color: l.color, flicker: !!l.flicker, power: l.power ?? 1 }
+      if (d.x != null) lights.push({ ax: d.x, ay: d.y, dx: l.dx, h: l.h, ...extra })
+      else if (d.wall) {
+        // Речі на стіні дивляться в кімнату: «праворуч» на задній стіні — +x, на лівій — −z, на правій — +z.
+        const wy = d.h + l.h
+        if (d.wall === 'back') lights.push({ wall: 'back', wx: d.at + l.dx, wy, wz: FLOOR.y0 + WALL_GAP, ...extra })
+        else if (d.wall === 'left') lights.push({ wall: 'left', wx: FLOOR.x0 + WALL_GAP, wy, wz: d.at - l.dx, ...extra })
+        else lights.push({ wall: 'right', wx: FLOOR.x1 - WALL_GAP, wy, wz: d.at + l.dx, ...extra })
+      }
+    }
   }
   return lights
 }

@@ -252,7 +252,11 @@ export function Sheet({ open, onClose, title, children }) {
 
 export function Toasts({ toasts }) {
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-18 z-50 flex flex-col items-center gap-2 px-4">
+    // У повноекранному Telegram зверху його кнопки — опускаємо тости нижче (змінні ставить telegram-web-app.js).
+    <div
+      className="pointer-events-none fixed inset-x-0 z-50 flex flex-col items-center gap-2 px-4"
+      style={{ top: 'calc(4.5rem + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px))' }}
+    >
       <AnimatePresence>
         {toasts.map((t) => (
           <motion.div

@@ -4,7 +4,7 @@ import { canAfford, formatAmounts, homeStorage, itemOf } from '../data.js'
 import { useGame, useNow } from '../context.js'
 import { bedCount, fieldView, ownedSeeds, plotSpot, plotView } from '../farm.js'
 import { haptic, useBackButton } from '../tg.js'
-import { ItemIcon, PxButton, ScreenTitle, Segmented } from '../ui.jsx'
+import { ItemIcon, PxButton, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
 import homeAtlas from '../walk/home-atlas.json'
 import decorAtlas from '../walk/home-decor.json'
@@ -69,7 +69,7 @@ const CATS_HOME = [
 
 /** Рідний острів зсередини: ходиш мандрівником, підходиш до будівель — або будуєш у пісочниці. */
 export default function IslandWalk() {
-  const { state, catalog, items, act, toast, switchTab } = useGame()
+  const { state, catalog, items, act, toast, switchTab, back } = useGame()
   const canvas = useRef(null)
   const engine = useRef(null)
   const [error, setError] = useState(null)
@@ -128,7 +128,6 @@ export default function IslandWalk() {
   const sandbox = indoors
     ? { base: '/home/interior', placed: interior, defs: catalog.interior ?? [] }
     : { base: '/home/deco', placed: islandPlaced, defs: islandDefs }
-  const name = state.user.firstName || 'Мандрівника'
 
   const collecting = useRef(false)
   const collect = async () => {
@@ -582,6 +581,13 @@ export default function IslandWalk() {
           : islandSpot(catalog, near)
   const showSeeds = !build && !indoors && (plotV ? plotV.action === 'plant' || plotV.action === 'till' : actOf(near) === 'farmshop')
   const hasBench = deco.some((d) => d.k === 'workbench')
+  const hint = build ? null : indoors ? (interior.length ? null : 'Хата порожня — натисни 🔨 і постав, що хочеш.') : survivalHint(state, hasBench, tools)
+  /** «Назад»: з хати — надвір, з острова — туди, звідки прийшли. */
+  const leave = () => {
+    if (indoors) return goScene('island')
+    haptic('light')
+    back()
+  }
   const dogInfo = nearDog ? state.dogs?.[nearDog.id] : null
   const building = catalog.buildings.find((b) => b.id === sheet)
   // Звістка про острів «з нуля» — раз; сервер забуває її після «Будуймо!».
@@ -592,206 +598,180 @@ export default function IslandWalk() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <ScreenTitle
-        title={build ? (indoors ? '🔨 Облаштовуємо хату' : '🔨 Будуємо острів') : indoors ? '🏠 Хатинка' : `🏝️ ${home.shared ? 'Спільний острів' : `Острів ${name}`}`}
-        // Під час гри підказка вже є в панелі під полотном — тут не забираємо висоту в острова.
-        subtitle={
-          build
-            ? indoors
-              ? 'Обери річ і торкнись підлоги чи стіни, перетягни привид, куди треба. У «Підлозі» — візерунок і колір.'
-              : 'Тягни пальцем, щоб роззирнутися. Обери предмет, торкнись місця — і перетягни привид, куди треба.'
-            : null
-        }
-      />
+    // Повноекранний острів: полотно на весь екран, керування — поверх нього.
+    // Висота полотна не залежить від панелей, тож камера не смикається, коли вони з'являються.
+    <div className="relative h-full w-full overflow-hidden bg-[#3b7fd0]">
+      <canvas ref={canvas} className="absolute inset-0 block h-full w-full touch-none" />
+      {!ready && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f2a3d]/60 text-center">
+          <motion.span className="text-4xl" animate={error ? {} : { y: [0, -6, 0] }} transition={{ duration: 1.2, repeat: Infinity }}>
+            {error ? '🌫️' : '⛵'}
+          </motion.span>
+          <p className="px-6 text-sm text-cream">{error ?? 'Пристаємо до берега…'}</p>
+        </div>
+      )}
 
-      <div
-        className={`relative min-h-[240px] flex-1 overflow-hidden rounded-sm border-4 bg-[#3b7fd0] shadow-[0_6px_0_#0006] transition-colors ${
-          build ? 'border-gold' : 'border-wood-dark'
-        }`}
-      >
-        {/* Полотно заповнює весь вільний простір; рушій сам підлаштовує камеру під розмір. */}
-        <canvas ref={canvas} className="absolute inset-0 block h-full w-full touch-none" />
-        {ready && <CameraControls engine={engine} onWhistle={whistle} />}
-        {/* Пакетики насіння — поверх острова, щоб не міняти висоту полотна. */}
-        {showSeeds && (
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/45 to-transparent px-3 pt-4">
-            <SeedBar seed={seedToPlant()?.id ?? null} setSeed={setSeed} onShop={() => setFarmTab('seeds')} />
-          </div>
-        )}
-        {!ready && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0f2a3d]/60 text-center">
-            <motion.span
-              className="text-4xl"
-              animate={error ? {} : { y: [0, -6, 0] }}
-              transition={{ duration: 1.2, repeat: Infinity }}
-            >
-              {error ? '🌫️' : '⛵'}
-            </motion.span>
-            <p className="px-6 text-sm text-cream">{error ?? 'Пристаємо до берега…'}</p>
-          </div>
-        )}
-        <p className="pointer-events-none absolute top-2 left-2 rounded-sm bg-black/35 px-2 py-1 font-pixel text-[9px] text-cream drop-shadow">
-          {build
-            ? indoors
-              ? `РЕЧІ ${interior.length}/${catalog.interiorMax ?? 100}`
-              : `ДЕКОР ${deco.length}/${catalog.decorMax ?? 150}`
-            : indoors ? 'ХАТИНКА' : home.shared ? 'СПІЛЬНИЙ ОСТРІВ' : `ОСТРІВ ${name.toUpperCase()}`}
-        </p>
-        {!build && !indoors && (
-          <p className="pointer-events-none absolute top-8 left-2 flex gap-1.5 rounded-sm bg-black/35 px-2 py-0.5 font-pixel text-[9px] text-cream drop-shadow">
-            {(catalog.craft?.tools ?? []).map((t) => (
-              <span key={t.id} className={tools[t.id] ? '' : 'opacity-40 grayscale'}>
-                {t.emoji}
-                {tools[t.id] ? tools[t.id] : '–'}
+      {/* Верх: назад, інструменти (або лічильник у будівництві), погода й камера. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 px-2" style={{ paddingTop: SAFE_TOP }}>
+        <div className="pointer-events-auto flex items-center gap-1.5">
+          <HudButton label={build ? '✓ Готово' : '←'} title={build ? 'Готово' : indoors ? 'Надвір' : 'Залишити острів'} onClick={build ? exitBuild : leave} wide={build} />
+          {build ? (
+            <span className="rounded-sm bg-black/45 px-2 py-1 font-pixel text-[9px] text-cream">
+              {indoors ? `РЕЧІ ${interior.length}/${catalog.interiorMax ?? 100}` : `ДЕКОР ${deco.length}/${catalog.decorMax ?? 150}`}
+            </span>
+          ) : (
+            !indoors && (
+              <span className="flex gap-2 rounded-sm bg-black/45 px-2 py-1 font-pixel text-[10px] text-cream">
+                {(catalog.craft?.tools ?? []).map((t) => (
+                  <span key={t.id} className={tools[t.id] ? '' : 'opacity-40 grayscale'}>
+                    {t.emoji}
+                    {tools[t.id] || '–'}
+                  </span>
+                ))}
               </span>
-            ))}
-          </p>
-        )}
-        {!build && (
-          <button
-            type="button"
-            onClick={() => toast(skyHint(sky))}
-            className="absolute top-12 right-2 flex items-center gap-1 rounded-sm bg-black/35 px-2 py-1 font-pixel text-[9px] text-cream drop-shadow"
-          >
-            <span className="text-xs">{sky.part.emoji}</span>
-            {sky.part.name.toUpperCase()} · <span className="text-xs">{sky.weather.emoji}</span>
-            {sky.weather.name.toUpperCase()}
-          </button>
+            )
+          )}
+        </div>
+        {ready && (
+          <div className="pointer-events-auto flex gap-1">
+            {!build && <HudButton label={`${sky.part.emoji}${sky.weather.emoji}`} title={`${sky.part.name} · ${sky.weather.name}`} onClick={() => toast(skyHint(sky))} wide />}
+            <HudButton label="+" title="Наблизити" onClick={() => engine.current?.zoom(0.8)} />
+            <HudButton label="−" title="Віддалити" onClick={() => engine.current?.zoom(1.25)} />
+            {!build && <HudButton label="📯" title="Покликати псів" onClick={whistle} />}
+          </div>
         )}
       </div>
 
-      {build ? (
-        <BuildPanel
-          indoor={indoors}
-          defs={sandbox.defs}
-          placed={sandbox.placed}
-          houseLevel={houseLevel}
-          cat={cat}
-          setCat={(c) => {
-            setCat(c)
-            setFloorTry(null)
-            if (c === 'floor') {
-              clearGhost()
-              select(null)
-            }
-          }}
-          floor={floor}
-          floorTry={floorTry}
-          onFloor={chooseFloor}
-          onBuyFloor={buyFloor}
-          onCancelFloor={() => setFloorTry(null)}
-          pick={pick}
-          ghost={ghost}
-          sel={sel}
-          busy={busy}
-          onChoose={choose}
-          onConfirm={confirm}
-          onCancel={() => {
-            clearGhost()
-            select(null)
-          }}
-          onMove={startMove}
-          onRemove={remove}
-          onDone={exitBuild}
-        />
-      ) : (
-        <>
-          {/* Висота стала: інакше полотно над панеллю міняло б розмір щоразу, як змінюється підказка, — і острів смикався б. */}
-          <div className="px-wood flex h-[60px] shrink-0 items-center gap-2 overflow-hidden px-2 py-1.5 text-cream">
-            <AnimatePresence mode="wait" initial={false}>
-              {spot ? (
-                <motion.div
-                  key={spot.id}
-                  className="flex flex-1 items-center gap-2"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.15 }}
-                >
-                  {plotV ? (
-                    <PlotIcon v={plotV} items={items} />
-                  ) : (
-                    <span className="text-2xl">{nearDog ? '🐶' : nearNode ? nearNode.emoji : spotIcon(catalog, spot.id)}</span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-extrabold">{spot.label}</p>
-                    {dogInfo ? (
-                      <Hearts hearts={dogInfo.hearts} love={dogInfo.love} size={10} />
-                    ) : (
-                      <p className={`truncate text-[11px] ${nodeTool && !nodeTool.ok ? 'text-[#ffb3a6]' : 'text-cream/75'}`}>
-                        {plotInfo ? plotInfo.hint : nearNode ? nodeHint(items, nearNode, nodeTool) : spotHint(catalog, home.levels, chestOpen, spot.id)}
-                      </p>
-                    )}
-                  </div>
-                  {plotV ? (
-                    <>
-                      {plotV.crop && !plotV.ready && (
-                        <PxButton size="sm" variant="paper" onClick={() => clearPlot(plotV.i)} aria-label="Викопати">
-                          🗑
+      {/* Низ: дія поруч, насіння, будівництво — або панель пісочниці. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 px-2" style={{ paddingBottom: SAFE_BOTTOM }}>
+        {build ? (
+          <div className="pointer-events-auto overflow-hidden rounded-sm bg-[#0f2a3d]/85 p-2 shadow-[0_-4px_16px_#0006] backdrop-blur-[2px]">
+            <BuildPanel
+              indoor={indoors}
+              defs={sandbox.defs}
+              placed={sandbox.placed}
+              houseLevel={houseLevel}
+              cat={cat}
+              setCat={(c) => {
+                setCat(c)
+                setFloorTry(null)
+                if (c === 'floor') {
+                  clearGhost()
+                  select(null)
+                }
+              }}
+              floor={floor}
+              floorTry={floorTry}
+              onFloor={chooseFloor}
+              onBuyFloor={buyFloor}
+              onCancelFloor={() => setFloorTry(null)}
+              pick={pick}
+              ghost={ghost}
+              sel={sel}
+              busy={busy}
+              onChoose={choose}
+              onConfirm={confirm}
+              onCancel={() => {
+                clearGhost()
+                select(null)
+              }}
+              onMove={startMove}
+              onRemove={remove}
+            />
+          </div>
+        ) : (
+          <>
+            {showSeeds && (
+              <div className="pointer-events-auto">
+                <SeedBar seed={seedToPlant()?.id ?? null} setSeed={setSeed} onShop={() => setFarmTab('seeds')} />
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <AnimatePresence mode="wait" initial={false}>
+                  {spot ? (
+                    <motion.div
+                      key={spot.id}
+                      className="px-wood pointer-events-auto flex h-[60px] items-center gap-2 overflow-hidden px-2 py-1.5 text-cream"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      {plotV ? (
+                        <PlotIcon v={plotV} items={items} />
+                      ) : (
+                        <span className="text-2xl">{nearDog ? '🐶' : nearNode ? nearNode.emoji : spotIcon(catalog, spot.id)}</span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-extrabold">{spot.label}</p>
+                        {dogInfo ? (
+                          <Hearts hearts={dogInfo.hearts} love={dogInfo.love} size={10} />
+                        ) : (
+                          <p className={`truncate text-[11px] ${nodeTool && !nodeTool.ok ? 'text-[#ffb3a6]' : 'text-cream/75'}`}>
+                            {plotInfo ? plotInfo.hint : nearNode ? nodeHint(items, nearNode, nodeTool) : spotHint(catalog, home.levels, chestOpen, spot.id)}
+                          </p>
+                        )}
+                      </div>
+                      {plotV ? (
+                        <>
+                          {plotV.crop && !plotV.ready && (
+                            <PxButton size="sm" variant="paper" onClick={() => clearPlot(plotV.i)} aria-label="Викопати">
+                              🗑
+                            </PxButton>
+                          )}
+                          <PxButton
+                            size="sm"
+                            variant={plotV.action === 'harvest' ? 'yellow' : plotV.action === 'water' ? 'blue' : 'green'}
+                            className={plotV.action === 'wait' ? 'opacity-60' : ''}
+                            onClick={() => interact(spot.id)}
+                          >
+                            {plotV.action === 'plant' && seedToPlant() ? `🌱 ${seedToPlant().name}` : plotInfo.button}
+                          </PxButton>
+                        </>
+                      ) : nearNode ? (
+                        <PxButton size="sm" variant={nodeTool.ok ? 'yellow' : 'paper'} className={nodeTool.ok ? '' : 'opacity-60'} onClick={() => interact(spot.id)}>
+                          {GATHER[nodeTool.kind]}
+                        </PxButton>
+                      ) : (
+                        <PxButton size="sm" variant="green" onClick={() => interact(spot.id)}>
+                          {nearDog ? 'Погладити' : (ACTION[actOf(spot.id)] ?? 'Відкрити')}
                         </PxButton>
                       )}
-                      <PxButton
-                        size="sm"
-                        variant={plotV.action === 'harvest' ? 'yellow' : plotV.action === 'water' ? 'blue' : 'green'}
-                        className={plotV.action === 'wait' ? 'opacity-60' : ''}
-                        onClick={() => interact(spot.id)}
-                      >
-                        {plotV.action === 'plant' && seedToPlant() ? `🌱 ${seedToPlant().name}` : plotInfo.button}
-                      </PxButton>
-                    </>
-                  ) : nearNode ? (
-                    <PxButton size="sm" variant={nodeTool.ok ? 'yellow' : 'paper'} className={nodeTool.ok ? '' : 'opacity-60'} onClick={() => interact(spot.id)}>
-                      {GATHER[nodeTool.kind]}
-                    </PxButton>
-                  ) : (
-                    <PxButton size="sm" variant="green" onClick={() => interact(spot.id)}>
-                      {nearDog ? 'Погладити' : (ACTION[actOf(spot.id)] ?? 'Відкрити')}
-                    </PxButton>
-                  )}
-                  {nearDog && (
-                    <PxButton size="sm" variant="paper" onClick={() => setDogSheet(nearDog.id)} aria-label="Нагодувати й команди">
-                      🦴
-                    </PxButton>
-                  )}
-                  {spot.id === 'house' && (
-                    <PxButton size="sm" variant="paper" onClick={() => setSheet('house')} aria-label="Покращити хатинку">
-                      🔨
-                    </PxButton>
-                  )}
-                </motion.div>
-              ) : (
-                <motion.p
-                  key="hint"
-                  className="line-clamp-2 flex-1 text-center text-[12px] leading-snug text-cream/80"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                >
-                  {indoors
-                    ? interior.length ? 'Тапни підлогу, щоб пройтись, або ліжко, піч чи полицю.' : 'Хата порожня — натисни «Облаштувати» й постав, що хочеш.'
-                    : survivalHint(state, hasBench, tools)}
-                </motion.p>
-              )}
-            </AnimatePresence>
-          </div>
-          {indoors ? (
-            <div className="grid grid-cols-2 gap-2">
-              <PxButton variant="yellow" size="lg" disabled={!ready} onClick={enterBuild}>
-                🔨 Облаштувати
-              </PxButton>
-              <PxButton variant="blue" size="lg" onClick={() => goScene('island')}>
-                🚪 Надвір
-              </PxButton>
+                      {nearDog && (
+                        <PxButton size="sm" variant="paper" onClick={() => setDogSheet(nearDog.id)} aria-label="Нагодувати й команди">
+                          🦴
+                        </PxButton>
+                      )}
+                      {spot.id === 'house' && (
+                        <PxButton size="sm" variant="paper" onClick={() => setSheet('house')} aria-label="Покращити хатинку">
+                          🔨
+                        </PxButton>
+                      )}
+                    </motion.div>
+                  ) : hint ? (
+                    // Підказка — лише поки є що підказати (перші кроки), і не заважає тапати по острову.
+                    <motion.p
+                      key="hint"
+                      className="mx-auto w-fit max-w-full rounded-sm bg-black/50 px-3 py-1.5 text-center text-[12px] leading-snug text-cream"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      {hint}
+                    </motion.p>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+              <div className="pointer-events-auto flex shrink-0 flex-col gap-2">
+                {indoors && <RoundButton label="🚪" title="Надвір" variant="blue" onClick={() => goScene('island')} />}
+                <RoundButton label="🔨" title={indoors ? 'Облаштувати' : 'Будувати'} variant="yellow" disabled={!ready} onClick={enterBuild} />
+              </div>
             </div>
-          ) : (
-            <PxButton variant="yellow" size="lg" className="w-full" disabled={!ready} onClick={enterBuild}>
-              🔨 Будувати
-            </PxButton>
-          )}
-        </>
-      )}
+          </>
+        )}
+      </div>
 
       <BuildingSheet building={building} onClose={() => setSheet(null)} />
       <DailySheet open={daily} onClose={() => setDaily(false)} />
@@ -803,38 +783,58 @@ export default function IslandWalk() {
   )
 }
 
-/** GameApp дає цьому екрану рівно висоту вікна: полотно розтягується, кнопки — під ним, без прокрутки. */
-IslandWalk.fill = true
+/** GameApp показує цей екран на весь екран: без шапки, вкладок і відступів. */
+IslandWalk.fullscreen = true
 
-/* ───────── Камера: поворот і зум для тих, хто не користується двома пальцями ───────── */
+/**
+ * Відступи від країв з урахуванням вирізу/жестів і кнопок Telegram у повноекранному режимі
+ * (telegram-web-app.js ставить --tg-safe-area-inset-* і --tg-content-safe-area-inset-*).
+ */
+const SAFE_TOP = 'calc(max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 8px)'
+const SAFE_BOTTOM = 'calc(max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px)) + 10px)'
 
-function CameraControls({ engine, onWhistle }) {
-  const btn = (label, title, fn) => (
+/** Маленька напівпрозора кнопка поверх острова. */
+function HudButton({ label, title, onClick, wide = false }) {
+  return (
     <button
       type="button"
       aria-label={title}
       title={title}
       onClick={() => {
         haptic('light')
-        fn(engine.current)
+        onClick()
       }}
-      className="flex h-8 w-8 items-center justify-center rounded-sm bg-black/35 font-pixel text-[13px] text-cream drop-shadow active:bg-black/55"
+      className={`flex h-9 items-center justify-center rounded-sm bg-black/45 font-pixel text-[14px] text-cream drop-shadow active:bg-black/65 ${wide ? 'px-2' : 'w-9'}`}
     >
       {label}
     </button>
   )
+}
+
+/** Кругла кнопка дії в правому нижньому куті (будувати, надвір). */
+function RoundButton({ label, title, onClick, variant, disabled }) {
+  const tone = variant === 'blue' ? 'bg-[#3a8fe0] border-[#1f4f87]' : 'bg-gold border-[#8a6410]'
   return (
-    <div className="absolute top-2 right-2 flex gap-1">
-      {btn('+', 'Наблизити', (e) => e?.zoom(0.8))}
-      {btn('−', 'Віддалити', (e) => e?.zoom(1.25))}
-      {btn('📯', 'Покликати псів', () => onWhistle())}
-    </div>
+    <motion.button
+      type="button"
+      aria-label={title}
+      title={title}
+      disabled={disabled}
+      whileTap={{ scale: 0.9 }}
+      onClick={() => {
+        haptic('medium')
+        onClick()
+      }}
+      className={`flex size-14 items-center justify-center rounded-full border-4 text-2xl shadow-[0_4px_0_#0007] disabled:opacity-50 ${tone}`}
+    >
+      {label}
+    </motion.button>
   )
 }
 
 /* ───────── Панель пісочниці ───────── */
 
-function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, onDone, floor, floorTry, onFloor, onBuyFloor, onCancelFloor }) {
+function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, floor, floorTry, onFloor, onBuyFloor, onCancelFloor }) {
   const { catalog, state, items } = useGame()
   const decor = defs
   const defOf = (kind) => decor.find((d) => d.id === kind)
@@ -986,9 +986,6 @@ function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost
       </div>
       )}
 
-      <PxButton variant="green" size="lg" className="w-full" onClick={onDone}>
-        ✓ Готово
-      </PxButton>
     </div>
   )
 }
@@ -1152,11 +1149,11 @@ function nodeHint(items, def, tool) {
 
 /** Підказка, що робити далі: від порожнього острова до сокири й кайла. */
 function survivalHint(state, hasBench, tools) {
-  if (!hasBench) return 'Збирай руками кущі, камінчики й корчі на березі. 4 гілочки й 2 камені — і став верстат 🪚 у «Будувати».'
+  if (!hasBench) return 'Збирай руками кущі, камінчики й корчі. 4 гілочки й 2 камені — і став верстат 🪚 (🔨).'
   if (!tools.axe) return 'Біля верстата 🪚 зроби кам\'яну сокиру — і рубай дерева на колоди.'
   if (!tools.pickaxe) return 'Зроби на верстаті кайло ⛏️ — каміння дасть більше каменю.'
-  if (!Object.keys(state.farm?.plots ?? {}).length) return 'Постав грядки й комору городника в «Будувати» — і вирощуй урожай 🌱'
-  return 'Тапни дерево, камінь чи будівлю — мандрівник сам дійде. На ПК — WASD, E — дія.'
+  if (!Object.keys(state.farm?.plots ?? {}).length) return 'Постав грядки й комору городника (🔨) — і вирощуй урожай 🌱'
+  return null
 }
 
 function spotIcon(catalog, id) {

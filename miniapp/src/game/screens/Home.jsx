@@ -262,7 +262,7 @@ function Hotspot({ crop, x, y, size, onClick, label }) {
 function BuildingRow({ onOpen }) {
   const { state, catalog } = useGame()
   return (
-    <div className="grid grid-cols-5 gap-1.5">
+    <div className="grid grid-cols-4 gap-1.5">
       {catalog.buildings.map((b, i) => {
         const lvl = state.home.levels[b.id]
         const next = b.levels[lvl + 1]

@@ -16,7 +16,7 @@ import Litopys from './screens/Litopys.jsx'
 import WorldMap from './screens/WorldMap.jsx'
 import { useGame } from './context.js'
 import { GameProvider } from './store.jsx'
-import { haptic, useBackButton } from './tg.js'
+import { haptic, useBackButton, useTelegramFullscreen } from './tg.js'
 import { Bar, Counter, FloatingDelta, PxButton, RewardModal, Sheet, Toasts } from './ui.jsx'
 
 const TABS = [
@@ -80,9 +80,13 @@ function Playing() {
     scroller.current?.scrollTo({ top: 0 })
   }, [key])
 
+  // Острів — на весь екран: без шапки, вкладок і відступів (і в Telegram — без його шапки).
+  const full = !!Screen.fullscreen
+  useTelegramFullscreen(full)
+
   return (
     <div className="game-root flex h-dvh flex-col">
-      <TopBar state={state} />
+      {!full && <TopBar state={state} />}
       <main ref={scroller} className="no-scrollbar relative flex-1 overflow-x-hidden overflow-y-auto">
         <AnimatePresence mode="popLayout" initial={false} custom={direction}>
           <motion.div
@@ -97,14 +101,13 @@ function Playing() {
             animate="center"
             exit="exit"
             transition={{ duration: 0.22, ease: 'easeOut' }}
-            // Екрани з `fill` (острів) займають рівно висоту між шапкою і таб-баром — без прокрутки під час гри.
-            className={`mx-auto w-full max-w-md px-3 pt-3 ${Screen.fill ? 'flex h-full flex-col pb-3' : 'pb-6'}`}
+            className={full ? 'h-full w-full' : 'mx-auto w-full max-w-md px-3 pt-3 pb-6'}
           >
             <Screen {...current.params} />
           </motion.div>
         </AnimatePresence>
       </main>
-      <TabBar />
+      {!full && <TabBar />}
       <Toasts toasts={toasts} />
       <RewardModal spec={rewardPopup} onClose={() => reward(null)} />
       <Onboarding />

@@ -72,3 +72,31 @@ export function useBackButton(active, fn) {
     }
   }, [active])
 }
+
+/**
+ * Справжній повний екран Telegram (Bot API 8.0), поки active: без шапки Telegram, лише кнопки
+ * «закрити/меню» поверх гри. Лише на телефонах — на ПК це розгорнуло б усе вікно.
+ * Виходимо з повного екрана лише якщо самі в нього зайшли.
+ */
+export function useTelegramFullscreen(active) {
+  useEffect(() => {
+    const wa = window.Telegram?.WebApp
+    if (!active || !wa?.requestFullscreen || !['ios', 'android', 'android_x'].includes(wa.platform)) return
+    if (wa.isVersionAtLeast && !wa.isVersionAtLeast('8.0')) return
+    if (wa.isFullscreen) return
+    let entered = false
+    try {
+      wa.requestFullscreen()
+      entered = true
+    } catch {
+      /* старий клієнт — лишаємось у звичайному режимі */
+    }
+    return () => {
+      try {
+        if (entered && wa.isFullscreen) wa.exitFullscreen()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [active])
+}

@@ -16,6 +16,7 @@ import { homeArt } from './home-art.mjs'
 import { decorArt } from './decor-art.mjs'
 import { modernArt } from './modern-art.mjs'
 import { floorSheet } from './floor-art.mjs'
+import { heroFrames, wearSheet } from './hero-wear.mjs'
 import { BEDS, BOARDWALK, CELL, INTERACT, LAND, MAP, PATH, PIER, PLAZA, RESERVED, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -883,128 +884,6 @@ function waterImage() {
 /** Тінь під об'єктом. */
 function shadow(img, cx, cy, rx, ry, a = 0.28) {
   img.ellipse(cx, cy, rx, ry, '#0b2010', a)
-}
-
-/** Мандрівник у брилі й вишиванці: 16×22, напрямки down/up/side, кадри ходьби. */
-const HERO_PAL = {
-  K: C.K,
-  Y: '#e9c56a',
-  y: '#c49a45',
-  T: '#c8372d',
-  h: '#7a4524',
-  H: '#4f2a14',
-  s: '#f5c9a0',
-  S: '#d9a077',
-  e: C.K,
-  W: '#f3eee2',
-  w: '#cbc2b0',
-  R: '#c8372d',
-  r: '#8e2a1f',
-  P: '#3f5fa8',
-  p: '#2c4580',
-  B: '#6a4528',
-  b: '#3a2414',
-}
-const HERO_HAT = [
-  '................',
-  '.....KKKKKK.....',
-  '....KYYYYYYK....',
-  '...KYYyYYyYYK...',
-  '.KKKTTTTTTTTKKK.',
-  'KYYYYYYYYYYYYYYK',
-  '.KKyyyyyyyyyyKK.',
-]
-const HERO = {
-  down: [
-    ...HERO_HAT,
-    '...KhsssssshK...',
-    '...KsessssesK...',
-    '...KSssssssSK...',
-    '....KKsSSsKK....',
-    '..KWWWWRRWWWWK..',
-    '.KwWWWWRRWWWWwK.',
-    '.KwWRWWRRWWRWwK.',
-    '.KsWWWWRRWWWWsK.',
-    '.KSrrrrrrrrrrSK.',
-    '..KPPPPPPPPPPK..',
-    '...KPPpKKpPPK...',
-    '...KPPPKKPPPK...',
-    '...KBBBKKBBBK...',
-    '...KbbbKKbbbK...',
-    '....KKK..KKK....',
-  ],
-  up: [
-    ...HERO_HAT,
-    '...KhhhhhhhhK...',
-    '...KhhhhhhhhK...',
-    '...KHhhHHhhHK...',
-    '....KKSSSSKK....',
-    '..KWWWWWWWWWWK..',
-    '.KwWWWWWWWWWWwK.',
-    '.KwWRWWWWWWRWwK.',
-    '.KsWWWWWWWWWWsK.',
-    '.KSrrrrrrrrrrSK.',
-    '..KPPPPPPPPPPK..',
-    '...KPPpKKpPPK...',
-    '...KPPPKKPPPK...',
-    '...KBBBKKBBBK...',
-    '...KbbbKKbbbK...',
-    '....KKK..KKK....',
-  ],
-  side: [
-    ...HERO_HAT,
-    '...KsssshhhhK...',
-    '...KsesshhhhK...',
-    '...KSssshhhHK...',
-    '....KKsShhKK....',
-    '....KWWWWWWK....',
-    '....KwRWWWwK....',
-    '....KwRWWWwK....',
-    '....KWsWWWwK....',
-    '....KrSrrrrK....',
-    '....KPPPPPPK....',
-    '....KPPPPPpK....',
-    '....KPPKKPpK....',
-    '....KBBKKBBK....',
-    '...KbbbKKbbK....',
-    '....KKK..KK.....',
-  ],
-}
-const SIDE_STRIDE = [
-  '....KPPPPPPK....',
-  '...KPPPKKPPpK...',
-  '..KPPK..KPpK....',
-  '..KBBK..KBBK....',
-  '.KbbbK.KbbbK....',
-  '..KKK...KKK.....',
-]
-
-/** Кадр ходьби спереду/ззаду: одна нога піднята на 1 px. */
-function liftLeg(rows, left) {
-  const out = rows.map((r) => r.split(''))
-  const [x0, x1] = left ? [3, 7] : [8, 12]
-  for (let y = 18; y < out.length; y++)
-    for (let x = x0; x <= x1; x++) out[y - 1][x] = y - 1 >= 18 || out[y][x] !== '.' ? out[y][x] : out[y - 1][x]
-  for (let x = x0; x <= x1; x++) out[out.length - 1][x] = '.'
-  return out.map((r) => r.join(''))
-}
-
-function heroFrames() {
-  const make = (rows, flip = false) => new Img(16, 22).rows(rows, 0, 0, HERO_PAL, flip)
-  const sideStride = [...HERO.side.slice(0, 16), ...SIDE_STRIDE]
-  const f = {}
-  for (const dir of ['down', 'up']) {
-    f[`hero_${dir}_0`] = make(HERO[dir])
-    f[`hero_${dir}_1`] = make(liftLeg(HERO[dir], true))
-    f[`hero_${dir}_2`] = make(liftLeg(HERO[dir], false))
-  }
-  f.hero_left_0 = make(HERO.side)
-  f.hero_left_1 = make(sideStride)
-  f.hero_left_2 = make(HERO.side)
-  f.hero_right_0 = make(HERO.side, true)
-  f.hero_right_1 = make(sideStride, true)
-  f.hero_right_2 = make(HERO.side, true)
-  return f
 }
 
 /** Крона з кількох кіл: освітлення зверху-зліва, текстура листя, темний контур. */
@@ -2947,7 +2826,8 @@ function dogSheet(anims, cell, image, scale = 1) {
 
 function buildSprites(farm, room) {
   const s = {
-    ...heroFrames(),
+    // Мандрівник у стартовому вбранні — для прев'ю; у грі рушій збирає його з шарів hero-wear.png.
+    ...heroFrames({ Img }),
     oak: oak(),
     birch: birch(),
     bush: bush(false),
@@ -3130,6 +3010,11 @@ const slots = nodeSlots(t)
 writeFileSync(join(ROOT, '../server/src/game/island-slots.json'), JSON.stringify(slots) + '\n')
 console.log(`місця для ресурсів: трава ${slots.grass.length}, пісок ${slots.sand.length}, скелі ${slots.rock.length}`)
 console.log(`ground ${ground.w}×${ground.h}, sprites ${atlas.w}×${atlas.h} (${Object.keys(frames).length} кадрів), хатинка ${interior.atlas.w}×${interior.atlas.h} (${Object.keys(interior.frames).length})`)
+// Мандрівник шарами (тіло, низ, верх, головний убір) — рушій збирає з них вдягненого (walk/outfit.js).
+const wear = wearSheet({ Img })
+writeFileSync(join(OUT_PUBLIC, 'hero-wear.png'), encodePng(wear.image))
+writeFileSync(join(ROOT, 'src/game/walk/hero-wear.json'), JSON.stringify(wear.meta) + '\n')
+console.log(`одяг мандрівника: ${wear.image.w}×${wear.image.h} (${Object.keys(wear.meta.layers).length} шарів)`)
 // Іконки врожаю й насіння для рюкзака (public/game/items/<id>.png).
 const OUT_ITEMS = join(ROOT, 'public/game/items')
 for (const [id, img] of Object.entries(farm.items)) writeFileSync(join(OUT_ITEMS, `${id}.png`), encodePng(img))
@@ -3149,8 +3034,11 @@ for (const [name, anims, cell, scale] of [
 // лише разом із самими картинками, тож довгий кеш і далі працює.
 {
   const h = createHash('sha1')
-  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'dog', 'sirko'].map((n) => join(OUT_PUBLIC, `${n}.png`))
+  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'dog', 'sirko', 'hero-wear'].map((n) => join(OUT_PUBLIC, `${n}.png`))
   for (const id of Object.keys(farm.items).sort()) pngs.push(join(OUT_ITEMS, `${id}.png`))
+  // Іконки одягу (scripts/sd-wardrobe.mjs).
+  const OUT_WEAR = join(ROOT, 'public/game/wear')
+  if (existsSync(OUT_WEAR)) for (const f of readdirSync(OUT_WEAR).filter((f) => f.endsWith('.png')).sort()) pngs.push(join(OUT_WEAR, f))
   for (const f of pngs) h.update(readFileSync(f))
   const v = h.digest('hex').slice(0, 10)
   writeFileSync(join(ROOT, 'src/game/walk/version.json'), JSON.stringify({ v }) + '\n')

@@ -18,6 +18,7 @@ import { farmCatalog } from "./farm.js";
 import { FLOOR_COLORS, FLOORS, INTERIOR, INTERIOR_MAX } from "./interior.js";
 import { BUILDINGS } from "./homestead.js";
 import { craftCatalog } from "./craft.js";
+import { wearCatalog } from "./wardrobe.js";
 import { nodesCatalog } from "./nodes.js";
 
 /**
@@ -142,6 +143,7 @@ export function buildCatalog() {
     farm: farmCatalog(),
     nodes: nodesCatalog(),
     craft: craftCatalog(),
+    wear: wearCatalog(),
     interior: INTERIOR,
     interiorMax: INTERIOR_MAX,
     floors: FLOORS,

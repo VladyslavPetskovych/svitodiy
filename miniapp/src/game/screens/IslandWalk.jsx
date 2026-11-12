@@ -18,14 +18,15 @@ import { skyAt, skyOverrideFromUrl } from '../walk/sky.js'
 import { BuildingSheet } from './Home.jsx'
 import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
 import { CraftSheet, ResetSheet } from './islandCraft.jsx'
+import { ClosetSheet } from './islandWardrobe.jsx'
 
 const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися' }
 /** Ресурси на острові — «node:<id>». */
 const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
 /** Чим добувати: кнопка дії. */
@@ -46,6 +47,8 @@ function skyHint(sky) {
 const actOf = (id) => id?.split(':')[0]
 const FEED_TEXT = [(n) => `😋 ${n} уминає!`, () => '😋 Хрум-хрум!']
 const DOG_PETS = [() => 'Гав! 🐾', (n) => `${n} махає хвостом`, () => 'Ще, ще! ❤️', (n) => `${n} лизнув руку`]
+/** Що сказати, вийшовши з шафи в новому. */
+const DRESSED = ['✨ Новий образ!', '😎 Красень!', '👕 Як із голочки']
 /** Випадковий елемент масиву (різні репліки пса). */
 const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)]
 /** «+3 🥕  +1 🌱» — коротко, для напису над грядкою чи ресурсом. */
@@ -100,6 +103,7 @@ export default function IslandWalk() {
   const [seed, setSeed] = useState(null) // яке насіння садити наступним тапом
   const [dogSheet, setDogSheet] = useState(null) // id пса, чия шторка відкрита
   const [craft, setCraft] = useState(false) // шторка верстата
+  const [closet, setCloset] = useState(false) // шторка шафи з одягом
   const gathering = useRef(false) // добування в процесі — другий тап не почне нове
   const working = useRef(new Set()) // грядки, на яких дія ще в дорозі до сервера
   // «Викопати» / «Розібрати»: перший тап перетворює кнопку на «Точно?», другий — підтверджує.
@@ -382,6 +386,7 @@ export default function IslandWalk() {
     else if (actOf(id) === 'bed') say('😴 Сил додалось!', 'hero', 'calm')
     else if (actOf(id) === 'stove') switchTab('backpack') // готують рибу в рюкзаку
     else if (actOf(id) === 'shelf') switchTab('journal')
+    else if (actOf(id) === 'closet') setCloset(true)
   }
 
   /* ───── Пісочниця: дії ───── */
@@ -582,7 +587,7 @@ export default function IslandWalk() {
 
   // Усі повідомлення на острові (і помилки сервера) — написами над мандрівником, а не плашками.
   // Поки відкрита шторка чи будуєш — написи спливають там, де тапнув (острів тоді за шторкою чи не в фокусі).
-  const overlayOpen = !!(sheet || farmTab || dogSheet || craft || build || (home.reset && !resetSeen))
+  const overlayOpen = !!(sheet || farmTab || dogSheet || craft || closet || build || (home.reset && !resetSeen))
   const overlay = useRef(overlayOpen)
   useEffect(() => {
     overlay.current = overlayOpen
@@ -657,6 +662,10 @@ export default function IslandWalk() {
   useEffect(() => {
     if (ready) engine.current?.syncDogs(state.dogs)
   }, [ready, state.dogs])
+  // Перевдягся в шафі — мандрівник у світі теж.
+  useEffect(() => {
+    if (ready) engine.current?.setOutfit(state.wear)
+  }, [ready, state.wear])
 
   // Бульбашки врожаю над будівлями, де вже є що забрати.
   const storage = homeStorage(catalog, home, now)
@@ -922,6 +931,7 @@ export default function IslandWalk() {
       <FarmSheet tab={farmTab} setTab={setFarmTab} onClose={() => setFarmTab(null)} />
       <DogSheet dog={dogSheet ? dogById(dogSheet) : null} onClose={() => setDogSheet(null)} onCommand={commandDog} onFeed={feedDog} />
       <CraftSheet open={craft} onClose={() => setCraft(false)} />
+      <ClosetSheet open={closet} onClose={() => setCloset(false)} onDressed={() => say(pickOne(DRESSED), 'hero', 'good')} />
       <ResetSheet note={resetSeen ? null : home.reset} onClose={ackReset} />
     </div>
   )
@@ -1328,6 +1338,7 @@ function spotHint(catalog, levels, chestOpen, id) {
   if (actOf(id) === 'bed') return 'Перина й вишита ковдра'
   if (actOf(id) === 'stove') return 'Готують рибу — у рюкзаку'
   if (actOf(id) === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'
+  if (actOf(id) === 'closet') return 'Перевдягтися, пошити чи купити одяг'
   if (id === 'chest') return chestOpen ? 'Сьогодні вже відкрито — повертайся завтра' : 'Щоденна нагорода чекає!'
   if (id === 'fishing') return 'Закинути вудку з краю причалу'
   if (id === 'boat') return 'Попливти до інших островів'

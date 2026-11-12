@@ -41,3 +41,4 @@ export const floorKey = (id) => `svitodiy:infloor:${id}`; // підлога ха
 export const dogsKey = (id) => `svitodiy:dogs:${id}`; // пси: id пса → JSON { love, fedDay, petDay, mode, sit }
 export const nodesKey = (id) => `svitodiy:nodes:${id}`; // ресурси острова: id → JSON { k, x, y, w } і _t — коли виріс останній
 export const toolsKey = (id) => `svitodiy:tools:${id}`; // інструменти гравця: axe / pickaxe → рівень
+export const wearKey = (id) => `svitodiy:wear:${id}`; // одяг гравця: own — що є (через кому), hat / top / bottom — що вдягнено

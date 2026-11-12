@@ -26,6 +26,8 @@ export const INTERIOR = [
   { id: "lamp_table", cat: "furniture", name: "Стіл із гасовою лампою", emoji: "🪔", level: 3, cost: { plank: 3, metal_scrap: 1, glass_shard: 1 } },
   // Меблі
   { id: "chest", cat: "furniture", name: "Скриня-посаг", emoji: "🧳", level: 1, cost: { plank: 4, metal_scrap: 1 } },
+  // Шафа для одягу: біля неї перевдягаються й шиють новий одяг (wardrobe.js). Розписна шафа — теж.
+  { id: "closet", cat: "furniture", name: "Шафа для одягу", emoji: "👕", level: 1, cost: { plank: 4, twig: 2 } },
   { id: "bench", cat: "furniture", name: "Лава з подушками", emoji: "🪑", level: 1, cost: { plank: 3 } },
   { id: "boots", cat: "furniture", name: "Чоботи", emoji: "👢", level: 1, cost: { fish_bone: 1 } },
   { id: "washstand", cat: "furniture", name: "Умивальник", emoji: "🚰", level: 2, cost: { plank: 3, stone: 1 } },
@@ -247,6 +249,18 @@ async function pay(userId, cost) {
   if (balance && (await getBalance(userId)) < balance) throw conflict("not_enough", `Потрібно ${balance} ✨.`);
   if (Object.keys(res).length && !(await consumeResources(userId, res))) throw conflict("not_enough", "Не вистачає матеріалів.");
   if (balance) await addBalance(userId, -balance);
+}
+
+/** Чи стоїть у хатинці хоч одна з речей kinds (наприклад шафа для одягу). */
+export async function hasInteriorItem(userId, kinds) {
+  const all = await getRedis().hVals(await keyOf(userId));
+  return all.some((raw) => {
+    try {
+      return kinds.includes(JSON.parse(raw).k);
+    } catch {
+      return false;
+    }
+  });
 }
 
 export async function placeInterior(userId, body) {

@@ -18,6 +18,7 @@ import { getFloor, getInterior } from "./interior.js";
 import { grantAdminResources } from "./admin.js";
 import { getHome } from "./homestead.js";
 import { getTools } from "./craft.js";
+import { getWear } from "./wardrobe.js";
 import { ensureIsland, takenBoxes } from "./island.js";
 import { getNodes } from "./nodes.js";
 import { dailyClaimKey, jobKey, kyivDay, previousDay, quizRewardKey, userKey } from "./keys.js";
@@ -99,7 +100,7 @@ export async function getState(userId) {
     getFloor(userId),
   ]);
   // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
-  const [nodes, tools] = await Promise.all([getNodes(userId, takenBoxes(home, deco, farm)), getTools(userId)]);
+  const [nodes, tools, wear] = await Promise.all([getNodes(userId, takenBoxes(home, deco, farm)), getTools(userId), getWear(userId)]);
 
   for (const k of Object.keys(inventory)) {
     if (inventory[k] <= 0) delete inventory[k];
@@ -134,6 +135,7 @@ export async function getState(userId) {
     floor,
     nodes,
     tools,
+    wear,
     // phone — чи є номер узагалі: без нього персональні розділи не відкрити.
     access: { nastia: access[0], admin: access[1], phone: access[2] != null },
     daily: await getDailyState(userId, h),

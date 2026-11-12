@@ -17,6 +17,7 @@ import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
 import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
 import { INTERIOR_GEOM, dogBedSpot, interiorFootprint, interiorInteract, interiorLights, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
 import { createInput } from './input.js'
+import { HERO_CELL, HERO_FRAME, HERO_FRAMES, composeHero, heroFrameIndex, outfitKey, outfitOf } from './outfit.js'
 import { CELL, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotCenter, plotRect, walkGrid } from './layout.js'
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
 
@@ -33,7 +34,7 @@ import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } fr
  * Сцени: «island» (острів надворі) і «home» (кімната хатинки).
  */
 
-const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', ...Object.keys(DOG_SHEETS)]
+const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'hero-wear', ...Object.keys(DOG_SHEETS)]
 
 /**
  * Аркуші спрайтів: острів (будівлі, декор, город, мандрівник) і окремо — хатинка зсередини
@@ -558,7 +559,27 @@ export function createWalk(canvas, assets, cb) {
   let emitters = []
   let beam = null
 
-  const heroMesh = new THREE.Mesh(spriteGeo('hero_down_0'), spriteMat)
+  // Мандрівник — своя текстура: 12 кадрів, зібраних із шарів одягу (outfit.js); перезбираємо, коли перевдягся.
+  const heroCanvas = document.createElement('canvas')
+  let heroOutfit = outfitOf(null)
+  composeHero(assets['hero-wear'].image, heroOutfit, heroCanvas)
+  const heroTex = crispTexture(new THREE.CanvasTexture(heroCanvas))
+  heroTex.colorSpace = THREE.SRGBColorSpace
+  const heroMat = crispPixels(new THREE.MeshBasicMaterial({ map: heroTex, transparent: true, alphaTest: 0.5, depthWrite: false }))
+  const heroGeos = HERO_FRAMES.map((_, i) => {
+    const { w, h } = HERO_FRAME
+    const AW = HERO_CELL.w * HERO_FRAMES.length
+    const AH = HERO_CELL.h
+    const g = new THREE.PlaneGeometry(w, h)
+    g.translate(0, h / 2, 0)
+    const u0 = (i * HERO_CELL.w + 1) / AW
+    const u1 = (i * HERO_CELL.w + 1 + w) / AW
+    const v1 = 1 - 1 / AH
+    const v0 = 1 - (1 + h) / AH
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([u0, v1, u1, v1, u0, v0, u1, v0], 2))
+    return g
+  })
+  const heroMesh = new THREE.Mesh(heroGeos[0], heroMat)
   scene3.add(heroMesh)
   const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false })
   const heroBlob = new THREE.Mesh(unitPlane, blobMat)
@@ -1907,7 +1928,7 @@ export function createWalk(canvas, assets, cb) {
       }
     } else hero.step = 0
     const fi = hero.moving ? HERO_SEQ[Math.floor(hero.step * 9) % 4] : 0
-    heroMesh.geometry = spriteGeo(`hero_${hero.dir}_${fi}`)
+    heroMesh.geometry = heroGeos[heroFrameIndex(hero.dir, fi)]
     heroMesh.position.set(hero.x, 0, hero.y)
     heroMesh.quaternion.copy(camera.quaternion)
     heroMesh.visible = true
@@ -2266,6 +2287,14 @@ export function createWalk(canvas, assets, cb) {
       tap({ plot: i })
       return true
     },
+    /** Перевдягнути мандрівника (state.wear: { hat, top, bottom }). Те саме вбрання — нічого не робить. */
+    setOutfit(w) {
+      const next = outfitOf(w)
+      if (outfitKey(next) === outfitKey(heroOutfit)) return
+      heroOutfit = next
+      composeHero(assets['hero-wear'].image, heroOutfit, heroCanvas)
+      heroTex.needsUpdate = true
+    },
     /** Де зараз мандрівник (координати мапи). */
     heroPos() {
       return { x: body.x, y: body.y }
@@ -2313,7 +2342,8 @@ export function createWalk(canvas, assets, cb) {
         if (o.material) o.material.dispose()
       })
       for (const m of [...Object.values(sheetMats), ...Object.values(ghostMats)]) m.dispose() // і ті, якими цього разу не малювали
-      for (const tex of [glowTex, blobTex, beamTex, gridTex, foamTex]) tex.dispose()
+      for (const tex of [glowTex, blobTex, beamTex, gridTex, foamTex, heroTex]) tex.dispose()
+      for (const g of heroGeos) g.dispose()
       lightScene.traverse((o) => o.material?.dispose())
       lightQuad.dispose()
       lightRT.dispose()

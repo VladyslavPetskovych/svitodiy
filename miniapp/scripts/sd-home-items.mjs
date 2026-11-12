@@ -12,16 +12,12 @@
  * генератор атласу (gen-island-art.mjs) кладе їх в аркуш home-decor.png. Потім: npm run gen:island.
  * Шлях до моделі — змінна SD_HOME (типово ~/sd: bin/sd-cli.exe, models/, lora/).
  */
-import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
+import { ROOT, pixelize, sdDraw } from './sd-lib.mjs'
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = join(ROOT, 'art/home-ai')
 const RAW = join(OUT, 'raw')
-const SD = process.env.SD_HOME ?? join(homedir(), 'sd')
 
 /**
  * id → що малювати й розмір спрайта (px гри). wall — висить на стіні (без тіні),
@@ -46,9 +42,6 @@ export const AI_ITEMS = {
   round_rug: { size: '46x28', flat: true, prompt: 'an oval braided rag rug with blue, white and yellow rings, top-down view' },
 }
 
-const STYLE = 'pixel art, single object, centered, game asset sprite, plain flat white background <lora:pixel-art-xl:1>'
-const NEGATIVE = 'blurry, photo, 3d render, floor, room, wall, shadow on background, text, watermark, frame border, multiple objects, cropped, cut off'
-
 const args = process.argv.slice(2)
 const redo = args.includes('--redo')
 const onlyPixelize = args.includes('--pixelize')
@@ -66,32 +59,11 @@ for (const id of ids) {
     continue
   }
   const raw = join(RAW, `${id}.png`)
-  if (!onlyPixelize && (redo || !existsSync(raw))) {
-    const t0 = Date.now()
-    const r = spawnSync(
-      join(SD, 'bin/sd-cli.exe'),
-      [
-        '-m', join(SD, 'models/sdxl-base-Q4_0.gguf'),
-        '--vae', join(SD, 'models/sdxl_vae_fp16fix.safetensors'),
-        '--lora-model-dir', join(SD, 'lora'),
-        '-p', `${STYLE}, ${item.prompt}`,
-        '-n', NEGATIVE,
-        '-W', '1024', '-H', '1024', '--steps', '20', '--cfg-scale', '6', '--seed', String(seed),
-        '-o', raw,
-      ],
-      { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' }
-    )
-    if (r.status !== 0 || !existsSync(raw)) {
-      console.error(`${id}: модель упала\n${r.stderr?.slice(-800)}`)
-      process.exitCode = 1
-      continue
-    }
-    console.log(`${id}: намальовано за ${Math.round((Date.now() - t0) / 1000)} с`)
+  if (!onlyPixelize && (redo || !existsSync(raw)) && !sdDraw(item.prompt, raw, { seed })) {
+    process.exitCode = 1
+    continue
   }
   if (!existsSync(raw)) continue
   const flags = item.flat ? [] : item.wall ? ['--outline'] : ['--outline', '--shadow']
-  const p = spawnSync('python', ['-I', join(ROOT, 'scripts/pixelize.py'), raw, join(OUT, `hd_${id}.png`), '--size', item.size, '--grid', '--main', '0.3', '--tol', '50', ...flags, '--preview', '6'], {
-    stdio: 'inherit',
-  })
-  if (p.status !== 0) process.exitCode = 1
+  if (!pixelize(raw, join(OUT, `hd_${id}.png`), item.size, flags)) process.exitCode = 1
 }

@@ -9,6 +9,7 @@ import { commandDog, feedDog, petDog } from "./game/dogs.js";
 import { GameError } from "./game/errors.js";
 import { moveInterior, placeInterior, removeInterior, setFloor } from "./game/interior.js";
 import { craftRecipe, craftTool } from "./game/craft.js";
+import { equipWear, getWearItem } from "./game/wardrobe.js";
 import { buySeeds, clearPlot, harvestPlot, moveBed, placeBed, plantPlot, removeBed, sellCrops, tillPlot, waterPlot } from "./game/farm.js";
 import { ackReset, collectHome, demolishBuilding, moveBuilding, placeBuilding, upgradeBuilding } from "./game/homestead.js";
 import { gatherNode } from "./game/nodes.js";
@@ -112,6 +113,10 @@ export function buildApiRouter(botToken) {
   api.post("/home/interior/:id/move", handler((req) => moveInterior(uid(req), req.params.id, body(req))));
   api.delete("/home/interior/:id", handler((req) => removeInterior(uid(req), req.params.id)));
   api.post("/home/floor", handler((req) => setFloor(uid(req), body(req))));
+
+  // Шафа: пошити / купити одяг (одразу вдягається) і перевдягтися в своє
+  api.post("/wear/get", handler((req) => getWearItem(uid(req), body(req).item, body(req).how)));
+  api.post("/wear/equip", handler((req) => equipWear(uid(req), body(req).slot, body(req).item ?? null)));
 
   // Город: грядки, насіння, урожай
   api.post("/farm/:plot/till", handler((req) => tillPlot(uid(req), req.params.plot)));

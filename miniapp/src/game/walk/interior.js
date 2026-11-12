@@ -22,6 +22,8 @@ export const INTERIOR_GEOM = {
   shelf: { sprite: 'home_shelf', layer: 'obj', fw: 4, fh: 1, act: 'shelf', label: 'Полиця з книжками' },
   dog_bed: { sprite: 'home_dog_bed', layer: 'floor', fw: 3, fh: 2, dogBed: true },
   chest: { sprite: 'home_chest', layer: 'obj', fw: 3, fh: 1 },
+  // Шафа для одягу (scripts/sd-wardrobe.mjs): підійти — перевдягтися, пошити чи купити одяг.
+  closet: { sprite: 'hd_closet', layer: 'obj', fw: 3, fh: 1, act: 'closet', label: 'Шафа для одягу' },
   bench: { sprite: 'home_bench', layer: 'obj', fw: 4, fh: 1 },
   boots: { sprite: 'home_boots', layer: 'obj', fw: 1, fh: 1 },
   washstand: { sprite: 'home_washstand', layer: 'obj', fw: 2, fh: 1 },
@@ -60,7 +62,7 @@ export const INTERIOR_GEOM = {
   loom: { sprite: 'hd_loom', layer: 'obj', fw: 4, fh: 1 },
   cradle: { sprite: 'hd_cradle', layer: 'obj', fw: 3, fh: 1 },
   dresser: { sprite: 'hd_dresser', layer: 'obj', fw: 3, fh: 1 },
-  wardrobe: { sprite: 'hd_wardrobe', layer: 'obj', fw: 3, fh: 1 },
+  wardrobe: { sprite: 'hd_wardrobe', layer: 'obj', fw: 3, fh: 1, act: 'closet', label: 'Розписна шафа' },
   rocking_chair: { sprite: 'hd_rocking_chair', layer: 'obj', fw: 2, fh: 1 },
   floor_clock: { sprite: 'hd_floor_clock', layer: 'obj', fw: 2, fh: 1 },
   desk: { sprite: 'hd_desk', layer: 'obj', fw: 3, fh: 1 },

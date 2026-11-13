@@ -32,6 +32,7 @@ import {
   startArc,
   stopArc,
 } from "./game/journal.js";
+import { bumpIsland, leavePresence, postPresence, wearChanged } from "./game/presence.js";
 import { displayName, getState, upsertProfile } from "./game/state.js";
 import { rateLimit } from "./rateLimit.js";
 import { requireTelegramUser } from "./telegramAuth.js";
@@ -69,10 +70,28 @@ export function buildApiRouter(botToken) {
     res.json(catalog);
   });
 
-  api.use(requireTelegramUser(botToken), rateLimit({ windowMs: 10_000, max: 40 }));
+  api.use(requireTelegramUser(botToken));
 
   const uid = (req) => req.tgUser.id;
   const body = (req) => req.body ?? {};
+
+  // Хто ще на спільному острові. Опитується часто (до 2/с), тож має свій ліміт і стоїть
+  // ДО загального — інакше з'їв би гравцеві весь ліміт на справжні дії. Redis не чіпає.
+  const presenceLimit = rateLimit({ windowMs: 10_000, max: 40 });
+  api.post("/presence", presenceLimit, handler((req) => postPresence(req.tgUser, req.body), { withState: false }));
+  api.delete("/presence", presenceLimit, handler((req) => leavePresence(uid(req)), { withState: false }));
+
+  api.use(rateLimit({ windowMs: 10_000, max: 40 }));
+
+  /**
+   * Дія змінює спільний острів (будівлі, декор, город, хата, пси, ресурси) — підняти його версію,
+   * щоб інші мешканці підхопили зміну. До getState у handler — тож сам гравець уже «бачив» нову версію.
+   */
+  const island = (fn) => async (req) => {
+    const result = await fn(req);
+    await bumpIsland(uid(req));
+    return result;
+  };
 
   // Стан гравця. Відкриття апки також оновлює профіль (ім'я, фото).
   const loadState = handler(async (req) => {
@@ -95,50 +114,55 @@ export function buildApiRouter(botToken) {
   api.post("/alchemy/craft", handler((req) => craft(uid(req), body(req).recipeId)));
 
   // Рідний острів: будівлі й комора
-  api.post("/home/collect", handler((req) => collectHome(uid(req))));
-  api.post("/home/:id/upgrade", handler((req) => upgradeBuilding(uid(req), req.params.id)));
+  api.post("/home/collect", handler(island((req) => collectHome(uid(req)))));
+  api.post("/home/:id/upgrade", handler(island((req) => upgradeBuilding(uid(req), req.params.id))));
   // Будівлі, які гравець ставить сам: поставити, перенести, розібрати (з поверненням усього витраченого).
   api.post("/home/reset/ack", handler((req) => ackReset(uid(req))));
-  api.post("/home/:id/place", handler((req) => placeBuilding(uid(req), req.params.id, body(req).x, body(req).y)));
-  api.post("/home/:id/move", handler((req) => moveBuilding(uid(req), req.params.id, body(req).x, body(req).y)));
-  api.delete("/home/building/:id", handler((req) => demolishBuilding(uid(req), req.params.id)));
+  api.post("/home/:id/place", handler(island((req) => placeBuilding(uid(req), req.params.id, body(req).x, body(req).y))));
+  api.post("/home/:id/move", handler(island((req) => moveBuilding(uid(req), req.params.id, body(req).x, body(req).y))));
+  api.delete("/home/building/:id", handler(island((req) => demolishBuilding(uid(req), req.params.id))));
 
   // Пісочниця: декор на острові
-  api.post("/home/deco", handler((req) => placeDecor(uid(req), body(req).kind, body(req).x, body(req).y)));
-  api.post("/home/deco/:id/move", handler((req) => moveDecor(uid(req), req.params.id, body(req).x, body(req).y)));
-  api.delete("/home/deco/:id", handler((req) => removeDecor(uid(req), req.params.id)));
+  api.post("/home/deco", handler(island((req) => placeDecor(uid(req), body(req).kind, body(req).x, body(req).y))));
+  api.post("/home/deco/:id/move", handler(island((req) => moveDecor(uid(req), req.params.id, body(req).x, body(req).y))));
+  api.delete("/home/deco/:id", handler(island((req) => removeDecor(uid(req), req.params.id))));
 
   // Пісочниця в хатинці: меблі й речі на стінах
-  api.post("/home/interior", handler((req) => placeInterior(uid(req), body(req))));
-  api.post("/home/interior/:id/move", handler((req) => moveInterior(uid(req), req.params.id, body(req))));
-  api.delete("/home/interior/:id", handler((req) => removeInterior(uid(req), req.params.id)));
-  api.post("/home/floor", handler((req) => setFloor(uid(req), body(req))));
+  api.post("/home/interior", handler(island((req) => placeInterior(uid(req), body(req)))));
+  api.post("/home/interior/:id/move", handler(island((req) => moveInterior(uid(req), req.params.id, body(req)))));
+  api.delete("/home/interior/:id", handler(island((req) => removeInterior(uid(req), req.params.id))));
+  api.post("/home/floor", handler(island((req) => setFloor(uid(req), body(req)))));
 
+  /** Перевдягся — сусіди по спільному острову побачать новий одяг з наступним опитуванням. */
+  const dressed = (req) => (result) => {
+    wearChanged(uid(req));
+    return result;
+  };
   // Шафа: пошити / купити одяг (одразу вдягається) і перевдягтися в своє
-  api.post("/wear/get", handler((req) => getWearItem(uid(req), body(req).item, body(req).how)));
-  api.post("/wear/equip", handler((req) => equipWear(uid(req), body(req).slot, body(req).item ?? null)));
+  api.post("/wear/get", handler((req) => getWearItem(uid(req), body(req).item, body(req).how).then(dressed(req))));
+  api.post("/wear/equip", handler((req) => equipWear(uid(req), body(req).slot, body(req).item ?? null).then(dressed(req))));
 
   // Город: грядки, насіння, урожай
-  api.post("/farm/:plot/till", handler((req) => tillPlot(uid(req), req.params.plot)));
-  api.post("/farm/:plot/plant", handler((req) => plantPlot(uid(req), req.params.plot, body(req).crop)));
-  api.post("/farm/:plot/water", handler((req) => waterPlot(uid(req), req.params.plot)));
-  api.post("/farm/:plot/harvest", handler((req) => harvestPlot(uid(req), req.params.plot)));
-  api.post("/farm/:plot/clear", handler((req) => clearPlot(uid(req), req.params.plot)));
+  api.post("/farm/:plot/till", handler(island((req) => tillPlot(uid(req), req.params.plot))));
+  api.post("/farm/:plot/plant", handler(island((req) => plantPlot(uid(req), req.params.plot, body(req).crop))));
+  api.post("/farm/:plot/water", handler(island((req) => waterPlot(uid(req), req.params.plot))));
+  api.post("/farm/:plot/harvest", handler(island((req) => harvestPlot(uid(req), req.params.plot))));
+  api.post("/farm/:plot/clear", handler(island((req) => clearPlot(uid(req), req.params.plot))));
   api.post("/farm/seeds", handler((req) => buySeeds(uid(req), body(req).crop, body(req).count)));
   api.post("/farm/sell", handler((req) => sellCrops(uid(req), body(req).crop, body(req).count)));
-  api.post("/farm/beds", handler((req) => placeBed(uid(req), body(req).x, body(req).y)));
-  api.post("/farm/beds/:plot/move", handler((req) => moveBed(uid(req), req.params.plot, body(req).x, body(req).y)));
-  api.delete("/farm/beds/:plot", handler((req) => removeBed(uid(req), req.params.plot)));
+  api.post("/farm/beds", handler(island((req) => placeBed(uid(req), body(req).x, body(req).y))));
+  api.post("/farm/beds/:plot/move", handler(island((req) => moveBed(uid(req), req.params.plot, body(req).x, body(req).y))));
+  api.delete("/farm/beds/:plot", handler(island((req) => removeBed(uid(req), req.params.plot))));
 
   // Виживання: дерева й каміння на острові, верстат
-  api.post("/island/nodes/:id/gather", handler((req) => gatherNode(uid(req), req.params.id)));
+  api.post("/island/nodes/:id/gather", handler(island((req) => gatherNode(uid(req), req.params.id))));
   api.post("/craft/tool", handler((req) => craftTool(uid(req), body(req).tool)));
   api.post("/craft/recipe", handler((req) => craftRecipe(uid(req), body(req).recipe, body(req).count)));
 
   // Пси-компаньйони
-  api.post("/dogs/:id/feed", handler((req) => feedDog(uid(req), req.params.id, body(req).item)));
-  api.post("/dogs/:id/pet", handler((req) => petDog(uid(req), req.params.id)));
-  api.post("/dogs/:id/command", handler((req) => commandDog(uid(req), req.params.id, body(req))));
+  api.post("/dogs/:id/feed", handler(island((req) => feedDog(uid(req), req.params.id, body(req).item))));
+  api.post("/dogs/:id/pet", handler(island((req) => petDog(uid(req), req.params.id))));
+  api.post("/dogs/:id/command", handler(island((req) => commandDog(uid(req), req.params.id, body(req)))));
 
   // Острови
   api.post("/islands/:id/explore", handler((req) => explore(uid(req), req.params.id)));

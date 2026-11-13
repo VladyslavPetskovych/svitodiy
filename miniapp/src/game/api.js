@@ -16,8 +16,9 @@ export class ApiError extends Error {
  * @param {string} method
  * @param {string} path без /api, напр. "/fish/cast"
  * @param {object} [body]
+ * @param {{ keepalive?: boolean, signal?: AbortSignal }} [opts] keepalive — запит доживе, навіть якщо апку закривають
  */
-export async function request(initData, method, path, body) {
+export async function request(initData, method, path, body, opts = {}) {
   let res
   try {
     res = await fetch(`${BASE}/api${path}`, {
@@ -27,6 +28,8 @@ export async function request(initData, method, path, body) {
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
+      keepalive: opts.keepalive,
+      signal: opts.signal,
     })
   } catch {
     throw new ApiError(0, 'network', 'Немає зв’язку з сервером. Перевір інтернет.')

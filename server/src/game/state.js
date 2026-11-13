@@ -21,6 +21,7 @@ import { getTools } from "./craft.js";
 import { getWear } from "./wardrobe.js";
 import { ensureIsland, takenBoxes } from "./island.js";
 import { getNodes } from "./nodes.js";
+import { islandSnapshot } from "./presence.js";
 import { dailyClaimKey, jobKey, kyivDay, previousDay, quizRewardKey, userKey } from "./keys.js";
 
 /**
@@ -79,6 +80,8 @@ async function getJob(userId) {
 
 /** Усе про гравця одним запитом — після кожної дії клієнт просто замінює стан. */
 export async function getState(userId) {
+  // Версію спільного острова фіксуємо ДО читання: зміна посеред читання не загубиться (presence.js).
+  const island = await islandSnapshot(userId);
   await grantAdminResources(userId);
   await ensureIsland(userId);
   const r = getRedis();
@@ -106,7 +109,7 @@ export async function getState(userId) {
     if (inventory[k] <= 0) delete inventory[k];
   }
 
-  return {
+  const state = {
     user: {
       id: userId,
       firstName: h.firstName ?? "",
@@ -148,6 +151,10 @@ export async function getState(userId) {
       quizRewardsToday: Math.min(Number(quizCount ?? 0), GAME_CONFIG.quizDailyCap),
       goal,
     },
+    // shared — острів спільний: Mini App показує, хто ще на ньому, і підхоплює зміни інших.
+    household: { shared: island.shared },
     serverTime: Date.now(),
   };
+  island.commit();
+  return state;
 }

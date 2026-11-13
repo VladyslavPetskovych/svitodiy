@@ -20,6 +20,7 @@ import { createInput } from './input.js'
 import { HERO_CELL, HERO_FRAME, HERO_FRAMES, composeHero, heroFrameIndex, outfitKey, outfitOf } from './outfit.js'
 import { CELL, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotCenter, plotRect, walkGrid } from './layout.js'
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
+import { createPeers } from './peers.js'
 
 /**
  * Прогулянка островом і хатинкою на three.js.
@@ -586,6 +587,19 @@ export function createWalk(canvas, assets, cb) {
   heroBlob.scale.set(13, 1, 8)
   heroBlob.renderOrder = -7
   scene3.add(heroBlob)
+
+  // Інші мандрівники спільного острова (presence.js): ті самі кадри, свій одяг, ім'я над головою.
+  const peers = createPeers({
+    scene3,
+    heroGeos,
+    sheet: assets['hero-wear'].image,
+    blobTex,
+    unitPlane,
+    seq: HERO_SEQ,
+    maxSpeed: PHYS.maxSpeed,
+    anchored: (e, out) => anchored(e, out),
+    floatText: (text, o) => floatText(text, o),
+  })
 
   // Пес-компаньйон: свій автомат станів, але та сама сітка, шляхи й фізика.
   // Пси-компаньйони: у кожного свій аркуш і характер, але спільні сітка, шляхи й фізика.
@@ -1933,6 +1947,7 @@ export function createWalk(canvas, assets, cb) {
     heroMesh.quaternion.copy(camera.quaternion)
     heroMesh.visible = true
     heroBlob.position.set(hero.x, 0.2, hero.y)
+    peers.update(dt, { sceneId: scene.id, camera, rig })
     for (const d of dogs) d.frame(dt, a, camera, rig)
 
     // Спрайти дивляться в камеру; «поп» і падіння новеньких.
@@ -2299,6 +2314,14 @@ export function createWalk(canvas, assets, cb) {
     heroPos() {
       return { x: body.x, y: body.y }
     },
+    /** Що бачать про тебе інші на спільному острові: сцена, місце, куди дивишся (у світі, не на екрані). */
+    selfState() {
+      return { scene: scene.id, x: body.x, y: body.y, fx: face.x, fy: face.y }
+    },
+    /** Інші мандрівники з presence.js; serverNow — годинник сервера (їхні точки — у його часі). */
+    setPeers(list, serverNow) {
+      peers.set(list, serverNow)
+    },
     /** Де на екрані (clientX/Y) точка світу — для тестів і підказок поверх канви. */
     screenOf(x, y, h = 0) {
       const v = new THREE.Vector3(x, h, y).project(camera)
@@ -2316,7 +2339,7 @@ export function createWalk(canvas, assets, cb) {
       const dogsInfo = Object.fromEntries(
         dogs.map((d) => [d.id, { x: d.body.x, y: d.body.y, state: d.state, mode: d.mode, scene: d.sceneId, visible: d.visible, dist: dogDist(d) }])
       )
-      return { player: { x: body.x, y: body.y }, hero: { x: hero.x, y: hero.y, dir: hero.dir, moving: hero.moving, my: heroMesh.position.y }, focus: { ...rig.focus }, dogs: dogsInfo, near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count }
+      return { player: { x: body.x, y: body.y }, hero: { x: hero.x, y: hero.y, dir: hero.dir, moving: hero.moving, my: heroMesh.position.y }, focus: { ...rig.focus }, dogs: dogsInfo, peers: peers.info(), near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count }
     },
     destroy() {
       renderer.setAnimationLoop(null)
@@ -2329,6 +2352,7 @@ export function createWalk(canvas, assets, cb) {
       canvas.removeEventListener('wheel', onWheel)
       input.destroy()
       clearItems()
+      peers.dispose()
       for (const d of dogs) d.dispose()
       for (const s of bubbleSprites.values()) s.material.dispose()
       while (floats.length) dropFloat(0)

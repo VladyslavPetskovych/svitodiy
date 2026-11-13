@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { canAfford, homeStorage, itemOf } from '../data.js'
 import { useGame, useNow } from '../context.js'
 import { bedCount, fieldView, ownedSeeds, plotSpot, plotView, shortDuration } from '../farm.js'
+import { createPresence } from '../presence.js'
 import { haptic, useBackButton } from '../tg.js'
 import { Bar, ItemIcon, PxButton, Segmented } from '../ui.jsx'
 import atlas from '../walk/atlas.json'
@@ -81,7 +82,7 @@ const CATS_HOME = [
 
 /** Рідний острів зсередини: ходиш мандрівником, підходиш до будівель — або будуєш у пісочниці. */
 export default function IslandWalk() {
-  const { state, catalog, items, act, toast, setToastSink, switchTab, back } = useGame()
+  const { wa, state, catalog, items, act, toast, setToastSink, switchTab, back } = useGame()
   const canvas = useRef(null)
   const engine = useRef(null)
   const [error, setError] = useState(null)
@@ -667,6 +668,47 @@ export default function IslandWalk() {
     if (ready) engine.current?.setOutfit(state.wear)
   }, [ready, state.wear])
 
+  // Спільний острів: інші мешканці гуляють поруч (presence.js), а їхні зміни острова
+  // підтягуються самі — тихим /state, не частіше ніж раз на 2 с.
+  const shared = !!state.household?.shared
+  const actRef = useRef(act)
+  useEffect(() => {
+    actRef.current = act
+  }, [act])
+  const [company, setCompany] = useState([]) // [{ id, name, scene }] — для значка 👥 угорі
+  useEffect(() => {
+    if (!ready || !shared) return
+    let lastRefresh = 0
+    let refreshing = false
+    const presence = createPresence({
+      initData: wa.initData,
+      getSelf: () => engine.current?.selfState(),
+      onPeers: (list, serverNow) => {
+        engine.current?.setPeers(list, serverNow)
+        const brief = list.map((q) => ({ id: q.id, name: q.name, scene: q.s?.at(-1)?.[3] ?? null }))
+        setCompany((prev) => (JSON.stringify(prev) === JSON.stringify(brief) ? prev : brief))
+      },
+      onChanged: () => {
+        const t = Date.now()
+        if (refreshing || t - lastRefresh < 2000) return
+        lastRefresh = t
+        refreshing = true
+        actRef.current('GET', '/state', undefined, { silent: true }).finally(() => {
+          refreshing = false
+        })
+      },
+      onOff: () => setCompany([]),
+    })
+    // Апку сховали — нас більше не видно; повернулись — знову на острові.
+    const onVisible = () => (document.visibilityState === 'visible' ? presence.start() : presence.stop())
+    onVisible()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      presence.stop()
+    }
+  }, [ready, shared, wa.initData])
+
   // Бульбашки врожаю над будівлями, де вже є що забрати.
   const storage = homeStorage(catalog, home, now)
   const bubbleKey = JSON.stringify(
@@ -753,6 +795,14 @@ export default function IslandWalk() {
         </div>
         {ready && (
           <div className="pointer-events-auto flex gap-1">
+            {!build && company.length > 0 && (
+              <HudButton
+                label={`👥${company.length}`}
+                title="Хто ще на острові"
+                onClick={() => say(company.map((c) => `${c.name} ${c.scene === 'home' ? 'у хатинці 🏠' : 'надворі 🌿'}`).join(' · '), 'hero', 'calm')}
+                wide
+              />
+            )}
             {!build && <HudButton label={`${sky.part.emoji}${sky.weather.emoji}`} title={`${sky.part.name} · ${sky.weather.name}`} onClick={() => say(skyHint(sky), 'hero', 'calm')} wide />}
             <HudButton label="+" title="Наблизити" onClick={() => engine.current?.zoom(0.8)} />
             <HudButton label="−" title="Віддалити" onClick={() => engine.current?.zoom(1.25)} />

@@ -276,7 +276,10 @@ def main():
     pad_x, pad_y = (1, 2) if a.outline else (0, 0)
     raw = Image.open(a.src).convert('RGB')
     if a.rotate:
-        raw = raw.rotate(a.rotate, expand=True, fillcolor=raw.getpixel((0, 0)))
+        # Не кратно 90° — сітка AI після повороту вже не рівна: крутимо м'яко й без --grid.
+        square = a.rotate % 90 == 0
+        raw = raw.rotate(a.rotate, Image.NEAREST if square else Image.BICUBIC, expand=True, fillcolor=raw.getpixel((0, 0)))
+        a.grid = a.grid and square
     src = np.asarray(raw)
     mask = remove_background(src, a.tol, a.grey)
     if a.main:

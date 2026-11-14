@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
 import { useState } from 'react'
 import { useGame } from '../context.js'
-import { canAfford, formatAmounts, itemOf } from '../data.js'
+import { canAfford, formatAmounts, itemOf, toolArt } from '../data.js'
 import { haptic } from '../tg.js'
 import { Chip, ItemIcon, PxButton, Sheet } from '../ui.jsx'
 
@@ -77,7 +77,11 @@ export function CraftSheet({ open, onClose }) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
             >
-              <span className={`text-3xl ${lvl ? '' : 'opacity-40 grayscale'}`}>{t.emoji}</span>
+              {toolArt(t.id, lvl) ? (
+                <img src={toolArt(t.id, lvl)} alt="" className={`pixelated h-10 w-10 shrink-0 ${lvl ? '' : 'opacity-40 grayscale'}`} />
+              ) : (
+                <span className={`text-3xl ${lvl ? '' : 'opacity-40 grayscale'}`}>{t.emoji}</span>
+              )}
               <div className="min-w-0 flex-1">
                 <p className="truncate font-extrabold">{cur ? cur.name : (t.none ?? 'Немає')}</p>
                 {next ? (

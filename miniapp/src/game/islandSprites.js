@@ -128,18 +128,6 @@ const FLOWER_BOX = ['.P.u.P.', 'gGgGgGg', 'bbbbbbb']
 const LANTERN = ['.K.', 'KYK', 'KyK', '.K.', '.B.', '.B.']
 const FLAG = ['KUUUU', 'KUUUU', 'Kuuuu', 'Kuuuu', 'K....', 'K....', 'K....']
 const POST_LANTERN = ['KYK', 'KyK', '.B.', '.B.']
-const SAILBOAT = [
-  '.....K.......',
-  '.....KW......',
-  '.....KWW.....',
-  '.....KWWW....',
-  '.....KRRRR...',
-  '.....KWWWWW..',
-  '.....K.......',
-  'BbbbbbbbbbbB.',
-  '.BbbbbbbbbB..',
-  '..BBBBBBBB...',
-]
 const SIGN = ['.KKKKK.', '.KLLLK.', '.KLKLK.', '.KKKKK.', '...B...', '...B...']
 
 /**
@@ -168,7 +156,6 @@ export function buildingSprites(id, level) {
               { rows: POST_LANTERN, x: 545, y: 562 },
             ]
           : []),
-        ...(level >= 3 ? [{ rows: SAILBOAT, x: 292, y: 614, reflect: true }] : []),
       ]
     case 'lighthouse':
       return level > 0 ? [lighthouseSprite(level)] : []

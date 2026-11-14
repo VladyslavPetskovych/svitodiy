@@ -850,6 +850,41 @@ function nodeSlots(t) {
   return out
 }
 
+/**
+ * Мілина біля берега, куди ставлять сітки (декор у воді, напр. fishing_net): клітинка майже вся — вода,
+ * до суші не далі SHORE_REACH клітинок, і не під причалом, човном чи місцем для рибалки.
+ * Рядки '0'/'1' — у atlas.shore (рушій) і server/src/game/island-shore.json (сервер перевіряє те саме).
+ */
+const SHORE_REACH = 3
+function shoreMask(t) {
+  const { w, h } = MAP
+  const walk = walkGrid(t)
+  const land = (cx, cy) => walk[cy]?.[cx] === '1'
+  const wet = (cx, cy) => {
+    let n = 0
+    for (let y = cy * CELL; y < (cy + 1) * CELL; y++)
+      for (let x = cx * CELL; x < (cx + 1) * CELL; x++) if (x < w && y < h && t.cls[y * w + x] === WATER) n++
+    return n >= CELL * CELL * 0.85
+  }
+  const busy = [
+    [PIER.x - PIER.w / 2, PIER.y0 - 6, PIER.w, PIER.y1 - PIER.y0 + 6],
+    ...INTERACT.filter((it) => ['pier', 'fishing', 'boat'].includes(it.id)).map((it) => it.box),
+  ].map(([x, y, bw, bh]) => [x - 4, y - 4, bw + 8, bh + 8])
+  return walk.map((line, cy) =>
+    [...line]
+      .map((_, cx) => {
+        const x = cx * CELL
+        const y = cy * CELL
+        if (land(cx, cy) || !wet(cx, cy)) return '0'
+        if (busy.some(([bx, by, bw, bh]) => x + CELL > bx && x < bx + bw && y + CELL > by && y < by + bh)) return '0'
+        for (let dy = -SHORE_REACH; dy <= SHORE_REACH; dy++)
+          for (let dx = -SHORE_REACH; dx <= SHORE_REACH; dx++) if (land(cx + dx, cy + dy)) return '1'
+        return '0'
+      })
+      .join('')
+  )
+}
+
 /* ───────── Вода: безшовна плитка 64×64, 4 кадри ───────── */
 
 function waterImage() {
@@ -1621,34 +1656,6 @@ function boatDrawn() {
   return img.outline(C.K)
 }
 
-function sailboat() {
-  const img = new Img(46, 60)
-  // Корпус.
-  for (let y = 42; y < 54; y++)
-    for (let x = 2; x < 44; x++) {
-      const dx = (x + 0.5 - 23) / 21
-      const dy = (y + 0.5 - 48) / 6
-      if (dx * dx * (dx < 0 ? 1.5 : 1) + dy * dy > 1) continue
-      img.set(x, y, y < 46 ? C.woodHi : y < 50 ? C.wood : C.woodLo)
-    }
-  img.hline(6, 40, 45, '#c8372d')
-  // Щогла й вітрила.
-  img.vline(22, 2, 46, C.woodLo)
-  for (let y = 4; y < 40; y++) {
-    const w = Math.floor((y - 4) * 0.5)
-    for (let x = 0; x < w; x++) img.set(23 + x, y, x > w - 3 ? '#cbc2b0' : '#f3eee2')
-  }
-  for (let y = 10; y < 38; y++) {
-    const w = Math.floor((y - 10) * 0.4)
-    for (let x = 0; x < w; x++) img.set(21 - x, y, x > w - 3 ? '#cbc2b0' : '#e6dcc4')
-  }
-  img.rect(23, 2, 7, 3, '#2f6fd0')
-  img.rect(23, 4, 7, 2, '#ffd23c')
-  img.hline(4, 42, 55, '#cfeaff', 0.7)
-  img.hline(10, 36, 57, '#cfeaff', 0.4)
-  return img.outline(C.K, 0.9)
-}
-
 /* ───────── Декор для пісочниці ───────── */
 
 function decoWildflowers() {
@@ -1893,8 +1900,48 @@ function decoCampfire() {
   return img.outline(C.K, 0.8)
 }
 
+/** Сітка в морі (лежить на воді, як човен): шнур по краю, вічка навскіс, поплавці, червоний буй і трохи водоростей. */
+function decoNet() {
+  const W = 26
+  const H = 18
+  const img = new Img(W, H)
+  const inside = (x, y) => x >= 2 && x <= W - 3 && y >= 2 && y <= H - 3 && !((x === 2 || x === W - 3) && (y === 2 || y === H - 3))
+  const edge = (x, y) => x === 2 || x === W - 3 || y === 2 || y === H - 3
+  // Вічка — шнур навскіс; між ними видно воду. Під шнуром — ледь темніша вода (сітка трохи занурена).
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      if (!inside(x, y) || edge(x, y)) continue
+      if ((x + y) % 4 === 0 || (x - y + 64) % 4 === 0) img.set(x, y, '#e2cf9f', 0.85)
+      else if ((x + y) % 4 === 1 || (x - y + 64) % 4 === 3) img.set(x, y, '#123a6a', 0.25)
+    }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (inside(x, y) && edge(x, y)) img.set(x, y, '#b38b4f')
+  // Поплавці по краю: помаранчеві й білі навперемін.
+  const floats = [5, 10, 15, 20].flatMap((x, i) => [[x, 1, i], [x, H - 4, i + 1]]).concat([[1, 7, 0], [W - 4, 8, 1]])
+  for (const [x, y, i] of floats) {
+    const [c, hi] = i % 2 ? ['#f3eee2', '#ffffff'] : ['#ff8a2a', '#ffd35a']
+    img.rect(x, y, 2, 2, c)
+    img.set(x, y, hi)
+  }
+  // Буй на розі — щоб сітку було видно здалеку.
+  img.ellipse(W - 3, 2.5, 2.5, 2.5, '#d9493a')
+  img.hline(W - 5, W - 1, 2, '#f3eee2')
+  img.set(W - 4, 1, '#ffb3a6')
+  // Що вже заплуталось у вічках.
+  for (const [x, y] of [[8, 8], [9, 9], [9, 8], [16, 11], [17, 11], [12, 5], [19, 6]]) img.set(x, y, '#4f8a34')
+  img.set(14, 9, '#fbeee0')
+  img.set(15, 9, '#f2a7a0')
+  // Контур лише зовні: дірки у вічках лишаються прозорими, крізь них видно воду.
+  const mark = []
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if (!inside(x, y) && !img.alpha(x, y) && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => img.alpha(x + dx, y + dy) > 128)) mark.push([x, y])
+  for (const [x, y] of mark) img.set(x, y, C.K, 0.45)
+  return img
+}
+
 function decoSprites() {
   return {
+    deco_net: decoNet(),
     deco_wildflowers: decoWildflowers(),
     deco_flower_bed: decoFlowerBed(),
     deco_sunflowers: decoSunflowers(),
@@ -2925,7 +2972,6 @@ function buildSprites(farm, room, winter) {
     deck: deck(),
     post_lantern: postLantern(),
     boat: boat(),
-    sailboat: sailboat(),
     ...decoSprites(),
     ...homeSprites(),
     ...farm.sprites,
@@ -3080,7 +3126,11 @@ console.log(`нові речі для хати: ${decorSheet.atlas.w}×${decorSh
 writeFileSync(join(OUT_PUBLIC, 'home-walls.png'), encodePng(walls.image))
 const wallsMeta = { size: { w: walls.image.w, h: walls.image.h }, ...walls.rects }
 writeFileSync(OUT_HOME_ATLAS, JSON.stringify({ size: { w: interior.atlas.w, h: interior.atlas.h }, frames: interior.frames, walls: wallsMeta }) + '\n')
-writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid(), winterWalk: winter.walk }) + '\n')
+const shore = shoreMask(t)
+writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), shore, homeWalk: homeWalkGrid(), winterWalk: winter.walk }) + '\n')
+// Мілина для сіток — сервер перевіряє, що їх ставлять у воду біля берега (server/src/game/decor.js).
+writeFileSync(join(ROOT, '../server/src/game/island-shore.json'), JSON.stringify({ cell: CELL, rows: shore }) + '\n')
+console.log(`мілина для сіток: ${shore.join('').split('1').length - 1} клітинок`)
 // Острів Хуртовини: земля, прибій і місця, де ростуть замети й лід (server/src/game/winter-slots.json).
 writeFileSync(join(OUT_PUBLIC, 'winter-ground.png'), encodePng(winter.ground))
 writeFileSync(join(OUT_PUBLIC, 'winter-foam.png'), encodePng(winter.foam))
@@ -3120,6 +3170,9 @@ for (const [name, anims, cell, scale] of [
   // Іконки одягу (scripts/sd-wardrobe.mjs).
   const OUT_WEAR = join(ROOT, 'public/game/wear')
   if (existsSync(OUT_WEAR)) for (const f of readdirSync(OUT_WEAR).filter((f) => f.endsWith('.png')).sort()) pngs.push(join(OUT_WEAR, f))
+  // Іконки інструментів (scripts/sd-tools.mjs).
+  const OUT_TOOLS = join(ROOT, 'public/game/tools')
+  if (existsSync(OUT_TOOLS)) for (const f of readdirSync(OUT_TOOLS).filter((f) => f.endsWith('.png')).sort()) pngs.push(join(OUT_TOOLS, f))
   for (const f of pngs) h.update(readFileSync(f))
   const v = h.digest('hex').slice(0, 10)
   writeFileSync(join(ROOT, 'src/game/walk/version.json'), JSON.stringify({ v }) + '\n')

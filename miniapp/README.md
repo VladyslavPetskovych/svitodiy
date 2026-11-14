@@ -69,6 +69,10 @@ Telegram ──initData──▶ Гра (Netlify) ──/api/*──▶ edge-ф�
   у Redis `svitodiy:deco:<id>`, ендпойнти `POST /home/deco`, `POST /home/deco/:id/move`, `DELETE /home/deco/:id`
   (прибрав — ресурси повертаються). Геометрія й спрайти — `src/game/walk/decor.js`. Новий предмет = запис
   у `DECOR` на сервері + рядок у `DECO_GEOM` + спрайт у генераторі.
+- Сітка (🥅, «Будова») ставиться лише у воду біля пляжу — на мілину з `atlas.shore`, ту саму маску сервер читає з
+  `server/src/game/island-shore.json` (обидві пише `npm run gen:island`; причал, човен і місце для рибалки виключені).
+  Кожна сітка (до 3) додає +3 дари моря на пляжі одночасно й +1 новий за крок росту, і нові частіше з'являються
+  біля неї (`NET` у `server/src/game/nodes.js`).
 
 ## Локальна розробка
 

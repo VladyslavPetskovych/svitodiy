@@ -1,5 +1,5 @@
 import { addBalance, addResourceToInventory, cropKey, getCrop, getRedis, seedKey } from "../bot.js";
-import { DECOR } from "./decor.js";
+import { DECOR, WATER_DECOR } from "./decor.js";
 import { BUILDINGS, harvest, spentOn } from "./homestead.js";
 import { homeOwner } from "./household.js";
 import { decoKey, farmKey, homeKey, nodesKey } from "./keys.js";
@@ -120,7 +120,8 @@ export function takenBoxes(home, deco, farm) {
     const [fw, fh] = b.foot;
     out.push([p.x - fw * 4 - 4, p.y - fh * 8 - 6, fw * 8 + 8, fh * 8 + 10]);
   }
-  for (const d of deco) out.push([d.x - 14, d.y - 16, 28, 18]);
+  // Сітки стоять у воді — пісок біля них лишаємо вільним для дарів моря.
+  for (const d of deco) if (!WATER_DECOR.has(d.k)) out.push([d.x - 14, d.y - 16, 28, 18]);
   for (const p of Object.values(farm.plots ?? {})) out.push([p.x - 10, p.y - 18, 20, 20]);
   return out;
 }

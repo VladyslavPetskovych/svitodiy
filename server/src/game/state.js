@@ -104,7 +104,7 @@ export async function getState(userId) {
   ]);
   // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
   const [nodes, winterNodes, tools, wear] = await Promise.all([
-    getNodes(userId, takenBoxes(home, deco, farm)),
+    getNodes(userId, takenBoxes(home, deco, farm), "home", deco),
     getNodes(userId, [], "winter"),
     getTools(userId),
     getWear(userId),

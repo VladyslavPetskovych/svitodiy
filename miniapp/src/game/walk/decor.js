@@ -33,6 +33,8 @@ export const DECO_GEOM = {
   seed_stand: { sprite: 'seed_stand', fw: 3, fh: 1, act: 'farmshop' },
   // Дощувач поливає грядки довкола (радіус — catalog.farm.sprinklerR), бризкає водою.
   sprinkler: { sprite: 'sprinkler', fw: 1, fh: 1, spray: true },
+  // Сітка лежить на воді (water — лише на мілині біля берега, atlas.shore) і приманює дари моря на пляж.
+  fishing_net: { sprite: 'deco_net', fw: 3, fh: 2, floor: true, water: true },
 }
 
 /**

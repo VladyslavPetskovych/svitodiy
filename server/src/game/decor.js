@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { homeOwner } from "./household.js";
 import { decoKey, takeCooldown } from "./keys.js";
+import { NET } from "./nodes.js";
 
 /**
  * Пісочниця рідного острова: гравець сам розставляє декор.
@@ -15,6 +17,19 @@ export const DECOR = [
   { id: "workbench", cat: "survival", name: "Верстат", emoji: "🪚", cost: { twig: 4, stone: 2 } },
   { id: "seed_stand", cat: "survival", name: "Комора городника", emoji: "🌱", cost: { twig: 3 } },
   { id: "sprinkler", cat: "survival", name: "Дощувач", emoji: "💦", cost: { plank: 2, metal_scrap: 2 } },
+  // Сітка ставиться лише на мілину біля берега (water, «ніжки» foot у клітинках по 8 px) і приманює
+  // на пляж корчі, мушлі й водорості (server/src/game/nodes.js → NET). Більше limit пляж не прогодує.
+  {
+    id: NET.kind,
+    cat: "survival",
+    name: "Сітка",
+    emoji: "🥅",
+    cost: { twig: 3, seaweed: 3 },
+    water: true,
+    foot: [3, 2],
+    limit: NET.max,
+    hint: "Став у воду біля пляжу — на берег частіше винесе корчі, мушлі й водорості.",
+  },
   { id: "wildflowers", cat: "plants", name: "Польові квіти", emoji: "🌼", cost: {} },
   { id: "flower_bed", cat: "plants", name: "Клумба", emoji: "🌷", cost: { twig: 1 } },
   { id: "sunflowers", cat: "plants", name: "Соняшники", emoji: "🌻", cost: { seaweed: 1 } },
@@ -41,6 +56,31 @@ export const DECOR = [
 export const DECOR_MAX = 150;
 
 const BY_ID = new Map(DECOR.map((d) => [d.id, d]));
+/** Декор, що стоїть у воді, а не на суші. */
+export const WATER_DECOR = new Set(DECOR.filter((d) => d.water).map((d) => d.id));
+
+/**
+ * Мілина біля берега, куди можна ставити сітки: рядки '0'/'1' по клітинках 8×8
+ * (генерує miniapp/scripts/gen-island-art.mjs — та сама маска, що й atlas.shore у Mini App).
+ */
+const SHORE = JSON.parse(readFileSync(new URL("./island-shore.json", import.meta.url), "utf8"));
+
+/** Чи всі клітинки під «ніжками» (якір — низ по центру) — мілина біля берега. */
+function onShore(def, x, y) {
+  const { cell, rows } = SHORE;
+  const [fw, fh] = def.foot;
+  const x0 = x - (fw * cell) / 2;
+  const y0 = y - fh * cell;
+  for (let cy = Math.floor(y0 / cell); cy <= Math.floor((y - 1) / cell); cy++)
+    for (let cx = Math.floor(x0 / cell); cx <= Math.floor((x0 + fw * cell - 1) / cell); cx++)
+      if (rows[cy]?.[cx] !== "1") return false;
+  return true;
+}
+
+/** Предмет у воді — лише на мілині; на суші — як і раніше, де завгодно в межах мапи. */
+function checkSpot(def, x, y) {
+  if (def.water && !onShore(def, x, y)) throw conflict("not_water", `${def.emoji} ${def.name}: став у воду біля берега.`);
+}
 /** Межі мапи острова в пікселях арту — як MAP у walk/layout.js. */
 const MAP_W = 512;
 const MAP_H = 448;
@@ -94,6 +134,11 @@ export async function placeDecor(userId, kind, x, y) {
   const r = getRedis();
   const k = await key(userId);
   if ((await r.hLen(k)) >= DECOR_MAX) throw conflict("full", `На острові вже ${DECOR_MAX} прикрас — прибери щось.`);
+  checkSpot(def, pos.x, pos.y);
+  if (def.limit) {
+    const same = (await r.hVals(k)).filter((raw) => raw.includes(`"k":"${def.id}"`)).length;
+    if (same >= def.limit) throw conflict("limit", `${def.emoji} Більше ${def.limit} сіток пляж не прогодує.`);
+  }
   if (Object.keys(def.cost).length && !(await consumeResources(userId, def.cost))) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
@@ -111,6 +156,7 @@ export async function moveDecor(userId, id, x, y) {
   const raw = await r.hGet(hk, id);
   if (!raw) throw new GameError(404, "not_found", "Цієї прикраси вже немає.");
   const { k } = JSON.parse(raw);
+  if (BY_ID.has(k)) checkSpot(BY_ID.get(k), pos.x, pos.y);
   await r.hSet(hk, id, JSON.stringify({ k, ...pos }));
   return { item: { id, k, ...pos } };
 }

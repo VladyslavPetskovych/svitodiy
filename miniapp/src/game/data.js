@@ -51,6 +51,10 @@ const ITEM_ART = new Set([
   'relic_hook_silver',
   'relic_hook_gold',
 ])
+/** Інструменти з піксельною іконкою (scripts/sd-tools.mjs): /game/tools/<id>_<рівень>.png, рівні 1…N. */
+const TOOL_ART = { shovel: 2 }
+/** Іконка інструмента на рівні (0 — ще немає: показуємо перший рівень), або null — тоді емодзі. */
+export const toolArt = (id, level) => (TOOL_ART[id] ? `/game/tools/${id}_${Math.min(Math.max(level, 1), TOOL_ART[id])}.png?v=${artVersion.v}` : null)
 const itemArt = (id) => (ITEM_ART.has(id) ? `/game/items/${id}.png` : null)
 
 /** Словник id → опис предмета (риба, ресурс, реліквія). */

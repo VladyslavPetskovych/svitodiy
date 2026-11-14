@@ -189,6 +189,8 @@ for (const sc of Object.values(SCENES)) sc.geo = geometry(sc.walk, sc.map)
 
 /** Суша острова, на якій можна будувати: з генератора, без мостків над водою. */
 const land = walkGrid(atlas.walk, [])
+/** Мілина біля берега, куди ставлять сітки (без причалу, човна й місця для рибалки) — теж з генератора. */
+const shore = walkGrid(atlas.shore ?? atlas.walk.map((l) => '0'.repeat(l.length)), [])
 /** Підлога хатинки, на якій можна ставити речі. */
 const homeLand = walkGrid(atlas.homeWalk, [])
 
@@ -1572,7 +1574,10 @@ export function createWalk(canvas, assets, cb) {
     if (!g) return { ok: false, reason: 'Невідомий предмет' }
     const fp = decoFootprint(kind, x, y)
     const cells = geo.cellsOf(fp)
-    if (!scene.outdoor || cells.some((c) => c < 0 || !land[c])) return { ok: false, reason: 'Тут будувати не можна' }
+    if (!scene.outdoor) return { ok: false, reason: 'Тут будувати не можна' }
+    // Сітку — лише на мілину біля берега, решту — лише на сушу.
+    if (g.water && cells.some((c) => c < 0 || !shore[c])) return { ok: false, reason: 'Сітку ставлять у воду біля берега' }
+    if (!g.water && cells.some((c) => c < 0 || !land[c])) return { ok: false, reason: 'Тут будувати не можна' }
     const others = list.filter((p) => !p.uid || p.uid !== ignoreUid)
     const busy = new Uint8Array(geo.cols * geo.rows)
     let tree = false

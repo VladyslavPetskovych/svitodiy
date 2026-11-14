@@ -466,6 +466,11 @@ export default function IslandWalk({ start = 'island' }) {
         return
       }
     }
+    if (!indoors && d.limit && deco.filter((x) => x.k === d.id).length >= d.limit) {
+      haptic('warning')
+      toast(`${d.emoji} Уже ${d.limit} — більше не треба`, 'error')
+      return
+    }
     if (indoors && d.level > houseLevel) {
       haptic('warning')
       toast(`🔒 Відкриється, коли хатинка стане ${d.level}-го рівня`, 'error')
@@ -1102,7 +1107,7 @@ function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost
   const beds = bedCount(state.farm)
   const selItem = sel && placed.find((d) => d.id === sel)
   const active = ghost ? defOf(ghost.kind) : pick ? defOf(pick) : null
-  const where = (d) => (indoor ? (d.wall ? 'на стіні, де повісити' : 'на підлозі, де поставити') : 'на острові, де поставити')
+  const where = (d) => (indoor ? (d.wall ? 'на стіні, де повісити' : 'на підлозі, де поставити') : d.water ? 'у воді біля пляжу, куди закинути' : 'на острові, де поставити')
 
   const floorDef = floorTry && catalog.floors?.find((f) => f.id === floorTry.p)
 
@@ -1149,9 +1154,12 @@ function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost
     context = (
       <>
         <DecoIcon kind={active.id} box={34} indoor={indoor} />
-        <p className="min-w-0 flex-1 text-[12px] text-cream/85">
-          Торкнись місця {where(active)} «{active.name}».
-        </p>
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] text-cream/85">
+            Торкнись місця {where(active)} «{active.name}».
+          </p>
+          {active.hint && <p className="text-[10px] leading-tight text-cream/65">{active.hint}</p>}
+        </div>
         <PxButton size="sm" variant="paper" onClick={onCancel} aria-label="Скасувати">
           ✕
         </PxButton>
@@ -1205,7 +1213,8 @@ function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost
           .map((d) => {
             const built = d.building && state.home.levels[d.building] > 0
             const locked = indoor && d.level > houseLevel
-            const full = d.id === 'bed' && beds.used >= beds.max
+            const count = d.limit ? placed.filter((x) => x.k === d.id).length : 0
+            const full = (d.id === 'bed' && beds.used >= beds.max) || (d.limit > 0 && count >= d.limit)
             const affordable = !locked && !full && (built || canAfford(d.cost, state.balance, state.inventory))
             const chosen = (ghost?.kind ?? pick) === d.id && !ghost?.uid
             return (
@@ -1221,6 +1230,11 @@ function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost
                   <DecoIcon kind={d.id} box={42} indoor={indoor} />
                 </span>
                 {locked && <span className="absolute top-0.5 right-1 font-pixel text-[9px] text-ink">🔒{d.level}</span>}
+                {d.limit > 0 && (
+                  <span className="absolute top-0.5 right-1 font-pixel text-[9px] text-ink">
+                    {count}/{d.limit}
+                  </span>
+                )}
                 <span className="w-full truncate px-1 text-center text-[10px] leading-tight font-extrabold text-ink">{d.name}</span>
                 <span className="flex min-h-[14px] flex-wrap justify-center gap-x-1 px-0.5 text-[9px] leading-tight text-ink-soft">
                   {built ? (

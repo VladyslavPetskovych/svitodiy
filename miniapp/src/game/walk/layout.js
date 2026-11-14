@@ -107,7 +107,6 @@ export function placements(home, chestOpen, deco = [], nodes = []) {
     add('post_lantern', PIER.x - 15, 372)
     add('post_lantern', PIER.x + 15, 372)
   }
-  if (levels.pier >= 3) add('sailboat', 196, 420)
   add('boat', BOAT.x, BOAT.y, { layer: 'floor' })
 
   add(chestOpen ? 'chest_open' : 'chest', CHEST.x, CHEST.y, { blocks: [[CHEST.x - 7, CHEST.y - 6, 14, 6]] })

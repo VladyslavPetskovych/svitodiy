@@ -114,6 +114,13 @@ export const REALMS = {
   home: { key: nodesKey, target: { grass: 22, sand: 9, rock: 3 }, growMs: 4 * 60_000 },
   winter: { key: winterNodesKey, target: { snow: 18, ice: 5 }, growMs: 3 * 60_000 },
 };
+
+/**
+ * Сітки в морі біля пляжу (декор fishing_net) приманюють дари моря: кожна (до max) —
+ * +extra корчів, мушель і водоростей на пляжі одночасно й ще один новий за кожен крок росту.
+ * Нові дари моря частіше (chance) виносить на пісок за r px від сітки.
+ */
+export const NET = { kind: "fishing_net", max: 3, extra: 3, r: 64, chance: 0.75 };
 const realmOf = (id) => {
   const realm = REALMS[id];
   if (!realm) throw badRequest("Невідомий острів.");
@@ -155,13 +162,17 @@ KINDS_BY_WHERE.rock.push("rock", "pebble");
  * Посадити до n нових ресурсів на вільні місця.
  * @param {Record<string, {k: string, x: number, y: number}>} nodes наявні
  * @param {number[][]} taken зайняті прямокутники (будівлі, декор, грядки)
+ * @param {{ x: number, y: number }[]} lure точки, біля яких ростуть охочіше (сітки в морі)
  */
-function sprout(nodes, taken, where, n) {
+function sprout(nodes, taken, where, n, lure = []) {
   const fresh = {};
   const all = () => [...Object.values(nodes), ...Object.values(fresh)];
   const free = SLOTS[where].filter(([x, y]) => !blocked(x, y, taken) && !all().some((o) => Math.abs(o.x - x) < 14 && Math.abs(o.y - y) < 12));
+  const lured = ([x, y]) => lure.some((p) => Math.hypot(p.x - x, p.y - y) <= NET.r);
   for (let i = 0; i < n && free.length; i++) {
-    const [x, y] = free.splice(Math.floor(Math.random() * free.length), 1)[0];
+    const near = lure.length && Math.random() < NET.chance ? free.map((s, j) => (lured(s) ? j : -1)).filter((j) => j >= 0) : [];
+    const at = near.length ? near[Math.floor(Math.random() * near.length)] : Math.floor(Math.random() * free.length);
+    const [x, y] = free.splice(at, 1)[0];
     if (all().some((o) => Math.abs(o.x - x) < 14 && Math.abs(o.y - y) < 12)) continue;
     // Види з лімітом (max) більше не ростуть, коли їх уже вдосталь.
     const kinds = KINDS_BY_WHERE[where].filter((k) => !NODES[k].max || all().filter((o) => o.k === k).length < NODES[k].max);
@@ -177,9 +188,12 @@ function sprout(nodes, taken, where, n) {
  * @param {string} owner чий острів (homeOwner)
  * @param {number[][]} taken зайняті прямокутники
  * @param {keyof typeof REALMS} realmId рідний острів чи Хуртовина
+ * @param {{ x: number, y: number }[]} nets сітки в морі (центри) — приманюють дари моря на пісок
  */
-export async function growNodes(owner, taken, realmId = "home") {
-  const { key: keyOf, target, growMs } = realmOf(realmId);
+export async function growNodes(owner, taken, realmId = "home", nets = []) {
+  const { key: keyOf, target: base, growMs } = realmOf(realmId);
+  const lure = base.sand ? nets.slice(0, NET.max) : [];
+  const target = lure.length ? { ...base, sand: base.sand + lure.length * NET.extra } : base;
   const r = getRedis();
   const key = keyOf(owner);
   const h = await r.hGetAll(key);
@@ -197,8 +211,10 @@ export async function growNodes(owner, taken, realmId = "home") {
     const fresh = {};
     for (const where of Object.keys(target)) {
       const have = Object.values(nodes).filter((n) => (n.w ?? NODES[n.k].where) === where).length;
-      const want = Math.min(target[where] - have, steps);
-      if (want > 0) Object.assign(fresh, sprout({ ...nodes, ...fresh }, taken, where, want));
+      // Кожна сітка — ще один новий дар моря за крок.
+      const perStep = where === "sand" ? 1 + lure.length : 1;
+      const want = Math.min(target[where] - have, steps * perStep);
+      if (want > 0) Object.assign(fresh, sprout({ ...nodes, ...fresh }, taken, where, want, where === "sand" ? lure : []));
     }
     // Відлік — від останнього «кроку», щоб частковий час не губився.
     const t = last ? last + steps * growMs : now;
@@ -210,10 +226,15 @@ export async function growNodes(owner, taken, realmId = "home") {
   return Object.entries(nodes).map(([id, n]) => ({ id, k: n.k, x: n.x, y: n.y }));
 }
 
-/** Ресурси для стану гри — уже з новими, що встигли вирости. */
-export async function getNodes(userId, taken, realmId = "home") {
+/**
+ * Ресурси для стану гри — уже з новими, що встигли вирости.
+ * @param {{ k: string, x: number, y: number }[]} deco декор острова — сітки з нього приманюють дари моря
+ */
+export async function getNodes(userId, taken, realmId = "home", deco = []) {
   const { owner } = await homeOwner(userId);
-  return growNodes(owner, taken, realmId);
+  // Якір сітки — низ по центру, сама вона 24×16: центр — на 8 px вище.
+  const nets = deco.filter((d) => d.k === NET.kind).map((d) => ({ x: d.x, y: d.y - 8 }));
+  return growNodes(owner, taken, realmId, nets);
 }
 
 const randInt = ([a, b]) => a + Math.floor(Math.random() * (b - a + 1));

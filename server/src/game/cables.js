@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
 import { deckCells, getDecor } from "./decor.js";
 import { GameError, badRequest, conflict } from "./errors.js";
+import { PLATFORM_REACH } from "./island-bounds.js";
 import { homeOwner } from "./household.js";
 import { cablesKey, takeCooldown } from "./keys.js";
 
@@ -10,7 +11,7 @@ import { cablesKey, takeCooldown } from "./keys.js";
  * у звичайній грі їх не видно. Зберігаються клітинками 8×8 px: hash «cx,cy» → «1».
  * Кожна клітинка коштує 1 дріт (bare_wire) з рюкзака; прибрав — дріт повертається.
  *
- * Кабель кладуть на сушу й на помости (у межах мапи): маску суші (island-walk.json) беремо з того ж атласу,
+ * Кабель кладуть на сушу й на помости (і в морі довкола мапи, де стоять помости): маску суші (island-walk.json) беремо з того ж атласу,
  * що й клієнт (miniapp/src/game/walk/atlas.json → walk), помости — з декору (decor.js → deckCells).
  */
 const WALK = JSON.parse(readFileSync(new URL("./island-walk.json", import.meta.url), "utf8"));
@@ -51,7 +52,9 @@ function parseCells(list) {
     if (!Array.isArray(c) || c.length !== 2) throw badRequest("Невідома клітинка.");
     const [x, y] = c;
     if (!Number.isInteger(x) || !Number.isInteger(y)) throw badRequest("Невідома клітинка.");
-    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) throw badRequest("Це поза островом.");
+    // Помости стоять і в морі довкола мапи — до PLATFORM_REACH клітинок від краю, кабель — теж.
+    const R = PLATFORM_REACH;
+    if (x < -R || y < -R || x >= COLS + R || y >= ROWS + R) throw badRequest("Це поза островом.");
     const k = `${x},${y}`;
     if (seen.has(k)) continue;
     seen.add(k);

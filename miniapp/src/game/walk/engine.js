@@ -800,11 +800,15 @@ export function createWalk(canvas, assets, cb) {
 
   // Будівництво: сітка, рамки «ніжок» і привид предмета.
   // Удвічі детальніше за арт: кабель тонший за клітинку й лишається чітким при наближенні.
-  const GRID_RES = 2
+  // Шар покриває мапу й усі помости в морі довкола (fitGrid); завеликий — детальність менша, щоб текстура влізла в GPU.
+  const GRID_MAX_RES = 2
+  const GRID_MAX_PX = 4096
   const gridCanvas = document.createElement('canvas')
-  gridCanvas.width = MAP.w * GRID_RES
-  gridCanvas.height = MAP.h * GRID_RES
-  const gridTex = new THREE.CanvasTexture(gridCanvas)
+  /** Що покриває шар сітки: x, y, w, h — у пікселях арту; res — пікселів канви на піксель арту. */
+  let gridFrame = { x: 0, y: 0, w: MAP.w, h: MAP.h, res: GRID_MAX_RES }
+  gridCanvas.width = MAP.w * GRID_MAX_RES
+  gridCanvas.height = MAP.h * GRID_MAX_RES
+  let gridTex = new THREE.CanvasTexture(gridCanvas)
   gridTex.magFilter = THREE.NearestFilter
   gridTex.minFilter = THREE.NearestFilter
   gridTex.generateMipmaps = false
@@ -814,6 +818,44 @@ export function createWalk(canvas, assets, cb) {
   )
   gridMesh.position.set(MAP.w / 2, 0.1, MAP.h / 2)
   gridMesh.renderOrder = -9
+
+  /** Розтягти шар сітки на мапу сцени й помости довкола (на рідному острові). Канву й текстуру перебудовуємо, лише коли межі змінились. */
+  function fitGrid() {
+    let x0 = 0
+    let y0 = 0
+    let x1 = scene.map.w
+    let y1 = scene.map.h
+    if (scene.outdoor) {
+      for (const p of list) {
+        if (!p.platform || !p.walk) continue
+        const [x, y, w, h] = p.walk
+        x0 = Math.min(x0, Math.floor(x / CELL) * CELL - CELL)
+        y0 = Math.min(y0, Math.floor(y / CELL) * CELL - CELL)
+        x1 = Math.max(x1, Math.ceil((x + w) / CELL) * CELL + CELL)
+        y1 = Math.max(y1, Math.ceil((y + h) / CELL) * CELL + CELL)
+      }
+    }
+    const w = x1 - x0
+    const h = y1 - y0
+    const res = Math.min(GRID_MAX_RES, GRID_MAX_PX / Math.max(w, h))
+    const f = gridFrame
+    if (f.x === x0 && f.y === y0 && f.w === w && f.h === h && f.res === res) return
+    gridFrame = { x: x0, y: y0, w, h, res }
+    gridCanvas.width = Math.ceil(w * res)
+    gridCanvas.height = Math.ceil(h * res)
+    // Розмір канви змінився — стару текстуру GPU не перевикористати.
+    gridTex.dispose()
+    gridTex = new THREE.CanvasTexture(gridCanvas)
+    gridTex.magFilter = THREE.NearestFilter
+    gridTex.minFilter = THREE.NearestFilter
+    gridTex.generateMipmaps = false
+    gridMesh.material.map = gridTex
+    gridMesh.material.needsUpdate = true
+    gridMesh.geometry.dispose()
+    gridMesh.geometry = new THREE.PlaneGeometry(w, h).rotateX(-Math.PI / 2)
+    gridMesh.position.set(x0 + w / 2, 0.1, y0 + h / 2)
+    underlay = null
+  }
   gridMesh.visible = false
   scene3.add(gridMesh)
 
@@ -1156,10 +1198,12 @@ export function createWalk(canvas, assets, cb) {
 
   /** Сітка будівництва: ледь помітні клітинки суші, зайняті — червонуваті. */
   function drawGrid() {
+    fitGrid()
     const ctx = gridCanvas.getContext('2d')
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height)
-    ctx.setTransform(GRID_RES, 0, 0, GRID_RES, 0, 0) // далі — у пікселях арту
+    const { x: gx, y: gy, res } = gridFrame
+    ctx.setTransform(res, 0, 0, res, -gx * res, -gy * res) // далі — у пікселях арту
     wireAt = t
     const ground = scene.outdoor ? land : homeLand
     if (mode === 'power') {
@@ -1195,8 +1239,20 @@ export function createWalk(canvas, assets, cb) {
     if (wireGroundCache?.list === list) return wireGroundCache.grid
     const g = SCENES.island.geo
     const grid = land.slice()
-    for (const p of list) if (p.platform && p.walk) for (const c of g.cellsOf(p.walk)) if (c >= 0) grid[c] = 1
-    wireGroundCache = { list, grid }
+    // Межі, де взагалі є суша чи помост (клітинки) — у них і шукаємо маршрут.
+    const box = { x0: 0, y0: 0, x1: atlas.walk[0].length - 1, y1: atlas.walk.length - 1 }
+    for (const p of list) {
+      if (!p.platform || !p.walk) continue
+      for (const c of g.cellsOf(p.walk)) {
+        if (c < 0) continue
+        grid[c] = 1
+        box.x0 = Math.min(box.x0, g.cx(c))
+        box.y0 = Math.min(box.y0, g.cy(c))
+        box.x1 = Math.max(box.x1, g.cx(c))
+        box.y1 = Math.max(box.y1, g.cy(c))
+      }
+    }
+    wireGroundCache = { list, grid, box }
     return grid
   }
 
@@ -1208,7 +1264,7 @@ export function createWalk(canvas, assets, cb) {
     c.width = gridCanvas.width
     c.height = gridCanvas.height
     const g = c.getContext('2d')
-    g.setTransform(GRID_RES, 0, 0, GRID_RES, 0, 0)
+    g.setTransform(gridFrame.res, 0, 0, gridFrame.res, -gridFrame.x * gridFrame.res, -gridFrame.y * gridFrame.res)
     g.fillStyle = 'rgba(8, 16, 28, 0.55)'
     for (let i = 0; i < ground.length; i++) if (ground[i]) g.fillRect(geo.cx(i) * CELL, geo.cy(i) * CELL, CELL, CELL)
     g.fillStyle = 'rgba(160, 200, 255, 0.08)'
@@ -2812,12 +2868,19 @@ export function createWalk(canvas, assets, cb) {
     /** Маршрут кабелю між клітинками: сушею й помостами, по своєму кабелю — даром. null — не дотягнутись. */
     routeWire(from, to) {
       const W = wireData()
-      // Кабель — по суші й помостах у межах мапи (шар кабелів малюється лише над нею), без запасу моря довкола.
-      const cols = atlas.walk[0].length
-      const rows = atlas.walk.length
+      // Кабель — по суші й помостах, хоч і далеко в морі. Шукаємо в межах, де вони є (зсув — бо там клітинки бувають від'ємні).
       const ground = wireGround()
+      const { x0, y0, x1, y1 } = wireGroundCache.box
       const g = SCENES.island.geo
-      return findRoute(from, to, { cols, rows, land: (x, y) => ground[g.idx(x, y)] === 1, has: (x, y) => W.has.has(cellKey(x, y)) })
+      const r = findRoute([from[0] - x0, from[1] - y0], [to[0] - x0, to[1] - y0], {
+        cols: x1 - x0 + 1,
+        rows: y1 - y0 + 1,
+        land: (x, y) => ground[g.idx(x + x0, y + y0)] === 1,
+        has: (x, y) => W.has.has(cellKey(x + x0, y + y0)),
+      })
+      if (!r) return null
+      const back = ([x, y]) => [x + x0, y + y0]
+      return { cells: r.cells.map(back), fresh: r.fresh.map(back) }
     },
     /** Ділянка кабелю під клітинкою (між розгалуженнями) — щоб зняти гілку одним тапом. */
     wireSegment(cell) {

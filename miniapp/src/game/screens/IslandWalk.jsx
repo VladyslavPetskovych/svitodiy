@@ -1571,7 +1571,7 @@ function BuildPanel({ wiring = null, hideItems = false, indoor, defs, placed, ho
   const beds = bedCount(state.farm)
   const selItem = sel && placed.find((d) => d.id === sel)
   const active = ghost ? defOf(ghost.kind) : pick ? defOf(pick) : null
-  const where = (d) => (indoor ? (d.wall ? 'на стіні, де повісити' : 'на підлозі, де поставити') : d.water ? 'у воді біля пляжу, куди закинути' : d.platform ? 'у воді, поруч із берегом або помостом' : 'на острові, де поставити')
+  const where = (d) => (indoor ? (d.wall ? 'на стіні, де повісити' : 'на підлозі, де поставити') : d.water ? 'у воді біля пляжу, куди закинути' : d.platform ? 'у воді чи на пляжі, поруч із берегом або помостом' : 'на острові, де поставити')
 
   const floorDef = floorTry && catalog.floors?.find((f) => f.id === floorTry.p)
 

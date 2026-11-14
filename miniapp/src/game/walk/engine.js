@@ -1858,12 +1858,20 @@ export function createWalk(canvas, assets, cb) {
         return nx >= 0 && ny >= 0 && nx < geo.cols && ny < geo.rows && ground[ny * geo.cols + nx] === 1
       })
     }
-    // Сітку — лише на мілину біля берега; помост — лише у воду, поруч із сушею чи іншим помостом;
+    // Сітку — лише на мілину біля берега; помост — у воду чи на пляж, поруч із сушею чи іншим помостом;
     // решту — лише на землю (сушу або помост).
     if (g.water && cells.some((c) => c < 0 || !shore[c])) return { ok: false, reason: 'Сітку ставлять у воду біля берега' }
     if (g.platform) {
-      if (cells.some((c) => c < 0 || land[c])) return { ok: false, reason: 'Помост ставлять у воду' }
-      if (!cells.some((c) => nextToGround(c))) return { ok: false, reason: 'Помост ставлять поруч із берегом чи іншим помостом' }
+      if (cells.some((c) => c < 0)) return { ok: false, reason: 'Тут будувати не можна' }
+      // У воду чи на пляж: хоч одна клітинка — вода або межує з водою (не вглиб острова).
+      const isWater = (cx, cy) => cx >= 0 && cy >= 0 && cx < geo.cols && cy < geo.rows && !land[cy * geo.cols + cx]
+      const nearWater = cells.some((c) => {
+        const cx = c % geo.cols
+        const cy = Math.floor(c / geo.cols)
+        return [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => isWater(cx + dx, cy + dy))
+      })
+      if (!nearWater) return { ok: false, reason: 'Помост ставлять у воду чи на пляж біля води' }
+      if (!cells.some((c) => land[c] || nextToGround(c))) return { ok: false, reason: 'Помост ставлять поруч із берегом чи іншим помостом' }
     } else if (!g.water && cells.some((c) => c < 0 || !ground[c])) return { ok: false, reason: 'Тут будувати не можна' }
     const busy = new Uint8Array(geo.cols * geo.rows)
     let tree = false

@@ -25,7 +25,7 @@ export const DECOR = [
   { id: "seed_stand", cat: "survival", name: "Комора городника", emoji: "🌱", cost: { twig: 3 } },
   { id: "sprinkler", cat: "survival", name: "Дощувач", emoji: "💦", cost: { plank: 2, metal_scrap: 2 } },
   // Поміст: дощатий майданчик на воді. Ступається й на ньому ставлять усе, як на березі.
-  // Кладеться лише у воду й або біля суші, або поруч з іншим помостом (checkPlatform).
+  // Кладеться у воду чи на пляж біля води, поруч із сушею або іншим помостом (checkPlatform).
   {
     id: "platform",
     cat: "survival",
@@ -34,7 +34,7 @@ export const DECOR = [
     cost: { plank: 2, twig: 2 },
     platform: true,
     foot: [2, 2],
-    hint: "Став на воду поруч із берегом чи іншим помостом — по ньому ходять і ставлять речі, як на суші.",
+    hint: "Став на воду чи пляж поруч із берегом чи іншим помостом — по ньому ходять і ставлять речі, як на суші.",
   },
   // Сітка ставиться лише на мілину біля берега (water, «ніжки» foot у клітинках по 8 px) і приманює
   // на пляж корчі, мушлі й водорості (server/src/game/nodes.js → NET). Більше limit пляж не прогодує.
@@ -168,9 +168,13 @@ function checkPlatform(def, x, y, decor, selfId = null) {
   const { rows } = LAND;
   const inMap = (cx, cy) => cy >= 0 && cy < rows.length && cx >= 0 && cx < rows[0].length;
   const cells = footCells(def, x, y);
-  if (cells.some(([cx, cy]) => !inMap(cx, cy) || rows[cy][cx] === "1")) {
-    throw conflict("not_water", `${def.emoji} ${def.name}: став у воду, не на сушу.`);
-  }
+  if (cells.some(([cx, cy]) => !inMap(cx, cy))) throw badRequest("Сюди поставити не вийде.");
+  // Можна у воду й на пляж: хоч одна клітинка — вода або межує з водою (не вглиб острова).
+  const water = (cx, cy) => inMap(cx, cy) && rows[cy][cx] !== "1";
+  const nearWater = cells.some(
+    ([cx, cy]) => water(cx, cy) || water(cx + 1, cy) || water(cx - 1, cy) || water(cx, cy + 1) || water(cx, cy - 1)
+  );
+  if (!nearWater) throw conflict("not_water", `${def.emoji} ${def.name}: став у воду чи на пляж біля води.`);
   const deck = new Set();
   for (const d of decor) {
     if (d.id === selfId || !BY_ID.get(d.k)?.platform) continue;
@@ -178,7 +182,7 @@ function checkPlatform(def, x, y, decor, selfId = null) {
   }
   if (cells.some(([cx, cy]) => deck.has(`${cx},${cy}`))) throw conflict("busy", `${def.emoji} ${def.name}: тут уже є помост.`);
   const walkable = (cx, cy) => (inMap(cx, cy) && rows[cy][cx] === "1") || deck.has(`${cx},${cy}`);
-  const touches = cells.some(([cx, cy]) => walkable(cx + 1, cy) || walkable(cx - 1, cy) || walkable(cx, cy + 1) || walkable(cx, cy - 1));
+  const touches = cells.some(([cx, cy]) => walkable(cx, cy) || walkable(cx + 1, cy) || walkable(cx - 1, cy) || walkable(cx, cy + 1) || walkable(cx, cy - 1));
   if (!touches) throw conflict("not_connected", `${def.emoji} ${def.name}: став поруч із берегом чи іншим помостом.`);
 }
 

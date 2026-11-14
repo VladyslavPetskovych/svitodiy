@@ -305,6 +305,25 @@ export async function gatherNode(userId, id, realmId = "home") {
   return { node: { id, k: node.k, x: node.x, y: node.y }, got };
 }
 
+/** Чайки не частіше, ніж раз на стільки, цуплять дари моря з одного острова (мс). */
+const GULL_COOLDOWN_MS = 45_000;
+
+/**
+ * Чайка понесла дар моря з пляжу (клієнт: miniapp/src/game/walk/gulls.js) — ресурс зникає, нікому не дістається.
+ * Лише з піску рідного острова й не частіше за GULL_COOLDOWN_MS на острів: так клієнт не «з'їсть» острів запитами.
+ */
+export async function stealNode(userId, id) {
+  if (typeof id !== "string" || !ID.test(id)) throw badRequest("Невідомий ресурс.");
+  const { owner } = await homeOwner(userId);
+  const r = getRedis();
+  const key = REALMS.home.key(owner);
+  const node = parse(await r.hGet(key, id));
+  if (!node || NODES[node.k].where !== "sand") throw new GameError(404, "not_found", "Тут уже нічого немає.");
+  if (!(await takeCooldown(owner, "gull", GULL_COOLDOWN_MS))) throw new GameError(429, "cooldown", "Чайки ще ситі.");
+  if ((await r.hDel(key, id)) !== 1) throw new GameError(404, "not_found", "Тут уже нічого немає.");
+  return { node: { id, k: node.k, x: node.x, y: node.y } };
+}
+
 /** Для каталогу: що де росте й чим добувати. finds — що трапляється під снігом, від найчастішого. */
 export function nodesCatalog() {
   return Object.entries(NODES).map(([id, d]) => ({

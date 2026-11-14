@@ -14,7 +14,7 @@ import { craftRecipe, craftTool } from "./game/craft.js";
 import { equipWear, getWearItem } from "./game/wardrobe.js";
 import { buySeeds, clearPlot, harvestPlot, moveBed, placeBed, plantPlot, removeBed, sellCrops, tillPlot, waterPlot } from "./game/farm.js";
 import { ackReset, collectHome, demolishBuilding, moveBuilding, placeBuilding, upgradeBuilding } from "./game/homestead.js";
-import { gatherNode } from "./game/nodes.js";
+import { gatherNode, stealNode } from "./game/nodes.js";
 import { collectRubber } from "./game/rubber.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
 import {
@@ -165,6 +165,8 @@ export function buildApiRouter(botToken) {
 
   // Виживання: дерева й каміння на острові, верстат
   api.post("/island/nodes/:id/gather", handler(island((req) => gatherNode(uid(req), req.params.id))));
+  // Чайка понесла дар моря з пляжу.
+  api.post("/island/nodes/:id/gull", handler(island((req) => stealNode(uid(req), req.params.id))));
   // Острів Хуртовини: розкопати замет лопатою, розбити брилу, підняти хмиз
   api.post("/winter/nodes/:id/gather", handler(island((req) => gatherNode(uid(req), req.params.id, "winter"))));
   // Гевея: зібрати каучук із чашки.

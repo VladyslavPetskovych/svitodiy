@@ -24,6 +24,7 @@ import { CELL, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, p
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
 import { WINTER_FIRE, WINTER_INTERACT, WINTER_MAP, WINTER_PIER, WINTER_SPAWN, winterPlacements } from './winter.js'
 import { createPeers } from './peers.js'
+import { createGulls } from './gulls.js'
 
 /**
  * Прогулянка островом і хатинкою на three.js.
@@ -196,6 +197,23 @@ const shore = walkGrid(atlas.shore ?? atlas.walk.map((l) => '0'.repeat(l.length)
 /** Підлога хатинки, на якій можна ставити речі. */
 const homeLand = walkGrid(atlas.homeWalk, [])
 
+/** Дари моря на піску, які можуть поцупити чайки (сервер дозволяє лише їх — nodes.js → stealNode). */
+const BEACH_LOOT = new Set(['driftwood', 'shell', 'seaweed'])
+/** Пляж для чайок: центри клітинок суші, від яких до води не далі двох клітинок. */
+const BEACH = (() => {
+  const { cols, rows } = SCENES.island.geo
+  const water = (cx, cy) => cx >= 0 && cy >= 0 && cx < cols && cy < rows && !land[cy * cols + cx]
+  const out = []
+  for (let cy = 2; cy < rows - 2; cy++)
+    for (let cx = 2; cx < cols - 2; cx++) {
+      if (!land[cy * cols + cx]) continue
+      let near = false
+      for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2 && !near; dx++) near = water(cx + dx, cy + dy)
+      if (near) out.push({ x: cx * CELL + CELL / 2, y: cy * CELL + CELL / 2 + 2 })
+    }
+  return out
+})()
+
 const HERO_SEQ = [1, 0, 2, 0]
 const TAP_SLOP = 10 // CSS px: далі — це вже перетягування, а не тап
 
@@ -203,7 +221,8 @@ const TAP_SLOP = 10 // CSS px: далі — це вже перетягуванн
  * @param {HTMLCanvasElement} canvas
  * @param {object} assets результат loadAssets()
  * @param {{ onNear: (id: string|null) => void, onInteract: (id: string) => void, onBubble: () => void,
- *   onBuildTap: (p: { x: number, y: number, uid: string|null }) => void }} cb
+ *   onBuildTap: (p: { x: number, y: number, uid: string|null }) => void,
+ *   onGullSteal?: (nodeId: string) => Promise<boolean> }} cb — чайка понесла ресурс із пляжу; false — не вийшло
  */
 export function createWalk(canvas, assets, cb) {
   /** Розміри кадру за назвою — з будь-якого аркуша. */
@@ -2249,6 +2268,31 @@ export function createWalk(canvas, assets, cb) {
   const camUp = new THREE.Vector3()
   const tmp = new THREE.Vector3()
 
+  // Чайки на рідному острові: сідають на пляж, лякаються тебе й псів, часом цуплять дари моря з піску.
+  const gulls = createGulls({
+    scene3,
+    camera,
+    camUp,
+    camRight,
+    blobTex,
+    unitPlane,
+    particles,
+    floatText: (text, o) => floatText(text, o),
+    map: () => scene.map,
+    canStand: (x, y) => !!grid && geo.canStand(grid, x, y),
+    spots: () => BEACH,
+    beachNodes: () =>
+      sceneNodes()
+        .filter((n) => BEACH_LOOT.has(n.k))
+        .map((n) => ({ id: n.id, x: n.x, y: n.y, s: list.find((p) => p.node === n.id)?.s ?? NODE_GEOM[n.k].sprite })),
+    look: (s) => {
+      const g = spriteGeo(s)
+      return g && { geo: g, mat: matOf(s) }
+    },
+    scarers: () => [body, ...presentDogs().map((d) => d.body)],
+    onSteal: (id) => Promise.resolve(cb.onGullSteal ? cb.onGullSteal(id) : false),
+  })
+
   /** Точка 2D-арту, прив'язана до якоря спрайта → світ (спрайт дивиться в камеру). */
   function anchored(e, out = tmp) {
     return out.set(e.ax, 0, e.ay).addScaledVector(camRight, e.dx).addScaledVector(camUp, e.h)
@@ -2443,11 +2487,12 @@ export function createWalk(canvas, assets, cb) {
     heroBlob.position.set(hero.x, 0.2, hero.y)
     peers.update(dt, { sceneId: scene.id, camera, rig })
     for (const d of dogs) d.frame(dt, a, camera, rig)
+    gulls.update(dt, scene.id === 'island')
 
     // Спрайти дивляться в камеру; «поп» і падіння новеньких.
     for (const it of items) {
       const m = it.mesh
-      m.visible = it.wall ? wallShown[it.p.wall] : !(ghost?.uid && it.p.uid === ghost.uid)
+      m.visible = it.wall ? wallShown[it.p.wall] : !(ghost?.uid && it.p.uid === ghost.uid) && !(it.p.node && gulls.hidden.has(it.p.node))
       if (!it.flat && !it.wall) m.quaternion.copy(camera.quaternion)
       // Анімований спрайт (крила вітряка): гортаємо кадри — усі одного розміру, якір той самий.
       if (it.p.anim) {
@@ -2880,12 +2925,14 @@ export function createWalk(canvas, assets, cb) {
       const hit = interact.find((it) => inBox(p.art, it.box)) ?? interact.find((it) => inBox(p.ground, it.box))
       return { sprite: p.item?.p.s ?? null, plot: p.plot, art: p.art, ground: p.ground, hit: hit?.id ?? null }
     },
+    /** Викликати чайку ('thief' | 'pass' | 'land') — для ручних перевірок. */
+    spawnGull: (kind) => gulls.spawn(kind),
     /** Знімок стану для тестів і налагодження (лише читання). */
     debug() {
       const dogsInfo = Object.fromEntries(
         dogs.map((d) => [d.id, { x: d.body.x, y: d.body.y, state: d.state, mode: d.mode, scene: d.sceneId, visible: d.visible, dist: dogDist(d) }])
       )
-      return { player: { x: body.x, y: body.y }, hero: { x: hero.x, y: hero.y, dir: hero.dir, moving: hero.moving, my: heroMesh.position.y }, focus: { ...rig.focus }, dogs: dogsInfo, peers: peers.info(), near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count, decals: decals.length }
+      return { player: { x: body.x, y: body.y }, hero: { x: hero.x, y: hero.y, dir: hero.dir, moving: hero.moving, my: heroMesh.position.y }, focus: { ...rig.focus }, dogs: dogsInfo, gulls: gulls.info(), peers: peers.info(), near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count, decals: decals.length }
     },
     destroy() {
       renderer.setAnimationLoop(null)
@@ -2899,6 +2946,7 @@ export function createWalk(canvas, assets, cb) {
       input.destroy()
       clearItems()
       peers.dispose()
+      gulls.dispose()
       for (const d of dogs) d.dispose()
       for (const s of bubbleSprites.values()) s.material.dispose()
       while (floats.length) dropFloat(0)

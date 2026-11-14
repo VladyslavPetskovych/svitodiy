@@ -414,6 +414,18 @@ export default function IslandWalk({ start = 'island' }) {
     say(got || 'Нічого цікавого', 'hero', got ? 'good' : 'calm', rare ? 'coins' : null)
   }
 
+  /** Чайка понесла дар моря з пляжу: сервер прибирає ресурс; не вийшло — рушій поверне його на місце. */
+  const gullSteal = async (id) => {
+    const n = nodes.find((x) => x.id === id)
+    const def = n && catalog.nodes?.find((d) => d.id === n.k)
+    if (!def) return false
+    const res = await act('POST', `/island/nodes/${id}/gull`, {}, { silent: true })
+    if (!res) return false
+    haptic('warning')
+    say(`🐦 Чайка поцупила: ${def.emoji} ${def.name.toLowerCase()}`, { x: n.x, y: n.y, h: 14 }, 'error')
+    return true
+  }
+
   /** Сісти в човен на Хуртовині й попливти додому — на рідний острів. */
   const sailHome = () => {
     haptic('medium')
@@ -932,7 +944,7 @@ export default function IslandWalk({ start = 'island' }) {
   // Обробники рушія читають свіжі значення через ref — рушій створюється один раз.
   const handlers = useRef({})
   useEffect(() => {
-    handlers.current = { interact, collect, buildTap, chainNext, wire: wireTap }
+    handlers.current = { interact, collect, buildTap, chainNext, wire: wireTap, gullSteal }
   })
 
   // Усі повідомлення на острові (і помилки сервера) — написами над мандрівником, а не плашками.
@@ -970,6 +982,7 @@ export default function IslandWalk({ start = 'island' }) {
           onBubble: () => handlers.current.collect(),
           onBuildTap: (p) => handlers.current.buildTap(p),
           onWire: (ev) => handlers.current.wire?.(ev),
+          onGullSteal: (id) => handlers.current.gullSteal?.(id) ?? false,
         })
         engine.current = walk
         if (start !== 'island') walk.setScene(start)

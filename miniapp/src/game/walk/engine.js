@@ -13,6 +13,7 @@ import sirkoMeta from './sirko.json'
 const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
 import { beamTexture, blobTexture, bubbleTexture, createParticles, crispPixels, crispTexture, dropHeight, glowTexture, popScale, textTexture, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
+import { flowDistance, routeWire as findRoute, segmentAt } from './wires.js'
 import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
 import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
 import { INTERIOR_GEOM, dogBedSpot, interiorFootprint, interiorInteract, interiorLights, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
@@ -574,10 +575,15 @@ export function createWalk(canvas, assets, cb) {
   const NO_CABLES = { cells: [], networks: [], wired: [] }
   /** Кабелі острова з сервера: клітинки, мережі, під'єднані прикраси (server/src/game/state.js → cables). */
   let cables = NO_CABLES
-  /** Мазок, що ще летить до сервера: { cells, cut } — показуємо одразу, не чекаючи відповіді. */
-  let wirePreview = null
+  /**
+   * Що інтерфейс показує поверх кабелів: start/end — кінці маршруту, route — запропонований маршрут
+   * ({ cells, fresh }), sel — ділянка, яку збираються зняти. Усе — клітинки [cx, cy].
+   */
+  const NO_VIEW = { start: null, end: null, route: null, sel: null }
+  let wireView = NO_VIEW
   /** Мережа, яку підсвітили в списку (id), або null. */
   let netHL = null
+  let wireAt = -1 // коли востаннє перемальовували кабелі (вони анімовані — струм біжить)
   const dimMats = new Map() // матеріал спрайта → притемнена копія (для режиму електрики)
   let ghost = null // { kind, x, y, uid?, ok, reason? }
   const ghostVis = { x: 0, y: 0, born: -1, badAt: -1 }
@@ -765,9 +771,11 @@ export function createWalk(canvas, assets, cb) {
   scene3.add(marker)
 
   // Будівництво: сітка, рамки «ніжок» і привид предмета.
+  // Удвічі детальніше за арт: кабель тонший за клітинку й лишається чітким при наближенні.
+  const GRID_RES = 2
   const gridCanvas = document.createElement('canvas')
-  gridCanvas.width = MAP.w
-  gridCanvas.height = MAP.h
+  gridCanvas.width = MAP.w * GRID_RES
+  gridCanvas.height = MAP.h * GRID_RES
   const gridTex = new THREE.CanvasTexture(gridCanvas)
   gridTex.magFilter = THREE.NearestFilter
   gridTex.minFilter = THREE.NearestFilter
@@ -1100,14 +1108,19 @@ export function createWalk(canvas, assets, cb) {
     if (editing()) drawGrid()
   }
 
-  /** Притемнена копія матеріалу спрайта: у режимі електрики решта світу сіра, а не конкурує з приладами. */
+  /**
+   * Притемнена й напівпрозора копія матеріалу спрайта: у режимі електрики решта світу — тінь,
+   * крізь яку видно кабель під деревами й будинками.
+   */
   function dimmedMat(name) {
     const base = matOf(name)
     let m = dimMats.get(base)
     if (!m) {
-      m = base.clone()
-      // Темніше, ніж 40%: видно, що це не можна чіпати.
-      m.color.setScalar(0.06)
+      m = crispPixels(base.clone())
+      m.color.setScalar(0.12)
+      m.opacity = 0.45
+      // alphaTest порівнює вже з opacity — поріг майже нульовий, інакше напівпрозоре зникло б зовсім.
+      m.alphaTest = 0.01
       dimMats.set(base, m)
     }
     return m
@@ -1116,7 +1129,10 @@ export function createWalk(canvas, assets, cb) {
   /** Сітка будівництва: ледь помітні клітинки суші, зайняті — червонуваті. */
   function drawGrid() {
     const ctx = gridCanvas.getContext('2d')
-    ctx.clearRect(0, 0, MAP.w, MAP.h)
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height)
+    ctx.setTransform(GRID_RES, 0, 0, GRID_RES, 0, 0) // далі — у пікселях арту
+    wireAt = t
     const ground = scene.outdoor ? land : homeLand
     if (mode === 'power') {
       drawWires(ctx, ground)
@@ -1140,63 +1156,182 @@ export function createWalk(canvas, assets, cb) {
     gridTex.needsUpdate = true
   }
 
-  /**
-   * Кабелі під землею — малюються на землі, під прикрасами. Видно лише в режимі електрики.
-   * Мережа, підсвічена зі списку, яскрава, решта тьмяніє. Вітряк: жовтий ореол, якщо під'єднаний,
-   * червона крапка, якщо ні. Мазок (ще не збережений) — пунктиром.
-   */
-  function drawWires(ctx, ground) {
-    for (let c = 0; c < ground.length; c++) {
-      if (!ground[c]) continue
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.07)'
-      ctx.fillRect((c % geo.cols) * CELL, Math.floor(c / geo.cols) * CELL, CELL, CELL)
+  /** Клітинка, у якій стоїть прилад (якір — низ по центру), — та сама, що рахує сервер (power.js → cellOfDeco). */
+  const deviceCell = (p) => [Math.floor(p.x / CELL), Math.floor((p.y - 1) / CELL)]
+  const cellKey = (x, y) => x + ',' + y
+  const mid = (v) => v * CELL + CELL / 2
+
+  /** «Під землею»: суша темніє, тонка сітка клітинок — щоб влучати. Малюється раз на сцену. */
+  let underlay = null
+  function underlayFor(ground) {
+    if (underlay?.scene === scene.id) return underlay.canvas
+    const c = document.createElement('canvas')
+    c.width = gridCanvas.width
+    c.height = gridCanvas.height
+    const g = c.getContext('2d')
+    g.setTransform(GRID_RES, 0, 0, GRID_RES, 0, 0)
+    g.fillStyle = 'rgba(8, 16, 28, 0.55)'
+    for (let i = 0; i < ground.length; i++) if (ground[i]) g.fillRect((i % geo.cols) * CELL, Math.floor(i / geo.cols) * CELL, CELL, CELL)
+    g.fillStyle = 'rgba(160, 200, 255, 0.08)'
+    for (let i = 0; i < ground.length; i++) {
+      if (!ground[i]) continue
+      const x = (i % geo.cols) * CELL
+      const y = Math.floor(i / geo.cols) * CELL
+      g.fillRect(x, y, CELL, 0.5)
+      g.fillRect(x, y, 0.5, CELL)
     }
-    const netOf = new Map()
-    for (const n of cables.networks) for (const [x, y] of n.cells) netOf.set(x + ',' + y, n.id)
-    const lit = (x, y) => netHL === null || netOf.get(x + ',' + y) === netHL
-    const has = new Set(cables.cells.map(([x, y]) => x + ',' + y))
-    const link = (x, y, dx, dy, on) => {
-      ctx.strokeStyle = on ? 'rgba(255, 196, 140, 0.95)' : 'rgba(255, 196, 140, 0.22)'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(x * CELL + CELL / 2, y * CELL + CELL / 2)
-      ctx.lineTo((x + dx) * CELL + CELL / 2, (y + dy) * CELL + CELL / 2)
-      ctx.stroke()
-    }
-    for (const [x, y] of cables.cells) {
-      const on = lit(x, y)
-      ctx.fillStyle = on ? 'rgba(120, 58, 30, 0.75)' : 'rgba(80, 44, 26, 0.35)'
-      ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2)
-      if (has.has(x + 1 + ',' + y)) link(x, y, 1, 0, on && lit(x + 1, y))
-      if (has.has(x + ',' + (y + 1))) link(x, y, 0, 1, on && lit(x, y + 1))
-    }
-    // Мазок, що ще летить до сервера: пунктир поверх того, що є.
-    if (wirePreview) {
-      ctx.strokeStyle = wirePreview.cut ? 'rgba(255, 110, 90, 0.95)' : 'rgba(255, 224, 140, 0.95)'
-      ctx.lineWidth = 1
-      ctx.setLineDash([2, 2])
-      for (const [x, y] of wirePreview.cells) if (ground[y * geo.cols + x] || wirePreview.cut) ctx.strokeRect(x * CELL + 0.5, y * CELL + 0.5, CELL - 1, CELL - 1)
-      ctx.setLineDash([])
-    }
-    // Електрика: вітряки, під'єднані чи ні.
-    const wired = new Set(cables.wired)
-    const hl = cables.networks.find((n) => n.id === netHL)
-    for (const p of list) {
-      if (!p.uid || !ELECTRIC.has(p.kind)) continue
-      const cx = Math.floor(p.x / CELL)
-      const cy = Math.floor((p.y - 1) / CELL)
-      if (wired.has(p.uid)) {
-        const bright = netHL === null || (hl && hl.devices.includes(p.uid))
-        ctx.strokeStyle = bright ? 'rgba(255, 224, 102, 0.95)' : 'rgba(255, 224, 102, 0.25)'
-        ctx.lineWidth = 2
-        ctx.strokeRect(cx * CELL - 3, cy * CELL - 3, CELL * 2 + 2, CELL * 2 + 2)
-      } else {
-        ctx.fillStyle = 'rgba(255, 90, 70, 0.95)'
-        ctx.beginPath()
-        ctx.arc(cx * CELL + CELL / 2, cy * CELL + CELL / 2, 3, 0, Math.PI * 2)
-        ctx.fill()
+    underlay = { scene: scene.id, canvas: c }
+    return c
+  }
+
+  /** Лінія через центри клітинок; сусідні по стороні з'єднуються, самотня клітинка — крапка. */
+  function cellsPath(cells) {
+    const set = new Set(cells.map(([x, y]) => cellKey(x, y)))
+    const path = new Path2D()
+    for (const [x, y] of cells) {
+      const r = set.has(cellKey(x + 1, y))
+      const d = set.has(cellKey(x, y + 1))
+      if (r) {
+        path.moveTo(mid(x), mid(y))
+        path.lineTo(mid(x + 1), mid(y))
+      }
+      if (d) {
+        path.moveTo(mid(x), mid(y))
+        path.lineTo(mid(x), mid(y + 1))
+      }
+      if (!r && !d && !set.has(cellKey(x - 1, y)) && !set.has(cellKey(x, y - 1))) {
+        path.moveTo(mid(x), mid(y))
+        path.lineTo(mid(x) + 0.01, mid(y))
       }
     }
+    return path
+  }
+
+  /** Те, що не змінюється від кадру до кадру: шляхи мереж, прилади, хвилі струму. Рахуємо, лише коли змінились кабелі чи острів. */
+  let wireCache = null
+  function wireData() {
+    if (wireCache?.cables === cables && wireCache.list === list) return wireCache
+    const has = new Set(cables.cells.map(([x, y]) => cellKey(x, y)))
+    const wired = new Set(cables.wired)
+    const devices = list.filter((p) => p.uid && ELECTRIC.has(p.kind)).map((p) => ({ uid: p.uid, cell: deviceCell(p), wired: wired.has(p.uid) }))
+    const nets = cables.networks.map((n) => {
+      const src = []
+      for (const d of devices) if (n.devices.includes(d.uid)) for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) src.push([d.cell[0] + dx, d.cell[1] + dy])
+      const degree = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => has.has(cellKey(x + dx, y + dy))).length
+      return {
+        n,
+        path: cellsPath(n.cells),
+        flow: n.gen ? flowDistance(n.cells, src) : null,
+        joints: n.cells.filter(([x, y]) => degree(x, y) >= 3),
+      }
+    })
+    const powered = new Set(cables.networks.filter((n) => n.gen > 0).flatMap((n) => n.devices))
+    wireCache = { cables, list, has, devices, nets, powered }
+    return wireCache
+  }
+
+  /**
+   * Кабелі під землею — на землі, під напівпрозорими прикрасами. Видно лише в режимі електрики.
+   * Мережа зі струмом — мідна, світло біжить від вітряка; без струму — тьмяна. Підсвічена зі списку — яскрава,
+   * решта тьмяніє. Поверх — маршрут, що пропонують прокласти, або ділянка, яку знімають.
+   */
+  function drawWires(ctx, ground) {
+    const W = wireData()
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.drawImage(underlayFor(ground), 0, 0)
+    ctx.restore()
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    const stroke = (path, color, width) => {
+      ctx.strokeStyle = color
+      ctx.lineWidth = width
+      ctx.stroke(path)
+    }
+    const phase = t * 7
+
+    for (const net of W.nets) {
+      const dim = netHL !== null && net.n.id !== netHL
+      const live = net.n.gen > 0
+      ctx.globalAlpha = dim ? 0.28 : 1
+      // Оболонка, мідна жила, відблиск — кабель читається на будь-якому ґрунті.
+      stroke(net.path, '#140a05', 5.2)
+      stroke(net.path, live ? '#e9803a' : '#8a7566', 3.2)
+      stroke(net.path, live ? '#ffd79a' : '#b9a698', 1)
+      ctx.fillStyle = live ? '#fff0c2' : '#cdbdb0'
+      for (const [x, y] of net.joints) {
+        ctx.beginPath()
+        ctx.arc(mid(x), mid(y), 1.7, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      // Струм: світлі хвилі біжать від вітряка вздовж кабелю.
+      if (live && !dim) {
+        ctx.fillStyle = '#fffbe0'
+        for (const [x, y] of net.n.cells) {
+          const d = net.flow.get(cellKey(x, y))
+          if (d === undefined) continue
+          const v = (((d - phase) % 6) + 6) % 6
+          if (v >= 1.4) continue
+          ctx.globalAlpha = 1 - v / 1.4
+          ctx.beginPath()
+          ctx.arc(mid(x), mid(y), 1.9, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
+    }
+    ctx.globalAlpha = 1
+
+    // Прилади: зі струмом — жовтий ореол; без дроту — червоне коло, що блимає (кличе під'єднати).
+    const blink = 0.55 + Math.sin(t * 5) * 0.45
+    for (const d of W.devices) {
+      const [cx, cy] = d.cell
+      const on = W.powered.has(d.uid)
+      ctx.strokeStyle = on ? '#ffe066' : d.wired ? '#c9b8a8' : '#ff5a46'
+      ctx.globalAlpha = on ? 0.95 : d.wired ? 0.8 : blink
+      ctx.lineWidth = 1.6
+      ctx.beginPath()
+      ctx.arc(mid(cx), mid(cy), 6.5, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.fillStyle = ctx.strokeStyle
+      ctx.beginPath()
+      ctx.arc(mid(cx), mid(cy), 1.8, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+
+    // Ділянка, яку знімаємо: червона, «мурахи» біжать.
+    const { start, end, route, sel } = wireView
+    if (sel?.length) {
+      const p = cellsPath(sel)
+      ctx.fillStyle = 'rgba(255, 90, 70, 0.22)'
+      for (const [x, y] of sel) ctx.fillRect(x * CELL, y * CELL, CELL, CELL)
+      stroke(p, '#140a05', 4.4)
+      ctx.setLineDash([2.5, 2])
+      ctx.lineDashOffset = -t * 10
+      stroke(p, '#ff6a52', 2.6)
+      ctx.setLineDash([])
+    }
+    // Маршрут, що пропонують прокласти: нові клітинки підсвічені, лінія — зелені «мурахи».
+    if (route?.cells.length) {
+      ctx.fillStyle = 'rgba(141, 255, 156, 0.2)'
+      for (const [x, y] of route.fresh) ctx.fillRect(x * CELL, y * CELL, CELL, CELL)
+      const p = cellsPath(route.cells)
+      stroke(p, 'rgba(10, 30, 14, 0.85)', 4.4)
+      ctx.setLineDash([3, 2])
+      ctx.lineDashOffset = -t * 12
+      stroke(p, '#8dff9c', 2.4)
+      ctx.setLineDash([])
+    }
+    const ring = (cell, color, r) => {
+      if (!cell) return
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1.6
+      ctx.beginPath()
+      ctx.arc(mid(cell[0]), mid(cell[1]), r, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+    ring(start, '#8dff9c', 4.2 + Math.sin(t * 6) * 0.8)
+    ring(end, '#ffffff', 4.2)
   }
 
   /* ───── Перебудова сцени ───── */
@@ -1838,7 +1973,6 @@ export function createWalk(canvas, assets, cb) {
     if (pointers.size === 2) {
       // Другий палець — це жест (зум), а не хода.
       gesture = twoFinger()
-      if (held?.kind === 'wire') cb.onWire?.({ phase: 'cancel' })
       held = null
       if (mode === 'walk') {
         path = []
@@ -1851,9 +1985,9 @@ export function createWalk(canvas, assets, cb) {
     const p = pick(e.clientX, e.clientY)
     held = { cx: e.clientX, cy: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, p }
     if (mode === 'power') {
-      // Палець малює кабель (або ставить прикрасу, якщо вибрана — це вирішує інтерфейс).
-      held.kind = 'wire'
-      cb.onWire?.({ phase: 'down', x: p.ground?.x, y: p.ground?.y })
+      // Палець тягне камеру; тап (без руху) — вибір клітинки для кабелю, див. onUp.
+      held.kind = 'pan'
+      held.anchor = p.ground
       return
     }
     if (mode === 'build') {
@@ -1907,11 +2041,6 @@ export function createWalk(canvas, assets, cb) {
     held.cy = e.clientY
     if (!held.moved && Math.hypot(e.clientX - held.sx, e.clientY - held.sy) > TAP_SLOP) held.moved = true
     if (!held.moved) return
-    if (held.kind === 'wire') {
-      const g = groundAt(e.clientX, e.clientY)
-      if (g) cb.onWire?.({ phase: 'move', x: g.x, y: g.y })
-      return
-    }
     if (held.kind === 'pan' && held.anchor) {
       // Земля під пальцем лишається під пальцем.
       const g = groundAt(e.clientX, e.clientY)
@@ -1953,9 +2082,15 @@ export function createWalk(canvas, assets, cb) {
       if (!pointers.size) held = null
       return
     }
-    if (held.kind === 'wire') {
-      const g = groundAt(e.clientX, e.clientY)
-      cb.onWire?.({ phase: 'end', moved: held.moved, x: g?.x, y: g?.y })
+    if (mode === 'power') {
+      // Тап: клітинка під пальцем, а якщо влучили у вітряк — його клітинка (кабель під'єднається саме до неї).
+      if (!held.moved) {
+        const it = held.p.item?.p
+        const dev = it?.uid && ELECTRIC.has(it.kind) ? it : null
+        const g = held.p.ground
+        const cell = dev ? deviceCell(dev) : g ? [Math.floor(g.x / CELL), Math.floor(g.y / CELL)] : null
+        cb.onWire?.({ x: g?.x, y: g?.y, cell, device: dev?.uid ?? null })
+      }
       held = null
       return
     }
@@ -2304,6 +2439,8 @@ export function createWalk(canvas, assets, cb) {
 
     // Будівництво: виділена прикраса й привид нового місця.
     gridMesh.visible = editing()
+    // Кабелі анімовані (струм біжить, «мурахи» маршруту) — перемальовуємо ~10 разів на секунду, не щокадру.
+    if (mode === 'power' && t - wireAt > 0.1) drawGrid()
     const blink = 0.55 + Math.sin(t * 6) * 0.25
     const sel = mode === 'build' && selected && !ghost && list.find((p) => p.uid === selected)
     if (sel && sel.layer !== 'wall') selFoot.set(footOf(sel.kind, sel.x, sel.y), 0xffdc5a, 0.25 * blink, 0xffe678, blink)
@@ -2423,7 +2560,7 @@ export function createWalk(canvas, assets, cb) {
       goal = null
       markerAt = null
       body.vx = body.vy = 0
-      wirePreview = null
+      wireView = NO_VIEW
       netHL = null
       if (editing()) {
         near = null
@@ -2435,10 +2572,21 @@ export function createWalk(canvas, assets, cb) {
       }
       buildItems()
     },
-    /** Мазок, що ще летить до сервера: { cells, cut } або null. */
-    setWirePreview(w) {
-      wirePreview = w
+    /** Поверх кабелів: { start, end, route: { cells, fresh }, sel } — кінці маршруту, маршрут і ділянка на зняття. */
+    setWireView(v) {
+      wireView = v ? { ...NO_VIEW, ...v } : NO_VIEW
       if (mode === 'power') drawGrid()
+    },
+    /** Маршрут кабелю між клітинками: лише сушею, по своєму кабелю — даром. null — не дотягнутись. */
+    routeWire(from, to) {
+      const W = wireData()
+      const { cols, rows } = geo
+      return findRoute(from, to, { cols, rows, land: (x, y) => x >= 0 && x < cols && !!land[y * cols + x], has: (x, y) => W.has.has(cellKey(x, y)) })
+    },
+    /** Ділянка кабелю під клітинкою (між розгалуженнями) — щоб зняти гілку одним тапом. */
+    wireSegment(cell) {
+      const W = wireData()
+      return segmentAt(cell, (x, y) => W.has.has(cellKey(x, y)))
     },
     /** Підсвітити мережу зі списку (id) або зняти підсвітку (null). */
     setNetHighlight(id) {

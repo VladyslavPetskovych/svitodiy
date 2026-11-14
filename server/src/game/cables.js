@@ -20,8 +20,8 @@ export const CABLE_MAX = 400;
 
 /** Клітинка на суші (з маски острова). */
 export const onLand = (x, y) => WALK.rows[y]?.[x] === "1";
-/** За один запит — не більше такої смуги (тягнеш пальцем — клієнт шле шматками). */
-const BATCH_MAX = 60;
+/** За один запит — не більше стількох клітинок (довший маршрут клієнт шле шматками). */
+const BATCH_MAX = 200;
 const WIRE = "bare_wire";
 
 /** @returns {Promise<[number, number][]>} клітинки з кабелем */

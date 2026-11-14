@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { sharedHomeId } from "../bot.js";
 import { badRequest } from "./errors.js";
+import { ISLAND } from "./island-bounds.js";
 import { getWear } from "./wardrobe.js";
 
 /**
@@ -24,7 +25,8 @@ import { getWear } from "./wardrobe.js";
  * і WINTER_MAP (walk/winter.js). Нові сцени — лише в кінець: точки зберігають номер сцени.
  */
 const SCENES = [
-  { id: "island", w: 512, h: 448 },
+  // Острів — з морем довкола, де стоять помости (island-bounds.js).
+  { id: "island", x0: ISLAND.x0, y0: ISLAND.y0, w: ISLAND.x1, h: ISLAND.y1 },
   { id: "home", w: 240, h: 192 },
   { id: "winter", w: 448, h: 416 },
 ];
@@ -234,8 +236,8 @@ export async function postPresence(tgUser, body) {
       if (ago == null || x == null || y == null || sc < 0 || ago < 0 || ago > MAX_AGO) continue;
       const at = Math.round(now - ago);
       if (at <= last || at <= (fresh.at(-1)?.[0] ?? 0)) continue;
-      const { w, h } = SCENES[sc];
-      fresh.push([at, Math.round(clamp(x, 0, w) * 10) / 10, Math.round(clamp(y, 0, h) * 10) / 10, sc]);
+      const { w, h, x0 = 0, y0 = 0 } = SCENES[sc];
+      fresh.push([at, Math.round(clamp(x, x0, w) * 10) / 10, Math.round(clamp(y, y0, h) * 10) / 10, sc]);
     }
     if (fresh.length) m.samples = [...m.samples, ...fresh].filter((p) => now - p[0] <= KEEP_MS).slice(-MAX_SAMPLES);
   }

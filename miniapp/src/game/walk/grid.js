@@ -3,14 +3,28 @@ import { CELL } from './layout.js'
 /**
  * Сітка прохідності сцени: клітинки, «ступня» мандрівника, пошук шляху й перевірка проходів.
  * Координати — пікселі арту (x — праворуч, y — вниз по мапі); у 3D це осі X і Z.
+ *
+ * pad — скільки клітинок моря довкола мапи теж входить у сітку (рідний острів: туди кладуть помости).
+ * Тоді координати бувають і від'ємні: клітинка (cx, cy) мапи лежить у сітці під номером idx(cx, cy),
+ * а cx(c) / cy(c) — навпаки. Масиви сітки (walkGrid) будуються з тим самим pad.
  * @param {string[]} walk рядки '0'/'1' з генератора
  * @param {{ w: number, h: number }} map
+ * @param {number} [pad]
  */
-export function geometry(walk, map) {
-  const cols = walk[0].length
-  const rows = walk.length
-  const cellOf = (x, y) => Math.floor(y / CELL) * cols + Math.floor(x / CELL)
-  const centerOf = (c) => ({ x: (c % cols) * CELL + CELL / 2, y: Math.floor(c / cols) * CELL + CELL / 2 })
+export function geometry(walk, map, pad = 0) {
+  const cols = walk[0].length + pad * 2
+  const rows = walk.length + pad * 2
+  /** Межі в пікселях арту, які покриває сітка. */
+  const x0 = -pad * CELL
+  const y0 = -pad * CELL
+  const x1 = map.w + pad * CELL
+  const y1 = map.h + pad * CELL
+  const inside = (cx, cy) => cx >= -pad && cy >= -pad && cx < cols - pad && cy < rows - pad
+  const idx = (cx, cy) => (inside(cx, cy) ? (cy + pad) * cols + cx + pad : -1)
+  const cxOf = (c) => (c % cols) - pad
+  const cyOf = (c) => Math.floor(c / cols) - pad
+  const cellOf = (x, y) => idx(Math.floor(x / CELL), Math.floor(y / CELL))
+  const centerOf = (c) => ({ x: cxOf(c) * CELL + CELL / 2, y: cyOf(c) * CELL + CELL / 2 })
 
   /**
    * «Ступня» мандрівника — прямокутник 6×3 px над якорем (x ±3, y −4…−1).
@@ -21,7 +35,7 @@ export function geometry(walk, map) {
     for (const [dx, dy] of FOOT) {
       const px = x + dx
       const py = y + dy
-      if (px < 0 || py < 0 || px >= map.w || py >= map.h || !grid[cellOf(px, py)]) return false
+      if (px < x0 || py < y0 || px >= x1 || py >= y1 || !grid[cellOf(px, py)]) return false
     }
     return true
   }
@@ -98,7 +112,7 @@ export function geometry(walk, map) {
     const out = []
     for (let cy = Math.floor(y / CELL); cy <= Math.floor((y + h - 1) / CELL); cy++)
       for (let cx = Math.floor(x / CELL); cx <= Math.floor((x + w - 1) / CELL); cx++)
-        out.push(cx < 0 || cy < 0 || cx >= cols || cy >= rows ? -1 : cy * cols + cx)
+        out.push(idx(cx, cy))
     return out
   }
 
@@ -123,7 +137,7 @@ export function geometry(walk, map) {
     return interact.every((it) => seen[cellOf(it.near[0], it.near[1])])
   }
 
-  return { cols, rows, cellOf, canStand, findPath, cellsOf, allReachable }
+  return { cols, rows, pad, bounds: { x0, y0, x1, y1 }, idx, cx: cxOf, cy: cyOf, cellOf, canStand, findPath, cellsOf, allReachable }
 }
 
 /** Кути «ступні» відносно якоря мандрівника. */

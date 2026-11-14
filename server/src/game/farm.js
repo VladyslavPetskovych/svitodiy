@@ -11,6 +11,7 @@ import {
   seedKey,
 } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
+import { onIsland } from "./island-bounds.js";
 import { homeOwner } from "./household.js";
 import { decoKey, farmKey, takeCooldown } from "./keys.js";
 import { RAIN_SINCE, firstRain, isRaining, lastRain } from "./weather.js";
@@ -212,12 +213,9 @@ export async function clearPlot(userId, plot) {
 
 /* ───────── Грядки в пісочниці ───────── */
 
-/** Межі мапи острова — як MAP у miniapp/src/game/walk/layout.js. */
-const MAP_W = 512;
-const MAP_H = 448;
-
 function bedCoords(x, y) {
-  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 8 || y < 16 || x > MAP_W - 8 || y > MAP_H) throw badRequest("Сюди грядку не поставити.");
+  // Мапа й море довкола: грядку можна поставити й на поміст (island-bounds.js).
+  if (!Number.isInteger(x) || !Number.isInteger(y) || !onIsland(x, y, 8)) throw badRequest("Сюди грядку не поставити.");
   return { x, y };
 }
 

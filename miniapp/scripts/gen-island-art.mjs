@@ -1785,6 +1785,31 @@ function decoPlankFloor() {
   return img
 }
 
+/**
+ * Палі під переднім краєм помосту — тайл 8×10 на клітинку (рушій кладе його під кожну клітинку краю,
+ * за якою відкрите море): торець настилу, тінь на воді й балка, опущена у воду, з брижами довкола.
+ */
+function platformFront() {
+  const img = new Img(8, 10)
+  // Торець настилу: світлий кант зверху, темна дошка.
+  img.hline(0, 7, 0, C.woodHi)
+  img.rect(0, 1, 8, 2, C.woodLo)
+  img.set(1, 2, '#3f2816')
+  img.set(6, 2, '#3f2816')
+  // Тінь помосту на воді.
+  img.rect(0, 3, 8, 2, '#0b2a4a', 0.35)
+  // Балка: освітлена ліва грань, темна права; під водою — темніша й синювата.
+  img.rect(3, 3, 2, 4, C.wood)
+  img.vline(4, 3, 6, C.woodLo)
+  img.rect(3, 7, 2, 2, '#3c4a5c', 0.8)
+  // Брижі на лінії води.
+  img.hline(1, 6, 7, '#cfeaff', 0.75)
+  img.hline(2, 5, 8, '#cfeaff', 0.35)
+  img.set(0, 9, '#cfeaff', 0.2)
+  img.set(7, 9, '#cfeaff', 0.2)
+  return img
+}
+
 function decoStoneLantern() {
   const img = new Img(12, 22)
   shadow(img, 6, 20, 5, 1.5)
@@ -1952,6 +1977,7 @@ function decoSprites() {
     deco_stepping_stone: decoSteppingStone(),
     deco_cobble_tile: decoCobbleTile(),
     deco_plank_floor: decoPlankFloor(),
+    platform_front: platformFront(),
     deco_stone_lantern: decoStoneLantern(),
     deco_well: decoWell(),
     deco_fence: decoFence(),

@@ -21,7 +21,7 @@ import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
 import { INTERIOR_GEOM, dogBedSpot, interiorFootprint, interiorInteract, interiorLights, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
 import { createInput } from './input.js'
 import { HERO_CELL, HERO_FRAME, HERO_FRAMES, composeHero, heroFrameIndex, outfitKey, outfitOf } from './outfit.js'
-import { CELL, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotCenter, plotRect, walkGrid } from './layout.js'
+import { CELL, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, PLATFORM_REACH, SPOTS, START, placements, plotCenter, plotRect, walkGrid } from './layout.js'
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
 import { WINTER_FIRE, WINTER_INTERACT, WINTER_MAP, WINTER_PIER, WINTER_SPAWN, winterPlacements } from './winter.js'
 import { createPeers } from './peers.js'
@@ -185,29 +185,36 @@ const PLACED_BUILDINGS = Object.keys(BUILDING_GEOM)
  * snowy — сніг: сніжить завжди, лишаються сліди, вода холодна.
  */
 const SCENES = {
-  island: { id: 'island', map: MAP, walk: atlas.walk, bg: 'ground', foam: 'foam', outdoor: true, farm: true, spawn: { x: SPOTS.house.x, y: SPOTS.house.y + 12, dir: 'down' } },
+  island: { id: 'island', map: MAP, walk: atlas.walk, pad: PLATFORM_REACH, bg: 'ground', foam: 'foam', outdoor: true, farm: true, spawn: { x: SPOTS.house.x, y: SPOTS.house.y + 12, dir: 'down' } },
   home: { id: 'home', map: HOME_MAP, walk: atlas.homeWalk, bg: 'home', outdoor: false, spawn: { ...HOME_START, dir: 'up' } },
   winter: { id: 'winter', map: WINTER_MAP, walk: atlas.winterWalk, bg: 'winter-ground', foam: 'winter-foam', outdoor: true, snowy: true, spawn: { ...WINTER_SPAWN } },
 }
-for (const sc of Object.values(SCENES)) sc.geo = geometry(sc.walk, sc.map)
+// Рідний острів: сітка ще й на PLATFORM_REACH клітинок моря довкола — там стоять помости.
+for (const sc of Object.values(SCENES)) sc.geo = geometry(sc.walk, sc.map, sc.pad ?? 0)
 
 /** Суша острова, на якій можна будувати: з генератора, без мостків над водою. */
-const land = walkGrid(atlas.walk, [])
+const land = walkGrid(atlas.walk, [], PLATFORM_REACH)
 /** Мілина біля берега, куди ставлять сітки (без причалу, човна й місця для рибалки) — теж з генератора. */
-const shore = walkGrid(atlas.shore ?? atlas.walk.map((l) => '0'.repeat(l.length)), [])
+const shore = walkGrid(atlas.shore ?? atlas.walk.map((l) => '0'.repeat(l.length)), [], PLATFORM_REACH)
+/** Суша острова за клітинкою мапи (cx, cy); за межами мапи — море. */
+const landAt = (cx, cy) => land[SCENES.island.geo.idx(cx, cy)] === 1
 /** Підлога хатинки, на якій можна ставити речі. */
 const homeLand = walkGrid(atlas.homeWalk, [])
+
+/** Висота тайла паль під переднім краєм помосту (спрайт platform_front), px. */
+const PILING_H = 10
 
 /** Дари моря на піску, які можуть поцупити чайки (сервер дозволяє лише їх — nodes.js → stealNode). */
 const BEACH_LOOT = new Set(['driftwood', 'shell', 'seaweed'])
 /** Пляж для чайок: центри клітинок суші, від яких до води не далі двох клітинок. */
 const BEACH = (() => {
-  const { cols, rows } = SCENES.island.geo
-  const water = (cx, cy) => cx >= 0 && cy >= 0 && cx < cols && cy < rows && !land[cy * cols + cx]
+  const cols = atlas.walk[0].length
+  const rows = atlas.walk.length
+  const water = (cx, cy) => cx >= 0 && cy >= 0 && cx < cols && cy < rows && !landAt(cx, cy)
   const out = []
   for (let cy = 2; cy < rows - 2; cy++)
     for (let cx = 2; cx < cols - 2; cx++) {
-      if (!land[cy * cols + cx]) continue
+      if (!landAt(cx, cy)) continue
       let near = false
       for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2 && !near; dx++) near = water(cx + dx, cy + dy)
       if (near) out.push({ x: cx * CELL + CELL / 2, y: cy * CELL + CELL / 2 + 2 })
@@ -1164,8 +1171,8 @@ export function createWalk(canvas, assets, cb) {
     for (const p of list) for (const b of p.blocks ?? []) for (const c of geo.cellsOf(b)) if (c >= 0) busy[c] = 1
     for (let c = 0; c < ground.length; c++) {
       if (!ground[c]) continue
-      const x = (c % geo.cols) * CELL
-      const y = Math.floor(c / geo.cols) * CELL
+      const x = geo.cx(c) * CELL
+      const y = geo.cy(c) * CELL
       if (busy[c]) {
         ctx.fillStyle = 'rgba(255, 90, 70, 0.14)'
         ctx.fillRect(x, y, CELL, CELL)
@@ -1192,12 +1199,12 @@ export function createWalk(canvas, assets, cb) {
     const g = c.getContext('2d')
     g.setTransform(GRID_RES, 0, 0, GRID_RES, 0, 0)
     g.fillStyle = 'rgba(8, 16, 28, 0.55)'
-    for (let i = 0; i < ground.length; i++) if (ground[i]) g.fillRect((i % geo.cols) * CELL, Math.floor(i / geo.cols) * CELL, CELL, CELL)
+    for (let i = 0; i < ground.length; i++) if (ground[i]) g.fillRect(geo.cx(i) * CELL, geo.cy(i) * CELL, CELL, CELL)
     g.fillStyle = 'rgba(160, 200, 255, 0.08)'
     for (let i = 0; i < ground.length; i++) {
       if (!ground[i]) continue
-      const x = (i % geo.cols) * CELL
-      const y = Math.floor(i / geo.cols) * CELL
+      const x = geo.cx(i) * CELL
+      const y = geo.cy(i) * CELL
       g.fillRect(x, y, CELL, 0.5)
       g.fillRect(x, y, 0.5, CELL)
     }
@@ -1405,6 +1412,7 @@ export function createWalk(canvas, assets, cb) {
       fx = winterEffects()
     } else if (scene.outdoor) {
       list = [...placements(home, chestOpen, deco, nodes), ...farmPlacements(farmView)]
+      list.push(...platformFronts(list))
       interact = islandInteract()
       fx = effectsFor(home, deco)
     } else {
@@ -1412,7 +1420,7 @@ export function createWalk(canvas, assets, cb) {
       interact = interiorInteract(interior)
       fx = homeEffects(interior)
     }
-    grid = walkGrid(scene.walk, list)
+    grid = walkGrid(scene.walk, list, geo.pad)
     if (selected && !list.some((p) => p.uid === selected)) selected = null
     // Щось виросло чи стало просто під ногами — відступаємо на найближче вільне місце, а не до дверей.
     if (!geo.canStand(grid, body.x, body.y)) {
@@ -1420,6 +1428,48 @@ export function createWalk(canvas, assets, cb) {
       teleport(body, free.x, free.y)
     }
     buildItems()
+    fitBounds()
+  }
+
+  /**
+   * Палі під помостом: де передній край помосту (ближчий до камери, знизу на мапі) виходить у відкрите море,
+   * під ним видно торець настилу й балки, опущені у воду. По тайлу на клітинку.
+   */
+  function platformFronts(all) {
+    const deck = new Set()
+    const decks = all.filter((p) => p.platform)
+    for (const p of decks) for (const c of geo.cellsOf(p.walk)) if (c >= 0) deck.add(c)
+    const out = []
+    for (const p of decks) {
+      const [x, y, w, h] = p.walk
+      const below = Math.floor((y + h) / CELL)
+      for (let cx = Math.floor(x / CELL); cx <= Math.floor((x + w - 1) / CELL); cx++) {
+        const c = geo.idx(cx, below)
+        if (landAt(cx, below) || deck.has(c)) continue
+        out.push({ s: 'platform_front', x: cx * CELL + CELL / 2, y: below * CELL + PILING_H, layer: 'floor' })
+      }
+    }
+    return out
+  }
+
+  /**
+   * Межі камери. Острів: сама мапа й помости, що стоять у морі, а в будівництві — увесь простір,
+   * куди можна покласти помост (PLATFORM_REACH клітинок довкола). Решта сцен — їхня мапа.
+   */
+  function fitBounds() {
+    const m = scene.map
+    if (!scene.outdoor || !geo.pad) return rig.setBounds(m.w, m.h, scene.outdoor ? 40 : 100)
+    const b = editing() ? { ...geo.bounds } : { x0: 0, y0: 0, x1: m.w, y1: m.h }
+    if (!editing())
+      for (const p of list)
+        if (p.platform) {
+          const [x, y, w, h] = p.walk
+          b.x0 = Math.min(b.x0, x - 40)
+          b.y0 = Math.min(b.y0, y - 40)
+          b.x1 = Math.max(b.x1, x + w + 40)
+          b.y1 = Math.max(b.y1, y + h + 40)
+        }
+    rig.setBounds(b.x1 - b.x0, b.y1 - b.y0, 40, b.x0, b.y0)
   }
 
   /** Найближча точка, де можна стати (по спіралі клітинок), або точка входу в сцену. */
@@ -1648,8 +1698,8 @@ export function createWalk(canvas, assets, cb) {
     ground.scale.set(scene.map.w, 1, scene.map.h)
     ground.position.set(scene.map.w / 2, 0, scene.map.h / 2)
     renderer.setClearColor(outdoor ? 0x3b7fd0 : 0x120c08)
-    // Кімната менша за кадр — тримаємо її по центру; острів — з відступом від краю.
-    rig.setBounds(scene.map.w, scene.map.h, outdoor ? 40 : 100)
+    // Кімната менша за кадр — тримаємо її по центру; острів — з відступом від краю (і з помостами в морі).
+    fitBounds()
   }
 
   /** Перейти в іншу сцену («island» / «home»): гравець стає біля входу. */
@@ -1866,7 +1916,7 @@ export function createWalk(canvas, assets, cb) {
     if (!scene.outdoor) return { ok: false, reason: 'Тут будувати не можна' }
     const others = list.filter((p) => !p.uid || p.uid !== ignoreUid)
     // Земля для будівництва = суша острова + помости на воді (вони теж суша).
-    const ground = walkGrid(atlas.walk, others.filter((p) => p.platform))
+    const ground = walkGrid(atlas.walk, others.filter((p) => p.platform), geo.pad)
     const nextToGround = (c) => {
       const cx = c % geo.cols
       const cy = Math.floor(c / geo.cols)
@@ -1909,7 +1959,7 @@ export function createWalk(canvas, assets, cb) {
     }
     if (cells.some((c) => busy[c])) return { ok: false, reason: tree ? 'Спершу розчисть місце' : 'Місце зайняте' }
     if (!g.floor) {
-      const test = walkGrid(atlas.walk, [...others, { blocks: [fp] }])
+      const test = walkGrid(atlas.walk, [...others, { blocks: [fp] }], geo.pad)
       const me = geo.cellOf(body.x, body.y)
       if (!test[me]) return { ok: false, reason: 'Тут стоїть мандрівник' }
       // Ресурси не рахуємо: заросле дерево можна й зрубати. Те, до чого вже не дійти, не блокує —
@@ -2689,6 +2739,7 @@ export function createWalk(canvas, assets, cb) {
         setGhostMesh()
       }
       buildItems()
+      fitBounds()
     },
     /** Поверх кабелів: { start, end, route: { cells, fresh }, sel } — кінці маршруту, маршрут і ділянка на зняття. */
     setWireView(v) {
@@ -2698,8 +2749,10 @@ export function createWalk(canvas, assets, cb) {
     /** Маршрут кабелю між клітинками: лише сушею, по своєму кабелю — даром. null — не дотягнутись. */
     routeWire(from, to) {
       const W = wireData()
-      const { cols, rows } = geo
-      return findRoute(from, to, { cols, rows, land: (x, y) => x >= 0 && x < cols && !!land[y * cols + x], has: (x, y) => W.has.has(cellKey(x, y)) })
+      // Кабель — лише по суші мапи (помости в морі — без кабелю): клітинки мапи без запасу моря.
+      const cols = atlas.walk[0].length
+      const rows = atlas.walk.length
+      return findRoute(from, to, { cols, rows, land: (x, y) => landAt(x, y), has: (x, y) => W.has.has(cellKey(x, y)) })
     },
     /** Ділянка кабелю під клітинкою (між розгалуженнями) — щоб зняти гілку одним тапом. */
     wireSegment(cell) {

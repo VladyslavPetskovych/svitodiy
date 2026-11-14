@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { homeOwner } from "./household.js";
+import { PLATFORM_REACH, onIsland } from "./island-bounds.js";
 import { decoKey, takeCooldown } from "./keys.js";
 import { NET } from "./nodes.js";
 import { RUBBER, rubberReady } from "./rubber.js";
@@ -187,11 +188,14 @@ function footCells(def, x, y) {
  */
 function checkPlatform(def, x, y, decor, selfId = null) {
   const { rows } = LAND;
-  const inMap = (cx, cy) => cy >= 0 && cy < rows.length && cx >= 0 && cx < rows[0].length;
+  // Помости кладуть і в море довкола мапи — до PLATFORM_REACH клітинок від краю (island-bounds.js).
+  const R = PLATFORM_REACH;
+  const inReach = (cx, cy) => cy >= -R && cy < rows.length + R && cx >= -R && cx < rows[0].length + R;
+  const isLand = (cx, cy) => rows[cy]?.[cx] === "1"; // за межами мапи — море
   const cells = footCells(def, x, y);
-  if (cells.some(([cx, cy]) => !inMap(cx, cy))) throw badRequest("Сюди поставити не вийде.");
+  if (cells.some(([cx, cy]) => !inReach(cx, cy))) throw badRequest("Сюди поставити не вийде — задалеко від острова.");
   // Можна у воду й на пляж: хоч одна клітинка — вода або межує з водою (не вглиб острова).
-  const water = (cx, cy) => inMap(cx, cy) && rows[cy][cx] !== "1";
+  const water = (cx, cy) => inReach(cx, cy) && !isLand(cx, cy);
   const nearWater = cells.some(
     ([cx, cy]) => water(cx, cy) || water(cx + 1, cy) || water(cx - 1, cy) || water(cx, cy + 1) || water(cx, cy - 1)
   );
@@ -202,7 +206,7 @@ function checkPlatform(def, x, y, decor, selfId = null) {
     for (const [cx, cy] of footCells(def, d.x, d.y)) deck.add(`${cx},${cy}`);
   }
   if (cells.some(([cx, cy]) => deck.has(`${cx},${cy}`))) throw conflict("busy", `${def.emoji} ${def.name}: тут уже є помост.`);
-  const walkable = (cx, cy) => (inMap(cx, cy) && rows[cy][cx] === "1") || deck.has(`${cx},${cy}`);
+  const walkable = (cx, cy) => isLand(cx, cy) || deck.has(`${cx},${cy}`);
   const touches = cells.some(([cx, cy]) => walkable(cx, cy) || walkable(cx + 1, cy) || walkable(cx - 1, cy) || walkable(cx, cy + 1) || walkable(cx, cy - 1));
   if (!touches) throw conflict("not_connected", `${def.emoji} ${def.name}: став поруч із берегом чи іншим помостом.`);
 }
@@ -211,9 +215,6 @@ function checkPlatform(def, x, y, decor, selfId = null) {
 function checkSpot(def, x, y) {
   if (def.water && !onShore(def, x, y)) throw conflict("not_water", `${def.emoji} ${def.name}: став у воду біля берега.`);
 }
-/** Межі мапи острова в пікселях арту — як MAP у walk/layout.js. */
-const MAP_W = 512;
-const MAP_H = 448;
 const ITEM_ID = /^[a-z0-9]{6,16}$/;
 
 /** @returns {Promise<{ id: string, k: string, x: number, y: number, t?: number, sp?: string, c?: number, nc?: number }[]>} */
@@ -236,7 +237,8 @@ export async function getDecor(userId) {
 }
 
 function coords(x, y) {
-  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x > MAP_W || y > MAP_H) {
+  // Мапа острова й море довкола, де стоять помости (на них ставлять усе, як на суші).
+  if (!Number.isInteger(x) || !Number.isInteger(y) || !onIsland(x, y)) {
     throw badRequest("Сюди поставити не вийде.");
   }
   return { x, y };

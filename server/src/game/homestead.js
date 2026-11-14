@@ -1,5 +1,6 @@
 import { addBalance, addResourceToInventory, consumeResources, getBalance, getInventory, getRedis } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
+import { onIsland } from "./island-bounds.js";
 import { homeOwner } from "./household.js";
 import { homeKey, takeCooldown } from "./keys.js";
 
@@ -202,10 +203,6 @@ export async function upgradeBuilding(userId, buildingId) {
 
 /* ───────── Будівлі, які ставить гравець ───────── */
 
-/** Межі мапи острова в пікселях арту — як MAP у miniapp/src/game/walk/layout.js. */
-const MAP_W = 512;
-const MAP_H = 448;
-
 function placeable(buildingId) {
   const b = typeof buildingId === "string" ? BY_ID.get(buildingId) : null;
   if (!b?.placeable) throw badRequest("Цю будівлю не переносять.");
@@ -213,7 +210,8 @@ function placeable(buildingId) {
 }
 
 function coords(x, y) {
-  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x > MAP_W || y > MAP_H) {
+  // Мапа й море довкола: будівлю можна поставити й на поміст (island-bounds.js).
+  if (!Number.isInteger(x) || !Number.isInteger(y) || !onIsland(x, y)) {
     throw badRequest("Сюди поставити не вийде.");
   }
   return `${x},${y}`;

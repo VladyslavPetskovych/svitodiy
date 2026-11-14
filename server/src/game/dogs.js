@@ -1,5 +1,6 @@
 import { CATCHES, CROPS, addResourceToInventory, consumeResources, cropKey, getCrop, getFishMeta, getRedis, seedKey } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
+import { ISLAND } from "./island-bounds.js";
 import { homeOwner } from "./household.js";
 import { dogsKey, kyivDay, takeCooldown } from "./keys.js";
 
@@ -39,7 +40,12 @@ const GIFTS = [
 const GIFT_TOTAL = GIFTS.reduce((s, g) => s + g.w, 0);
 
 export const MODES = ["follow", "sit", "house"];
-const SCENES = { island: { w: 512, h: 448 }, home: { w: 240, h: 192 }, winter: { w: 448, h: 416 } };
+// Острів — з морем довкола (island-bounds.js): пса можна посадити й на далекому помості.
+const SCENES = {
+  island: { x0: ISLAND.x0, y0: ISLAND.y0, w: ISLAND.x1, h: ISLAND.y1 },
+  home: { w: 240, h: 192 },
+  winter: { w: 448, h: 416 },
+};
 
 /**
  * Чим можна нагодувати: будь-яка риба, риб'яча кістка й деякі овочі з городу.
@@ -156,7 +162,7 @@ export async function commandDog(userId, dogId, body) {
     const sc = SCENES[body.scene];
     const x = Math.round(Number(body.x));
     const y = Math.round(Number(body.y));
-    if (!sc || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > sc.w || y > sc.h) {
+    if (!sc || !Number.isFinite(x) || !Number.isFinite(y) || x < (sc.x0 ?? 0) || y < (sc.y0 ?? 0) || x > sc.w || y > sc.h) {
       throw badRequest("Тут пес сидіти не може.");
     }
     sit = { scene: body.scene, x, y };

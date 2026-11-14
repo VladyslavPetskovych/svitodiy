@@ -44,11 +44,11 @@ export function createCameraRig(aspect) {
   const baseDist = () => VIEW / camera.aspect / (2 * tanHalf)
 
   function clampFocus(p) {
-    const { w, h, margin } = rig.bounds
+    const { w, h, margin, x0 = 0, y0 = 0 } = rig.bounds
     const mx = Math.min(margin, w / 2)
     const my = Math.min(margin, h / 2)
-    p.x = THREE.MathUtils.clamp(p.x, mx, w - mx)
-    p.y = THREE.MathUtils.clamp(p.y, my, h - my)
+    p.x = THREE.MathUtils.clamp(p.x, x0 + mx, x0 + w - mx)
+    p.y = THREE.MathUtils.clamp(p.y, y0 + my, y0 + h - my)
     return p
   }
 
@@ -58,8 +58,9 @@ export function createCameraRig(aspect) {
       camera.updateProjectionMatrix()
     },
     /** Межі мапи; margin — наскільки фокус тримається від краю (більший — менше руху камери). */
-    setBounds(w, h, margin = 40) {
-      rig.bounds = { w, h, margin }
+    /** Куди може дивитись камера: прямокутник від (x0, y0) розміром w×h, з відступом margin від краю. */
+    setBounds(w, h, margin = 40, x0 = 0, y0 = 0) {
+      rig.bounds = { w, h, margin, x0, y0 }
     },
     /** Слідувати за тілом (у фіксованому кроці не треба — викликається після руху, раз на кадр). */
     follow(x, y, vx, vy, dt) {

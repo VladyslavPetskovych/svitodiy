@@ -11,6 +11,12 @@ export const MAP = { w: 512, h: 448 }
 /** Клітинка сітки прохідності, px. */
 export const CELL = 8
 
+/**
+ * Як далеко від мапи острова можна класти помости, клітинок (server/src/game/decor.js — те саме число).
+ * Рушій тримає стільки моря довкола в сітці прохідності, тож по помостах там ходять, як по суші.
+ */
+export const PLATFORM_REACH = 100
+
 /** Рельєф: суша (пісок), плато з травою й скелястий мис під маяк — еліпси, що зливаються. */
 export const LAND = {
   shore: [
@@ -151,16 +157,17 @@ export function placements(home, chestOpen, deco = [], nodes = []) {
  * @param {string[]} base рядки '0'/'1' з генератора
  * @returns {Uint8Array} 1 — можна стати; індекс cy * cols + cx
  */
-export function walkGrid(base, list) {
-  const cols = base[0].length
-  const rows = base.length
+export function walkGrid(base, list, pad = 0) {
+  // pad — клітинки моря довкола мапи (як у geometry з grid.js): там лише помости.
+  const cols = base[0].length + pad * 2
+  const rows = base.length + pad * 2
   const grid = new Uint8Array(cols * rows)
   base.forEach((line, cy) => {
-    for (let cx = 0; cx < cols; cx++) grid[cy * cols + cx] = line[cx] === '1' ? 1 : 0
+    for (let cx = 0; cx < line.length; cx++) grid[(cy + pad) * cols + cx + pad] = line[cx] === '1' ? 1 : 0
   })
   const paint = ([x, y, w, h], v) => {
-    for (let cy = Math.floor(y / CELL); cy <= Math.floor((y + h - 1) / CELL); cy++)
-      for (let cx = Math.floor(x / CELL); cx <= Math.floor((x + w - 1) / CELL); cx++)
+    for (let cy = Math.floor(y / CELL) + pad; cy <= Math.floor((y + h - 1) / CELL) + pad; cy++)
+      for (let cx = Math.floor(x / CELL) + pad; cx <= Math.floor((x + w - 1) / CELL) + pad; cx++)
         if (cx >= 0 && cy >= 0 && cx < cols && cy < rows) grid[cy * cols + cx] = v
   }
   for (const p of list) if (p.walk) paint(p.walk, 1)

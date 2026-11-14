@@ -4,7 +4,8 @@
  *    далі цикл повторюється без шва). Рушій гортає їх за DECO_GEOM.windmill.anim.
  *  - посаджене дерево: tree_plant_0 (горбик з насіниною), tree_plant_1 (паросток),
  *    tree_young_<порода> (деревце) — далі сервер перетворює його на справжнє дерево (nodes.js).
- *  - іконки для рюкзака: copper_ingot, bare_wire, tree_seed (public/game/items/<id>.png).
+ *  - акумулятор battery_0…3 (скільки банок світиться — стільки заряду) і електропіч furnace_off / furnace_on.
+ *  - іконки для рюкзака: copper_ingot, bare_wire, tree_seed, battery, glass, iron_ingot (public/game/items/<id>.png).
  */
 
 const K = '#2b1d16'
@@ -504,8 +505,202 @@ export function powerArt({ Img, hash, canopy, shadow, LEAF }) {
     return img.outline(K, 0.9)
   }
 
+  /* ───────── Акумулятор ───────── */
+
+  /**
+   * Акумуляторна шафка на кам'яній плиті: залізний корпус, три скляні банки спереду
+   * (світиться стільки, скільки заряду — level 0…3), мідні клеми згори, кабель іде в землю.
+   */
+  function battery(level) {
+    const img = new Img(24, 27)
+    shadow(img, 12, 25, 10, 2)
+    // Кам'яна плита.
+    img.rect(2, 23, 20, 3, STONE.b)
+    img.hline(2, 21, 23, STONE.hi)
+    img.hline(2, 21, 25, STONE.lo)
+    for (const x of [7, 14]) img.set(x, 24, STONE.grout)
+    // Корпус: лівий бік світлий, правий у тіні, заклепки по кутах.
+    img.rect(4, 7, 16, 16, IRON.mid)
+    img.vline(4, 7, 22, IRON.hi)
+    img.vline(5, 8, 21, IRON.hi, 0.5)
+    img.vline(19, 7, 22, IRON.lo)
+    img.vline(18, 8, 22, IRON.lo, 0.5)
+    img.hline(4, 19, 22, IRON.lo)
+    for (const [x, y] of [[5, 8], [18, 8], [5, 21], [18, 21]]) img.set(x, y, '#cfd6da')
+    // Кришка з мідним кантом.
+    img.rect(3, 5, 18, 2, IRON.lo)
+    img.hline(3, 20, 5, IRON.hi)
+    img.hline(4, 19, 7, COPPER.mid)
+    // Клеми: «+» червона, «−» темна.
+    img.rect(7, 2, 3, 3, COPPER.mid)
+    img.hline(7, 9, 2, COPPER.glint)
+    img.rect(7, 1, 3, 1, '#d8432c')
+    img.rect(14, 2, 3, 3, COPPER.mid)
+    img.hline(14, 16, 2, COPPER.glint)
+    img.rect(14, 1, 3, 1, '#2b2b2b')
+    // Скляні банки: темне скло, рідина світиться зеленим, коли банка заряджена.
+    for (let i = 0; i < 3; i++) {
+      const x = 7 + i * 4
+      img.rect(x - 1, 10, 4, 10, '#1b2430')
+      const lit = i < level
+      for (let y = 11; y <= 18; y++) {
+        img.set(x, y, lit ? (y < 13 ? '#d8ffd0' : '#7cf07a') : '#2c3a48')
+        img.set(x + 1, y, lit ? (y < 13 ? '#b6ffa8' : '#4fc95a') : '#24303c')
+      }
+      img.set(x, 11, lit ? '#ffffff' : '#46586a') // відблиск на склі
+    }
+    // Блискавка на табличці.
+    img.rows(['.Y', 'YY', 'Y.'], 11, 20, { Y: '#ffd35a' })
+    // Кабель з правого боку — у землю.
+    img.vline(21, 9, 24, COPPER.lo)
+    img.set(21, 8, COPPER.mid)
+    img.set(20, 8, COPPER.mid)
+    return img.outline(K, 0.9)
+  }
+
+  /* ───────── Електропіч ───────── */
+
+  const BRICK = { mortar: '#6f6458', dark: '#5a2416', lo: '#7d3622', mid: '#a04b2c', hi: '#c26a43' }
+
+  /** Цегляна піч-купол на кам'яному цоколі, залізні дверцята з віконцем, димар і щиток із лампочкою. */
+  function furnace(on) {
+    const img = new Img(36, 42)
+    shadow(img, 18, 40, 16, 2.5)
+    // Цоколь.
+    for (let y = 35; y <= 39; y++)
+      for (let x = 2; x <= 33; x++) {
+        const tone = hash(Math.floor(x / 5), y, 41)
+        img.set(x, y, (x + (y % 2 ? 2 : 0)) % 5 === 0 ? STONE.grout : tone < 0.5 ? STONE.b : STONE.a)
+      }
+    img.hline(2, 33, 35, STONE.hi)
+    img.hline(2, 33, 39, STONE.lo)
+    // Цегляний корпус і купол.
+    const brick = (x, y) => {
+      const row = Math.floor(y / 3)
+      const seamY = y % 3 === 2
+      const seamX = (x + (row % 2 ? 3 : 0)) % 6 === 0
+      if (seamY || seamX) return BRICK.mortar
+      const t = hash(Math.floor((x + (row % 2 ? 3 : 0)) / 6), row, 17)
+      return t < 0.3 ? BRICK.lo : t < 0.8 ? BRICK.mid : BRICK.hi
+    }
+    for (let y = 8; y <= 34; y++)
+      for (let x = 4; x <= 31; x++) {
+        // Купол: зверху округлий.
+        if (y < 18) {
+          const dx = (x + 0.5 - 18) / 14
+          const dy = (y + 0.5 - 18) / 10
+          if (dx * dx + dy * dy > 1) continue
+        }
+        let c = brick(x, y)
+        if (x < 7) c = c === BRICK.mortar ? c : BRICK.hi // освітлений лівий бік
+        if (x > 28) c = c === BRICK.mortar ? BRICK.dark : BRICK.lo // тінь праворуч
+        img.set(x, y, c)
+      }
+    // Димар — залізна труба з ободом.
+    img.rect(22, 1, 4, 10, IRON.mid)
+    img.vline(22, 1, 10, IRON.hi)
+    img.vline(25, 1, 10, IRON.lo)
+    img.rect(21, 0, 6, 2, IRON.lo)
+    img.hline(21, 26, 0, IRON.hi)
+    // Арка під дверцята.
+    for (let y = 19; y <= 34; y++)
+      for (let x = 10; x <= 25; x++) {
+        if (y < 23) {
+          const dx = (x + 0.5 - 18) / 8
+          const dy = (y + 0.5 - 23) / 4
+          if (dx * dx + dy * dy > 1) continue
+        }
+        img.set(x, y, BRICK.dark)
+      }
+    // Дверцята.
+    img.rect(12, 23, 12, 11, IRON.lo)
+    img.rect(12, 23, 12, 1, IRON.hi)
+    img.vline(12, 23, 33, IRON.mid)
+    for (const [x, y] of [[13, 24], [22, 24], [13, 32], [22, 32]]) img.set(x, y, IRON.hi)
+    img.rect(20, 29, 3, 1, COPPER.mid) // ручка
+    // Віконце: увімкнена — жар світиться, вимкнена — темна з кількома жаринками.
+    const glow = on ? ['#fff3b0', '#ffd35a', '#ff9a3c', '#ff5a1f'] : ['#3a2a22', '#2b1d16', '#2b1d16', '#2b1d16']
+    for (let y = 25; y <= 28; y++) for (let x = 14; x <= 21; x++) img.set(x, y, glow[Math.min(3, Math.abs(y - 26) + (Math.abs(x - 17.5) > 2.5 ? 1 : 0))])
+    if (!on) for (const [x, y] of [[15, 28], [19, 27], [17, 28]]) img.set(x, y, '#a8432b')
+    // Відблиск жару на цоколі.
+    if (on) for (let x = 12; x <= 23; x++) img.set(x, 35, '#ffb36a', 0.55)
+    // Щиток на боці: залізна скринька, мідна обмотка, лампочка (зелена — є енергія, червона — немає).
+    img.rect(29, 22, 6, 8, IRON.mid)
+    img.hline(29, 34, 22, IRON.hi)
+    img.vline(34, 22, 29, IRON.lo)
+    for (const y of [25, 27]) img.hline(30, 33, y, COPPER.mid)
+    img.rect(31, 23, 2, 1, on ? '#7cf07a' : '#ff5a46')
+    img.vline(32, 30, 36, COPPER.lo) // кабель у землю
+    return img.outline(K, 0.9)
+  }
+
+  /* ───────── Іконки електрики ───────── */
+
+  /** Злиток у три чверті (той самий обрис, що в мідного) — з іншою палітрою. */
+  function ingot(pal) {
+    const img = new Img(22, 14)
+    img.rows(
+      [
+        '.....GGGGGGGGGG.....',
+        '....GHHHHHHHHHHD....',
+        '...HHHHWWHHHHHHDD...',
+        '..HHHHHHHHHHHHHHDD..',
+        '.MMMMMMMMMMMMMMMMDD.',
+        '.MMMMMLLLLLLMMMMMDDD',
+        'MMMMMMMLMMLMMMMMMMDD',
+        'MMMMMMMLLLLMMMMMMMDD',
+        'MMMMMMMMMMMMMMMMMMDD',
+        'LLLLLLLLLLLLLLLLLLLD',
+      ],
+      1,
+      2,
+      pal
+    )
+    return img.outline(K, 0.9)
+  }
+
+  /** Акумулятор для рюкзака: банка з клемами й зеленим зарядом. */
+  function batteryIcon() {
+    const img = new Img(18, 20)
+    img.rect(3, 5, 12, 14, IRON.mid)
+    img.vline(3, 5, 18, IRON.hi)
+    img.vline(14, 5, 18, IRON.lo)
+    img.hline(3, 14, 18, IRON.lo)
+    img.rect(5, 8, 8, 8, '#1b2430')
+    img.rect(6, 11, 6, 4, '#4fc95a')
+    img.hline(6, 11, 11, '#b6ffa8')
+    img.rows(['.Y.', 'YY.', '.YY', '.Y.'], 7, 9, { Y: '#ffd35a' })
+    img.rect(4, 2, 3, 3, COPPER.mid)
+    img.rect(4, 1, 3, 1, '#d8432c')
+    img.rect(11, 2, 3, 3, COPPER.mid)
+    img.rect(11, 1, 3, 1, '#2b2b2b')
+    img.hline(3, 14, 5, COPPER.mid)
+    return img.outline(K, 0.9)
+  }
+
+  /** Скло: прозора блакитна пластина з відблиском. */
+  function glassIcon() {
+    const img = new Img(18, 18)
+    for (let y = 2; y <= 15; y++)
+      for (let x = 2; x <= 15; x++) {
+        const edge = x === 2 || y === 2 || x === 15 || y === 15
+        img.set(x, y, edge ? '#6fa9c4' : (x + y) % 9 < 1 ? '#e9fbff' : y < 7 ? '#cdeefa' : '#a9dcf0')
+      }
+    // Діагональні відблиски.
+    for (let k = 0; k < 6; k++) {
+      img.set(5 + k, 10 - k, '#ffffff')
+      img.set(9 + k, 13 - k, '#f2fdff')
+    }
+    img.vline(15, 3, 15, '#4f88a3')
+    img.hline(3, 15, 15, '#4f88a3')
+    return img.outline(K, 0.7)
+  }
+
   const sprites = {}
   for (let f = 0; f < WINDMILL_FRAMES; f++) sprites[`windmill_${f}`] = windmillFrame(f)
+  for (let l = 0; l <= 3; l++) sprites[`battery_${l}`] = battery(l)
+  sprites.furnace_off = furnace(false)
+  sprites.furnace_on = furnace(true)
   sprites.tree_plant_0 = plant0()
   sprites.tree_plant_1 = plant1()
   for (const kind of ['oak', 'birch', 'pine']) sprites[`tree_young_${kind}`] = young(kind)
@@ -514,6 +709,15 @@ export function powerArt({ Img, hash, canopy, shadow, LEAF }) {
   sprites.rubber_tree = rubberTree(false)
   sprites.rubber_tree_full = rubberTree(true)
 
-  const items = { copper_ingot: copperIngot(), bare_wire: bareWire(), tree_seed: treeSeed(), rubber: rubber(), rubber_seed: rubberSeed() }
+  const items = {
+    copper_ingot: copperIngot(),
+    bare_wire: bareWire(),
+    tree_seed: treeSeed(),
+    rubber: rubber(),
+    rubber_seed: rubberSeed(),
+    battery: batteryIcon(),
+    glass: glassIcon(),
+    iron_ingot: ingot({ G: '#f4f7f9', W: '#ffffff', H: IRON.hi, M: IRON.mid, L: IRON.lo, D: '#33393e' }),
+  }
   return { sprites, items }
 }

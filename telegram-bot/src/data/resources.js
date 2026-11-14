@@ -22,6 +22,10 @@ export const RESOURCE_TYPES = [
   { id: "tree_seed", emoji: "🌰", name: "Насінина дерева" },
   { id: "rubber_seed", emoji: "🫘", name: "Насінина гевеї" },
   { id: "rubber", emoji: "🟤", name: "Каучук" },
+  // Електрика в Mini App: акумулятор — з верстата, скло й залізо — з електропечі.
+  { id: "battery", emoji: "🔋", name: "Акумулятор" },
+  { id: "glass", emoji: "🪟", name: "Скло" },
+  { id: "iron_ingot", emoji: "🔩", name: "Залізний злиток" },
 ];
 
 /**

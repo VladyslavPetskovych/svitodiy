@@ -1,18 +1,19 @@
 import { DECOR } from "./decor.js";
 import { CABLE_CELL } from "./cables.js";
+import { windWatts } from "./wind.js";
 
 /**
  * Електрика рідного острова (лише Mini App).
  *
- * Генератори — декор із полем watts (вітряк — 40 Вт). Струм дає лише той, хто під'єднаний
- * до кабельної мережі: вітряк без дроту не рахується, тож острів отримує 0 Вт.
+ * Прилади — декор із розділу «power»: вітряк (генератор, watts — найбільше, що дає на сильному вітрі;
+ * скільки саме зараз — wind.js), акумулятор (store — скільки Вт·год вміщає, заряд — у полі e, energy.js)
+ * і електропіч (бере енергію з акумуляторів своєї мережі, furnace.js).
  *
- * Кабелі лежать під землею: клітинка 8×8 px з кабелем. Пристрій під'єднаний, якщо його клітинка
+ * Кабелі лежать під землею: клітинка 8×8 px з кабелем. Прилад під'єднаний, якщо його клітинка
  * або сусідня (по стороні, не по діагоналі) має кабель. Мережа — зв'язна група кабельних клітинок.
- *
- * Споживачів поки немає: use — на майбутнє (лампи, станки), щоб клієнт уже показував баланс.
+ * Генератор дає струм лише своїй мережі: вітряк без дроту не рахується.
  */
-const WATTS = new Map(DECOR.filter((d) => d.watts > 0).map((d) => [d.id, d.watts]));
+const POWER = new Map(DECOR.filter((d) => d.cat === "power").map((d) => [d.id, d]));
 const SIDE_STEPS = [
   [1, 0],
   [-1, 0],
@@ -20,76 +21,113 @@ const SIDE_STEPS = [
   [0, -1],
 ];
 
+/** Скільки Вт·год вміщає акумулятор. */
+export const batteryCap = (kind) => POWER.get(kind)?.store ?? 0;
+/** Чи генератор (вітряк). */
+export const isGenerator = (kind) => (POWER.get(kind)?.watts ?? 0) > 0;
+
 /** Клітинка, в якій стоїть прикраса: якір — низ по центру, тож беремо піксель над ним. */
 export function cellOfDeco(d) {
   return [Math.floor(d.x / CABLE_CELL), Math.floor((d.y - 1) / CABLE_CELL)];
 }
 
 /**
- * Зв'язні мережі кабелів і пристрої, під'єднані до них.
+ * Зв'язні мережі кабелів і прилади, під'єднані до них.
+ * gen — скільки Вт дають вітряки мережі просто зараз (now), max — на найсильнішому вітрі,
+ * stored / capacity — заряд і місткість акумуляторів мережі, Вт·год.
  * @param {[number, number][]} cells клітинки з кабелем
- * @param {{ id: string, k: string, x: number, y: number }[]} deco
- * @returns {{ networks: { id: number, cells: [number, number][], devices: string[], gen: number, sources: number }[], wired: Set<string> }}
+ * @param {{ id: string, k: string, x: number, y: number, e?: number }[]} deco
+ * @param {number} [now]
  */
-export function networksOf(cells, deco) {
+export function networksOf(cells, deco, now = Date.now()) {
   const key = (x, y) => `${x},${y}`;
   const cellSet = new Set(cells.map(([x, y]) => key(x, y)));
-  const owner = new Map(); // клітинка → номер мережі
-  const networks = [];
+  const comp = new Map(); // клітинка → номер зв'язного шматка кабелю
+  const pieces = [];
 
   for (const [sx, sy] of cells) {
-    if (owner.has(key(sx, sy))) continue;
-    const id = networks.length;
+    if (comp.has(key(sx, sy))) continue;
+    const id = pieces.length;
     const members = [];
     const stack = [[sx, sy]];
-    owner.set(key(sx, sy), id);
+    comp.set(key(sx, sy), id);
     while (stack.length) {
       const [x, y] = stack.pop();
       members.push([x, y]);
       for (const [dx, dy] of SIDE_STEPS) {
         const k = key(x + dx, y + dy);
-        if (!cellSet.has(k) || owner.has(k)) continue;
-        owner.set(k, id);
+        if (!cellSet.has(k) || comp.has(k)) continue;
+        comp.set(k, id);
         stack.push([x + dx, y + dy]);
       }
     }
-    networks.push({ id, cells: members, devices: [], gen: 0, sources: 0 });
+    pieces.push(members);
   }
 
-  const wired = new Set();
+  // Прилад, до якого підходять кілька шматків кабелю, з'єднує їх: струм іде крізь нього.
+  const parent = pieces.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const touching = [];
   for (const d of deco) {
+    const def = POWER.get(d.k);
+    if (!def) continue;
     const [cx, cy] = cellOfDeco(d);
-    const around = [[0, 0], ...SIDE_STEPS];
-    let net;
-    for (const [dx, dy] of around) {
-      net = owner.get(key(cx + dx, cy + dy));
-      if (net !== undefined) break;
+    const ids = new Set();
+    for (const [dx, dy] of [[0, 0], ...SIDE_STEPS]) {
+      const c = comp.get(key(cx + dx, cy + dy));
+      if (c !== undefined) ids.add(c);
     }
-    if (net === undefined) continue;
+    if (!ids.size) continue;
+    const [first, ...rest] = ids;
+    for (const c of rest) parent[find(c)] = find(first);
+    touching.push({ d, def, piece: first });
+  }
+
+  const index = new Map(); // корінь → номер мережі
+  const networks = [];
+  pieces.forEach((members, i) => {
+    const root = find(i);
+    if (!index.has(root)) {
+      index.set(root, networks.length);
+      networks.push({ id: networks.length, cells: [], devices: [], gen: 0, max: 0, sources: 0, stored: 0, capacity: 0 });
+    }
+    networks[index.get(root)].cells.push(...members);
+  });
+
+  const wired = new Set();
+  for (const { d, def, piece } of touching) {
     wired.add(d.id);
-    const n = networks[net];
+    const n = networks[index.get(find(piece))];
     n.devices.push(d.id);
-    const w = WATTS.get(d.k);
-    if (w) {
-      n.gen += w;
+    if (def.watts) {
+      n.gen += windWatts(d.id, now);
+      n.max += def.watts;
       n.sources++;
+    }
+    if (def.store) {
+      n.stored += Math.min(def.store, d.e ?? 0);
+      n.capacity += def.store;
     }
   }
   return { networks, wired };
 }
 
 /**
- * @param {{ id: string, k: string, x: number, y: number }[]} deco
+ * Підсумок острова: gen — Вт просто зараз, max — на найсильнішому вітрі, stored / capacity — Вт·год в акумуляторах.
+ * @param {{ id: string, k: string, x: number, y: number, e?: number }[]} deco
  * @param {[number, number][]} [cells]
- * @returns {{ gen: number, use: number, sources: number }}
+ * @param {number} [now]
  */
-export function powerOf(deco, cells = []) {
-  const { networks } = networksOf(cells, deco);
-  let gen = 0;
-  let sources = 0;
+export function powerOf(deco, cells = [], now = Date.now()) {
+  const { networks } = networksOf(cells, deco, now);
+  const sum = { gen: 0, max: 0, use: 0, sources: 0, stored: 0, capacity: 0, at: now };
   for (const n of networks) {
-    gen += n.gen;
-    sources += n.sources;
+    sum.gen += n.gen;
+    sum.max += n.max;
+    sum.sources += n.sources;
+    sum.stored += n.stored;
+    sum.capacity += n.capacity;
   }
-  return { gen, use: 0, sources };
+  sum.stored = Math.round(sum.stored * 100) / 100;
+  return sum;
 }

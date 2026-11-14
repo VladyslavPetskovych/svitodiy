@@ -5,6 +5,7 @@ import { buildCatalog } from "./game/catalog.js";
 import { cast, cookFish, craft, equip, sellAllFish, sellFish } from "./game/chasodiy.js";
 import { claimDaily } from "./game/daily.js";
 import { layCables, removeCables } from "./game/cables.js";
+import { smelt } from "./game/furnace.js";
 import { moveDecor, placeDecor, removeDecor } from "./game/decor.js";
 import { commandDog, feedDog, petDog } from "./game/dogs.js";
 import { GameError } from "./game/errors.js";
@@ -132,6 +133,8 @@ export function buildApiRouter(botToken) {
   // Електрика: кабелі під землею (за один запит — смуга клітинок, як тягнеш пальцем)
   api.post("/home/cables", handler(island((req) => layCables(uid(req), body(req).cells))));
   api.delete("/home/cables", handler(island((req) => removeCables(uid(req), body(req).cells))));
+  // Електропіч: переплавити (скло, мідь, залізо) за енергію з акумуляторів своєї мережі
+  api.post("/home/furnace/:id/smelt", handler(island((req) => smelt(uid(req), req.params.id, body(req).recipe, body(req).count))));
 
   // Пісочниця в хатинці: меблі й речі на стінах
   api.post("/home/interior", handler(island((req) => placeInterior(uid(req), body(req)))));

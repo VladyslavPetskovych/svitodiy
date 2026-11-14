@@ -53,6 +53,9 @@ const ITEM_ART = new Set([
   'tree_seed',
   'rubber',
   'rubber_seed',
+  'battery',
+  'glass',
+  'iron_ingot',
   'relic_ring_wanderer',
   'relic_hook_silver',
   'relic_hook_gold',
@@ -144,7 +147,10 @@ export function sourceOf(catalog, id) {
   if (node) return `Добувай на своєму острові: ${node.name.toLowerCase()}${node.tool ? (node.tool === 'axe' ? ' (сокирою)' : ' (кайлом)') : ''}`
   if (id === 'plank') return 'Зроби на верстаті з колод'
   if (id === 'bare_wire') return 'Зроби на верстаті: з мідного злиточка або з 5 старих монет'
-  if (id === 'copper_ingot') return 'Інколи чіпляється на вудку'
+  if (id === 'copper_ingot') return 'Інколи чіпляється на вудку. Або виплав в електропечі зі старих монет'
+  if (id === 'battery') return 'Зроби на верстаті: мідь, брухт, скло й дріт. Постав у будові → ⚡ Електрика'
+  if (id === 'glass') return 'Виплав в електропечі з уламків скла'
+  if (id === 'iron_ingot') return 'Виплав в електропечі з металевого брухту'
   if (id === 'rubber') return 'Збирай з гевеї на острові — 3 щогодини'
   if (id === 'rubber_seed') return 'Рідко: у рибі, на вудці й у корчах на пляжі. Посади гевею в будівництві 🔨'
   if (id === 'tree_seed') return 'Трапляється в рибі, на вудці й у корчах на пляжі. Посади в будівництві 🔨'

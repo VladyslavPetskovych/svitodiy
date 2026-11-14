@@ -22,6 +22,7 @@ import { getWear } from "./wardrobe.js";
 import { ensureIsland, takenBoxes } from "./island.js";
 import { getNodes } from "./nodes.js";
 import { getCables } from "./cables.js";
+import { settleEnergy } from "./energy.js";
 import { networksOf, powerOf } from "./power.js";
 import { ripenTrees } from "./trees.js";
 import { creditNets } from "./nets.js";
@@ -82,17 +83,28 @@ async function getJob(userId) {
   }
 }
 
-/** Усе про гравця одним запитом — після кожної дії клієнт просто замінює стан. */
-/** Кабелі для клієнта: клітинки, мережі (клітинки й пристрої) і ті прикраси, що під'єднані. */
-function cablesView(cells, deco) {
-  const { networks, wired } = networksOf(cells, deco);
+/**
+ * Кабелі для клієнта: клітинки, мережі (клітинки, прилади, Вт зараз і на найсильнішому вітрі,
+ * заряд і місткість акумуляторів) і ті прикраси, що під'єднані.
+ */
+function cablesView(cells, deco, now) {
+  const { networks, wired } = networksOf(cells, deco, now);
   return {
     cells,
-    networks: networks.map((n) => ({ id: n.id, cells: n.cells, devices: n.devices, gen: n.gen })),
+    networks: networks.map((n) => ({
+      id: n.id,
+      cells: n.cells,
+      devices: n.devices,
+      gen: n.gen,
+      max: n.max,
+      stored: Math.round(n.stored * 100) / 100,
+      capacity: n.capacity,
+    })),
     wired: [...wired],
   };
 }
 
+/** Усе про гравця одним запитом — після кожної дії клієнт просто замінює стан. */
 export async function getState(userId) {
   // Версію спільного острова фіксуємо ДО читання: зміна посеред читання не загубиться (presence.js).
   const island = await islandSnapshot(userId);
@@ -121,6 +133,9 @@ export async function getState(userId) {
   const deco = await ripenTrees(userId, allDeco);
   // Сітки самі ловлять дари моря: уловлене за час відсутності одразу в рюкзаку.
   await creditNets(userId, deco);
+  // Вітряки заряджають акумулятори своїх мереж за час, що минув (energy.js).
+  const now = Date.now();
+  const charged = await settleEnergy(userId, deco, cells, now);
   // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
   const [nodes, winterNodes, tools, wear] = await Promise.all([
     getNodes(userId, takenBoxes(home, deco, farm), "home", deco),
@@ -155,11 +170,12 @@ export async function getState(userId) {
     inventory,
     job,
     home,
-    deco,
-    // Електрика острова: скільки Вт дають вітряки (power.js).
-    power: powerOf(deco, cells),
+    // Декор з уже зарахованим зарядом акумуляторів (поле e).
+    deco: charged,
+    // Електрика острова: Вт зараз і на найсильнішому вітрі, заряд акумуляторів (power.js, energy.js).
+    power: powerOf(charged, cells, now),
     // Кабелі під землею (малюються лише в режимі електрики): клітинки і мережі, що з них складаються.
-    cables: cablesView(cells, deco),
+    cables: cablesView(cells, charged, now),
     farm,
     dogs,
     interior,

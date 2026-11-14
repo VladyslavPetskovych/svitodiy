@@ -52,6 +52,8 @@ export const RECIPES = [
   { id: "bare_wire", name: "Голий дріт", emoji: "➰", in: { copper_ingot: 1 }, out: { bare_wire: 2 } },
   // Старі монети (з риби, заметів) переплавляють на дріт — повільніше, але без удачі на вудці.
   { id: "coin_wire", name: "Дріт із монет", emoji: "➰", in: { old_coin: 5 }, out: { bare_wire: 1 } },
+  // Акумулятор: мідні пластини, брухт на корпус, скло на банки й дріт на клеми. Ставиться в «⚡ Електриці».
+  { id: "battery", name: "Акумулятор", emoji: "🔋", in: { copper_ingot: 1, metal_scrap: 4, glass_shard: 2, bare_wire: 2 }, out: { battery: 1 } },
 ];
 
 const MAX_BATCH = 20;

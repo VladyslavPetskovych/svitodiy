@@ -14,6 +14,7 @@ const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
 import { beamTexture, blobTexture, bubbleTexture, createParticles, crispPixels, crispTexture, dropHeight, glowTexture, popScale, textTexture, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
 import { flowDistance, routeWire as findRoute, segmentAt } from './wires.js'
+import { WIND, windWatts } from '../wind.js'
 import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
 import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
 import { INTERIOR_GEOM, dogBedSpot, interiorFootprint, interiorInteract, interiorLights, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
@@ -570,8 +571,8 @@ export function createWalk(canvas, assets, cb) {
   let mode = 'walk'
   /** Режим «електрика»: кабелі під землею, підсвічені пристрої, решта — притемнена. */
   const editing = () => mode === 'build' || mode === 'power'
-  /** Прикраси, що живляться від кабелю (поки лише вітряк). */
-  const ELECTRIC = new Set(['windmill'])
+  /** Прилади, що під'єднуються кабелем: вітряк дає струм, акумулятор запасає, піч витрачає. */
+  const ELECTRIC = new Set(['windmill', 'battery', 'furnace'])
   const NO_CABLES = { cells: [], networks: [], wired: [] }
   /** Кабелі острова з сервера: клітинки, мережі, під'єднані прикраси (server/src/game/state.js → cables). */
   let cables = NO_CABLES
@@ -1213,22 +1214,38 @@ export function createWalk(canvas, assets, cb) {
     if (wireCache?.cables === cables && wireCache.list === list) return wireCache
     const has = new Set(cables.cells.map(([x, y]) => cellKey(x, y)))
     const wired = new Set(cables.wired)
-    const devices = list.filter((p) => p.uid && ELECTRIC.has(p.kind)).map((p) => ({ uid: p.uid, cell: deviceCell(p), wired: wired.has(p.uid) }))
+    // Заряд акумулятора (0…1) рахує IslandWalk із d.e — тут лише малюємо.
+    const charge = new Map((world?.deco ?? []).filter((d) => d.charge != null).map((d) => [d.id, d.charge]))
+    const devices = list
+      .filter((p) => p.uid && ELECTRIC.has(p.kind))
+      .map((p) => ({ uid: p.uid, kind: p.kind, cell: deviceCell(p), wired: wired.has(p.uid), charge: charge.get(p.uid) ?? 0 }))
+    const netOf = new Map()
     const nets = cables.networks.map((n) => {
       const src = []
-      for (const d of devices) if (n.devices.includes(d.uid)) for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) src.push([d.cell[0] + dx, d.cell[1] + dy])
+      const gens = []
+      for (const d of devices) {
+        if (!n.devices.includes(d.uid)) continue
+        netOf.set(d.uid, n)
+        if (d.kind === 'windmill') {
+          gens.push(d.uid)
+          for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) src.push([d.cell[0] + dx, d.cell[1] + dy])
+        }
+      }
       const degree = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => has.has(cellKey(x + dx, y + dy))).length
       return {
         n,
+        gens,
         path: cellsPath(n.cells),
-        flow: n.gen ? flowDistance(n.cells, src) : null,
+        flow: gens.length ? flowDistance(n.cells, src) : null,
         joints: n.cells.filter(([x, y]) => degree(x, y) >= 3),
       }
     })
-    const powered = new Set(cables.networks.filter((n) => n.gen > 0).flatMap((n) => n.devices))
-    wireCache = { cables, list, has, devices, nets, powered }
+    wireCache = { cables, list, has, devices, nets, netOf }
     return wireCache
   }
+
+  /** Скільки Вт дають вітряки мережі просто зараз (вітер — game/wind.js, той самий, що на сервері). */
+  const liveWatts = (net) => net.gens.reduce((s, id) => s + windWatts(id, Date.now()), 0)
 
   /**
    * Кабелі під землею — на землі, під напівпрозорими прикрасами. Видно лише в режимі електрики.
@@ -1250,9 +1267,13 @@ export function createWalk(canvas, assets, cb) {
     }
     const phase = t * 7
 
+    const netWatts = new Map()
     for (const net of W.nets) {
       const dim = netHL !== null && net.n.id !== netHL
-      const live = net.n.gen > 0
+      // Мідна — мережа з вітряком (навіть на штилі); струм, що біжить, — скільки дме просто зараз.
+      const live = net.gens.length > 0
+      const watts = live ? liveWatts(net) : 0
+      netWatts.set(net.n.id, watts)
       ctx.globalAlpha = dim ? 0.28 : 1
       // Оболонка, мідна жила, відблиск — кабель читається на будь-якому ґрунті.
       stroke(net.path, '#140a05', 5.2)
@@ -1264,38 +1285,59 @@ export function createWalk(canvas, assets, cb) {
         ctx.arc(mid(x), mid(y), 1.7, 0, Math.PI * 2)
         ctx.fill()
       }
-      // Струм: світлі хвилі біжать від вітряка вздовж кабелю.
-      if (live && !dim) {
+      // Струм: світлі хвилі біжать від вітряка вздовж кабелю — тим яскравіші, чим сильніше дме; на штилі їх немає.
+      const k = net.n.max ? watts / net.n.max : 0
+      if (live && !dim && k > 0) {
         ctx.fillStyle = '#fffbe0'
         for (const [x, y] of net.n.cells) {
           const d = net.flow.get(cellKey(x, y))
           if (d === undefined) continue
           const v = (((d - phase) % 6) + 6) % 6
           if (v >= 1.4) continue
-          ctx.globalAlpha = 1 - v / 1.4
+          ctx.globalAlpha = (1 - v / 1.4) * (0.25 + k * 0.75)
           ctx.beginPath()
-          ctx.arc(mid(x), mid(y), 1.9, 0, Math.PI * 2)
+          ctx.arc(mid(x), mid(y), 1.4 + k * 0.8, 0, Math.PI * 2)
           ctx.fill()
         }
       }
     }
     ctx.globalAlpha = 1
 
-    // Прилади: зі струмом — жовтий ореол; без дроту — червоне коло, що блимає (кличе під'єднати).
+    // Прилади. Вітряк: жовтий ореол, коли крутиться в мережі. Акумулятор: зелена дуга — скільки заряду.
+    // Піч: помаранчева, коли в її мережі є енергія. Не під'єднане — червоне коло блимає (кличе під'єднати).
     const blink = 0.55 + Math.sin(t * 5) * 0.45
-    for (const d of W.devices) {
-      const [cx, cy] = d.cell
-      const on = W.powered.has(d.uid)
-      ctx.strokeStyle = on ? '#ffe066' : d.wired ? '#c9b8a8' : '#ff5a46'
-      ctx.globalAlpha = on ? 0.95 : d.wired ? 0.8 : blink
+    const deviceRing = (cx, cy, color, alpha, r = 6.5) => {
+      ctx.strokeStyle = color
+      ctx.globalAlpha = alpha
       ctx.lineWidth = 1.6
       ctx.beginPath()
-      ctx.arc(mid(cx), mid(cy), 6.5, 0, Math.PI * 2)
+      ctx.arc(mid(cx), mid(cy), r, 0, Math.PI * 2)
       ctx.stroke()
-      ctx.fillStyle = ctx.strokeStyle
+      ctx.fillStyle = color
       ctx.beginPath()
       ctx.arc(mid(cx), mid(cy), 1.8, 0, Math.PI * 2)
       ctx.fill()
+    }
+    for (const d of W.devices) {
+      const [cx, cy] = d.cell
+      const net = W.netOf.get(d.uid)
+      if (!d.wired || !net) {
+        deviceRing(cx, cy, '#ff5a46', blink)
+        continue
+      }
+      if (d.kind === 'windmill') deviceRing(cx, cy, (netWatts.get(net.id) ?? 0) > 0 ? '#ffe066' : '#c9b8a8', 0.95)
+      else if (d.kind === 'furnace') deviceRing(cx, cy, net.stored > 0 ? '#ff9a3c' : '#c9b8a8', 0.95)
+      else if (d.kind === 'battery') {
+        deviceRing(cx, cy, '#5a6b5e', 0.9)
+        if (d.charge > 0) {
+          ctx.strokeStyle = '#7cf07a'
+          ctx.globalAlpha = 1
+          ctx.lineWidth = 2.2
+          ctx.beginPath()
+          ctx.arc(mid(cx), mid(cy), 6.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, d.charge))
+          ctx.stroke()
+        }
+      }
     }
     ctx.globalAlpha = 1
 
@@ -2382,7 +2424,11 @@ export function createWalk(canvas, assets, cb) {
       // Анімований спрайт (крила вітряка): гортаємо кадри — усі одного розміру, якір той самий.
       if (it.p.anim) {
         const a = it.p.anim
-        const fr = a.frames[Math.floor(t * a.fps) % a.frames.length]
+        // Вітряк крутиться так, як дме: на штилі ледь-ледь, на сильному вітрі — утричі швидше за звичайне.
+        const speed = a.wind && it.p.uid ? 0.12 + (windWatts(it.p.uid, Date.now()) / WIND.max) * 1.4 : 1
+        it.phase = (it.phase ?? t * a.fps) + (t - (it.lastT ?? t)) * a.fps * speed
+        it.lastT = t
+        const fr = a.frames[Math.floor(it.phase) % a.frames.length]
         if (fr !== it.frame) {
           it.frame = fr
           m.geometry = spriteGeo(fr, it.flat) ?? m.geometry

@@ -18,6 +18,8 @@ import { farmCatalog } from "./farm.js";
 import { FLOOR_COLORS, FLOORS, INTERIOR, INTERIOR_MAX } from "./interior.js";
 import { BUILDINGS } from "./homestead.js";
 import { craftCatalog } from "./craft.js";
+import { FURNACE_RECIPES } from "./furnace.js";
+import { WIND } from "./wind.js";
 import { wearCatalog } from "./wardrobe.js";
 import { nodesCatalog } from "./nodes.js";
 import { treesCatalog } from "./trees.js";
@@ -149,6 +151,9 @@ export function buildCatalog() {
     rubber: rubberCatalog(),
     nets: netsCatalog(),
     craft: craftCatalog(),
+    // Електрика: вітер (miniapp/src/game/wind.js — та сама формула) і рецепти електропечі.
+    wind: WIND,
+    furnace: { recipes: FURNACE_RECIPES },
     wear: wearCatalog(),
     interior: INTERIOR,
     interiorMax: INTERIOR_MAX,

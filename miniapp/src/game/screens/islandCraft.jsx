@@ -1,5 +1,5 @@
 import { motion } from 'motion/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useGame } from '../context.js'
 import { canAfford, formatAmounts, itemOf, toolArt } from '../data.js'
 import { haptic } from '../tg.js'
@@ -128,6 +128,82 @@ export function CraftSheet({ open, onClose }) {
               </PxButton>
               <PxButton size="sm" variant="yellow" disabled={n < 2 || busy} onClick={() => craftRecipe(r, Math.min(n, 20))}>
                 ×{Math.max(2, Math.min(n, 20))}
+              </PxButton>
+            </div>
+          )
+        })}
+      </div>
+    </Sheet>
+  )
+}
+
+const wh = (v) => (Math.floor((v ?? 0) * 10) / 10).toString().replace('.', ',')
+
+/**
+ * Електропіч: скло, мідь і залізо за енергію з акумуляторів її мережі (server/src/game/furnace.js).
+ * id — яка саме піч (у кожної своя мережа). Відкрили — оновлюємо стан: сервер дозаряджає акумулятори.
+ */
+export function FurnaceSheet({ id, onClose }) {
+  const { state, catalog, items, act, toast } = useGame()
+  const [busy, setBusy] = useState(false)
+  const recipes = catalog.furnace?.recipes ?? []
+  const net = id ? state.cables?.networks?.find((n) => n.devices.includes(id)) : null
+  const stored = net?.stored ?? 0
+
+  useEffect(() => {
+    if (id) act('GET', '/state', undefined, { silent: true })
+  }, [id, act])
+
+  const smelt = async (r, count) => {
+    if (busy) return
+    setBusy(true)
+    const res = await act('POST', `/home/furnace/${id}/smelt`, { recipe: r.id, count })
+    setBusy(false)
+    if (!res) return
+    haptic('success')
+    toast(`${r.emoji} ${formatAmounts(items, res.got)} · ⚡−${res.used} Вт·год`)
+  }
+  /** Скільки разів вистачить і матеріалів, і енергії (не більше 10 за раз). */
+  const timesOf = (r) => Math.min(10, Math.floor(stored / r.energy + 1e-9), ...Object.entries(r.in).map(([k, n]) => Math.floor((state.inventory[k] ?? 0) / n)))
+
+  const status = !net
+    ? { tone: 'text-[#a3341f]', text: '🔌 Не під\'єднана. У будові → ⚡ Електрика протягни до неї кабель від акумулятора.' }
+    : !net.capacity
+      ? { tone: 'text-[#a3341f]', text: '🔋 У мережі печі немає акумулятора — енергії нізвідки взяти.' }
+      : !net.max
+        ? { tone: 'text-[#8a5a00]', text: `🔋 ${wh(stored)} / ${net.capacity} Вт·год · у мережі немає вітряка, нова енергія не прийде.` }
+        : { tone: 'text-[#2d6b18]', text: `🔋 ${wh(stored)} / ${net.capacity} Вт·год у мережі` }
+
+  return (
+    <Sheet open={!!id} onClose={onClose} title="🔥 Електропіч">
+      <div className="flex flex-col gap-3">
+        <p className={`rounded-sm bg-parch-dark/50 p-2 text-center text-sm font-bold ${status.tone}`}>{status.text}</p>
+        <p className="text-center text-xs text-ink-soft">
+          Піч бере енергію з акумулятора своєї мережі. Вітряк дає від 0 до 40 Вт — як подме; у середньому ~20 Вт·год за годину.
+        </p>
+        {recipes.map((r) => {
+          const n = timesOf(r)
+          const energyOk = stored + 1e-9 >= r.energy
+          return (
+            <div key={r.id} className="flex items-center gap-2 rounded-sm bg-parch-dark/50 p-2">
+              <ItemIcon item={itemOf(items, Object.keys(r.out)[0])} size={32} className="shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-extrabold">{r.name}</p>
+                <p className="flex flex-wrap items-center gap-1 text-xs text-ink-soft">
+                  {Object.entries(r.in).map(([k, c]) => (
+                    <Chip key={k} ok={(state.inventory[k] ?? 0) >= c}>
+                      <ItemIcon item={itemOf(items, k)} size={14} />
+                      {Math.min(state.inventory[k] ?? 0, c)}/{c}
+                    </Chip>
+                  ))}
+                  <Chip ok={energyOk}>⚡{r.energy} Вт·год</Chip>
+                </p>
+              </div>
+              <PxButton size="sm" variant="green" disabled={n < 1 || busy} onClick={() => smelt(r, 1)}>
+                ×1
+              </PxButton>
+              <PxButton size="sm" variant="yellow" disabled={n < 2 || busy} onClick={() => smelt(r, n)}>
+                ×{Math.max(2, n)}
               </PxButton>
             </div>
           )

@@ -33,14 +33,33 @@ export const DECO_GEOM = {
   seed_stand: { sprite: 'seed_stand', fw: 3, fh: 1, act: 'farmshop' },
   // Дощувач поливає грядки довкола (радіус — catalog.farm.sprinklerR), бризкає водою.
   sprinkler: { sprite: 'sprinkler', fw: 1, fh: 1, spray: true },
-  // Вітряк: кадри крил гортаються (anim), лампочка над дверима світить уночі. Дає електрику (catalog.decor[].watts).
+  // Вітряк: кадри крил гортаються (anim) — тим швидше, чим сильніший вітер (wind: true, game/wind.js),
+  // лампочка над дверима світить уночі. Дає електрику (catalog.decor[].watts — найбільше на сильному вітрі).
   windmill: {
     sprite: 'windmill_0',
-    anim: { frames: ['windmill_0', 'windmill_1', 'windmill_2', 'windmill_3', 'windmill_4', 'windmill_5'], fps: 9 },
+    anim: { frames: ['windmill_0', 'windmill_1', 'windmill_2', 'windmill_3', 'windmill_4', 'windmill_5'], fps: 9, wind: true },
     fw: 4,
     fh: 3,
     act: 'windmill',
     light: { dy: -26, r: 12 },
+  },
+  // Акумулятор: світиться стільки банок, скільки заряду (d.g 0…3 рахує IslandWalk із d.e).
+  battery: {
+    sprite: 'battery_0',
+    icon: 'battery_3',
+    stages: ['battery_0', 'battery_1', 'battery_2', 'battery_3'],
+    fw: 2,
+    fh: 1,
+    act: 'battery',
+  },
+  // Електропіч: жар у віконці, коли в її мережі є енергія (d.g 1), інакше холодна (0).
+  furnace: {
+    sprite: 'furnace_off',
+    icon: 'furnace_on',
+    stages: ['furnace_off', 'furnace_on'],
+    fw: 4,
+    fh: 2,
+    act: 'furnace',
   },
   // Посаджене дерево: спрайт за стадією росту (d.g рахує IslandWalk); останню — за породою (d.sp).
   // Коли виросте, сервер ставить на його місце справжнє дерево (server/src/game/trees.js).

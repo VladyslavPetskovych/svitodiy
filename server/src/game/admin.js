@@ -76,6 +76,8 @@ const ADMIN_GRANTS = [
     give: (userId) => Promise.all(RESOURCE_TYPES.map((res) => addResourceToInventory(userId, res.id, 1000))),
   },
   { id: "balance-1000-v1", give: (userId) => addBalance(userId, 1000) }, // +1000 ✨ промінчиків
+  // Мідь для тестування електропечі: 100 злиточків (новий id — видасться ще раз).
+  { id: "copper-100-v2", give: (userId) => addResourceToInventory(userId, "copper_ingot", 100) },
 ];
 
 export async function grantAdminResources(userId) {

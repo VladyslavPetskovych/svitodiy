@@ -1846,10 +1846,25 @@ export function createWalk(canvas, assets, cb) {
     const fp = decoFootprint(kind, x, y)
     const cells = geo.cellsOf(fp)
     if (!scene.outdoor) return { ok: false, reason: 'Тут будувати не можна' }
-    // Сітку — лише на мілину біля берега, решту — лише на сушу.
-    if (g.water && cells.some((c) => c < 0 || !shore[c])) return { ok: false, reason: 'Сітку ставлять у воду біля берега' }
-    if (!g.water && cells.some((c) => c < 0 || !land[c])) return { ok: false, reason: 'Тут будувати не можна' }
     const others = list.filter((p) => !p.uid || p.uid !== ignoreUid)
+    // Земля для будівництва = суша острова + помости на воді (вони теж суша).
+    const ground = walkGrid(atlas.walk, others.filter((p) => p.platform))
+    const nextToGround = (c) => {
+      const cx = c % geo.cols
+      const cy = Math.floor(c / geo.cols)
+      return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+        const nx = cx + dx
+        const ny = cy + dy
+        return nx >= 0 && ny >= 0 && nx < geo.cols && ny < geo.rows && ground[ny * geo.cols + nx] === 1
+      })
+    }
+    // Сітку — лише на мілину біля берега; помост — лише у воду, поруч із сушею чи іншим помостом;
+    // решту — лише на землю (сушу або помост).
+    if (g.water && cells.some((c) => c < 0 || !shore[c])) return { ok: false, reason: 'Сітку ставлять у воду біля берега' }
+    if (g.platform) {
+      if (cells.some((c) => c < 0 || land[c])) return { ok: false, reason: 'Помост ставлять у воду' }
+      if (!cells.some((c) => nextToGround(c))) return { ok: false, reason: 'Помост ставлять поруч із берегом чи іншим помостом' }
+    } else if (!g.water && cells.some((c) => c < 0 || !ground[c])) return { ok: false, reason: 'Тут будувати не можна' }
     const busy = new Uint8Array(geo.cols * geo.rows)
     let tree = false
     for (const p of others) {
@@ -1860,6 +1875,8 @@ export function createWalk(canvas, assets, cb) {
         for (const c of hit) busy[c] = 1
         if (p.node && hit.some((c) => cells.includes(c))) tree = true
       }
+      // Помост — як земля: на нього ставлять усе, тож він не заважає, крім іншого помосту.
+      if (p.platform && !g.platform) continue
       // Підлогу (настил, грядку) на підлогу не кладемо, а будівлю чи лавку — на грядку.
       const floorish = p.occupies ?? (p.uid && DECO_GEOM[p.kind]?.floor ? [decoFootprint(p.kind, p.x, p.y)] : [])
       for (const b of floorish) for (const c of geo.cellsOf(b)) if (c >= 0) busy[c] = 1

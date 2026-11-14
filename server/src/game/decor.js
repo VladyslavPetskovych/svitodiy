@@ -24,6 +24,18 @@ export const DECOR = [
   { id: "workbench", cat: "survival", name: "Верстат", emoji: "🪚", cost: { twig: 4, stone: 2 } },
   { id: "seed_stand", cat: "survival", name: "Комора городника", emoji: "🌱", cost: { twig: 3 } },
   { id: "sprinkler", cat: "survival", name: "Дощувач", emoji: "💦", cost: { plank: 2, metal_scrap: 2 } },
+  // Поміст: дощатий майданчик на воді. Ступається й на ньому ставлять усе, як на березі.
+  // Кладеться лише у воду й або біля суші, або поруч з іншим помостом (checkPlatform).
+  {
+    id: "platform",
+    cat: "survival",
+    name: "Поміст",
+    emoji: "🪵",
+    cost: { plank: 2, twig: 2 },
+    platform: true,
+    foot: [2, 2],
+    hint: "Став на воду поруч із берегом чи іншим помостом — по ньому ходять і ставлять речі, як на суші.",
+  },
   // Сітка ставиться лише на мілину біля берега (water, «ніжки» foot у клітинках по 8 px) і приманює
   // на пляж корчі, мушлі й водорості (server/src/game/nodes.js → NET). Більше limit пляж не прогодує.
   {
@@ -121,6 +133,8 @@ export const WATER_DECOR = new Set(DECOR.filter((d) => d.water).map((d) => d.id)
  * (генерує miniapp/scripts/gen-island-art.mjs — та сама маска, що й atlas.shore у Mini App).
  */
 const SHORE = JSON.parse(readFileSync(new URL("./island-shore.json", import.meta.url), "utf8"));
+/** Суша острова — та сама маска, що atlas.walk у Mini App (клітинки 8×8). Помост ставлять лише у воду. */
+const LAND = JSON.parse(readFileSync(new URL("./island-walk.json", import.meta.url), "utf8"));
 
 /** Чи всі клітинки під «ніжками» (якір — низ по центру) — мілина біля берега. */
 function onShore(def, x, y) {
@@ -132,6 +146,40 @@ function onShore(def, x, y) {
     for (let cx = Math.floor(x0 / cell); cx <= Math.floor((x0 + fw * cell - 1) / cell); cx++)
       if (rows[cy]?.[cx] !== "1") return false;
   return true;
+}
+
+/** Клітинки [cx, cy] під «ніжками» (як у onShore). */
+function footCells(def, x, y) {
+  const { cell } = LAND;
+  const [fw, fh] = def.foot;
+  const x0 = x - (fw * cell) / 2;
+  const y0 = y - fh * cell;
+  const out = [];
+  for (let cy = Math.floor(y0 / cell); cy <= Math.floor((y - 1) / cell); cy++)
+    for (let cx = Math.floor(x0 / cell); cx <= Math.floor((x0 + fw * cell - 1) / cell); cx++) out.push([cx, cy]);
+  return out;
+}
+
+/**
+ * Помост: лише у воді, і або поруч із сушею, або поруч з іншим помостом — щоб до нього можна було дійти.
+ * decor — поточний декор дому; selfId — сам помост, якщо його переносять (його не рахуємо).
+ */
+function checkPlatform(def, x, y, decor, selfId = null) {
+  const { rows } = LAND;
+  const inMap = (cx, cy) => cy >= 0 && cy < rows.length && cx >= 0 && cx < rows[0].length;
+  const cells = footCells(def, x, y);
+  if (cells.some(([cx, cy]) => !inMap(cx, cy) || rows[cy][cx] === "1")) {
+    throw conflict("not_water", `${def.emoji} ${def.name}: став у воду, не на сушу.`);
+  }
+  const deck = new Set();
+  for (const d of decor) {
+    if (d.id === selfId || !BY_ID.get(d.k)?.platform) continue;
+    for (const [cx, cy] of footCells(def, d.x, d.y)) deck.add(`${cx},${cy}`);
+  }
+  if (cells.some(([cx, cy]) => deck.has(`${cx},${cy}`))) throw conflict("busy", `${def.emoji} ${def.name}: тут уже є помост.`);
+  const walkable = (cx, cy) => (inMap(cx, cy) && rows[cy][cx] === "1") || deck.has(`${cx},${cy}`);
+  const touches = cells.some(([cx, cy]) => walkable(cx + 1, cy) || walkable(cx - 1, cy) || walkable(cx, cy + 1) || walkable(cx, cy - 1));
+  if (!touches) throw conflict("not_connected", `${def.emoji} ${def.name}: став поруч із берегом чи іншим помостом.`);
 }
 
 /** Предмет у воді — лише на мілині; на суші — як і раніше, де завгодно в межах мапи. */
@@ -196,6 +244,7 @@ export async function placeDecor(userId, kind, x, y) {
   const k = await key(userId);
   if ((await r.hLen(k)) >= DECOR_MAX) throw conflict("full", `На острові вже ${DECOR_MAX} прикрас — прибери щось.`);
   checkSpot(def, pos.x, pos.y);
+  if (def.platform) checkPlatform(def, pos.x, pos.y, await getDecor(userId));
   if (def.limit) {
     const same = (await r.hVals(k)).filter((raw) => raw.includes(`"k":"${def.id}"`)).length;
     if (same >= def.limit) throw conflict("limit", `${def.emoji} Більше ${def.limit} сіток пляж не прогодує.`);
@@ -220,6 +269,7 @@ export async function moveDecor(userId, id, x, y) {
   // Переносимо разом з усім, що прикраса пам'ятає (посаджене дерево — коли посадили й що виросте).
   const old = JSON.parse(raw);
   if (BY_ID.has(old.k)) checkSpot(BY_ID.get(old.k), pos.x, pos.y);
+  if (BY_ID.get(old.k)?.platform) checkPlatform(BY_ID.get(old.k), pos.x, pos.y, await getDecor(userId), id);
   const item = { ...old, ...pos };
   await r.hSet(hk, id, JSON.stringify(item));
   return { item: { id, ...item } };

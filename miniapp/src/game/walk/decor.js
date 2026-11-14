@@ -80,6 +80,8 @@ export const DECO_GEOM = {
     fh: 1,
     act: 'rubber',
   },
+  // Поміст на воді: ступається й на ньому ставлять, як на суші (platform → layout.js дає йому walk-площу).
+  platform: { sprite: 'deco_plank_floor', fw: 2, fh: 2, floor: true, platform: true },
   // Сітка лежить на воді (water — лише на мілині біля берега, atlas.shore) і приманює дари моря на пляж.
   fishing_net: { sprite: 'deco_net', fw: 3, fh: 2, floor: true, water: true, act: 'net' },
 }

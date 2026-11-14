@@ -123,7 +123,16 @@ export function placements(home, chestOpen, deco = [], nodes = []) {
   for (const d of deco) {
     const g = DECO_GEOM[d.k]
     if (!g) continue
-    const at = { x: d.x, y: d.y, layer: g.floor ? 'floor' : 'obj', uid: d.id, kind: d.k, blocks: g.floor ? [] : [decoFootprint(d.k, d.x, d.y)] }
+    const at = {
+      x: d.x,
+      y: d.y,
+      layer: g.floor ? 'floor' : 'obj',
+      uid: d.id,
+      kind: d.k,
+      blocks: g.floor ? [] : [decoFootprint(d.k, d.x, d.y)],
+      // Поміст — це суша: по ньому ходять (walk) і він рахується як земля для будівництва (platform).
+      ...(g.platform && { walk: decoFootprint(d.k, d.x, d.y), platform: true }),
+    }
     out.push({ s: decoSprite(d), ...at, ...(g.anim && { anim: g.anim }) })
   }
 

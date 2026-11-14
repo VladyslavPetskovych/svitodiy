@@ -1,11 +1,11 @@
 ---
 name: pixel-sprites
-description: Generate pixel-art game sprites/icons for this game with the local model (stable-diffusion.cpp + Z-Image-Turbo + pixel-art LoRA in ~/sd) and pixelize them into the game's palette. Use when the user asks to draw/generate/make a sprite, icon, item, decor, building or any pixel art, or says "use the local model".
+description: Generate pixel-art game sprites/icons for this game with the local model (stable-diffusion.cpp + Z-Image-Turbo Q6_K in ~/sd) and pixelize them into the game's palette. Use when the user asks to draw/generate/make a sprite, icon, item, decor, building or any pixel art, or says "use the local model".
 ---
 
 # Pixel sprites with the local model
 
-Everything runs locally from `miniapp/` (Windows, AMD RX 7600S 8 GB, Vulkan). Nothing is sent to a cloud service.
+Everything runs locally from `miniapp/` (npm scripts: `sd:setup`, `sd:sprite`) (Windows, AMD RX 7600S 8 GB, Vulkan). Nothing is sent to a cloud service.
 
 ## 0. Make sure the model is installed
 ```
@@ -34,7 +34,9 @@ Raw caches are reused. Pass `--redo` (where supported) or delete the raw to redr
 - Describe ONE object concretely: material, colors, shape, and key details. Natural sentences work better than tag lists.
 - Hats/clothes tend to come out as a whole person wearing them, so say "on its own, not worn, no person".
 - Long objects (tools, boats) render upright. Fix that with `--flags "--rotate -45"`.
-- Speed: ~8 steps. If the GPU is busy, it can take several minutes per image.
+- Speed: 8 steps, ~90–140 s per 1024² image on the RX 7600S, so 4 seeds take ~7 min. Run long batches in the background.
+- Z-Image draws its own dark outline, so sd-lib drops `--outline` for it (`SD_OUTLINE=1` to force). The pixelizer strips its pale blue-grey ground shadow.
+- No LoRA on purpose: base Z-Image already gives clean pixel art, and every LoRA mode fails on 8 GB Vulkan (runtime: OOM; merged: K-quants can't CPY, Q5_0 OOM).
 - Fallback: `SD_MODEL=sdxl` (SDXL base Q4 + pixel-art-xl, 20 steps, real negative prompt).
 
 ## Rules

@@ -22,6 +22,7 @@ import { wearCatalog } from "./wardrobe.js";
 import { nodesCatalog } from "./nodes.js";
 import { treesCatalog } from "./trees.js";
 import { rubberCatalog } from "./rubber.js";
+import { netsCatalog } from "./nets.js";
 
 /**
  * Налаштування, яких у боті немає — лише для Mini App.
@@ -146,6 +147,7 @@ export function buildCatalog() {
     nodes: nodesCatalog(),
     trees: treesCatalog(),
     rubber: rubberCatalog(),
+    nets: netsCatalog(),
     craft: craftCatalog(),
     wear: wearCatalog(),
     interior: INTERIOR,

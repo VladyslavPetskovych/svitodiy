@@ -26,9 +26,9 @@ const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', tree: '🌱', rubber: '🟤' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', tree: '🌱', rubber: '🟤', net: '🥅' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', tree: 'Глянути', rubber: 'Зібрати' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', tree: 'Глянути', rubber: 'Зібрати', net: 'Глянути' }
 /** Ресурси на острові — «node:<id>». */
 const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
 /** Чим добувати: кнопка дії. */
@@ -459,6 +459,15 @@ export default function IslandWalk({ start = 'island' }) {
     say(left > 0 ? `🌱 ${d.g >= 2 ? name[0].toUpperCase() + name.slice(1) : 'Паросток'} · ще ${shortDuration(left)}` : `🌳 Ось-ось виросте ${name}!`, id, 'calm', 'leaves')
   }
 
+  /** Сітка сама ловить дари моря: напис — скільки до наступного улову і скільки їх за один раз. */
+  const netInfo = (id) => {
+    const d = deco.find((x) => x.id === id.slice(4))
+    if (!d) return
+    const every = (catalog.nets?.everyMin ?? 15) * 60_000
+    const left = d.nc ? every - ((now - d.nc) % every) : every
+    say(`🥅 Сама ловить дари моря · наступний улов ${shortDuration(left)}`, id, 'calm', 'water')
+  }
+
   /** Гевея: доросла — злити каучук із чашки; ні — скільки ще чекати. */
   const collectingRubber = useRef(false)
   const rubberAction = async (id) => {
@@ -487,6 +496,7 @@ export default function IslandWalk({ start = 'island' }) {
     else if (actOf(id) === 'windmill') windmillInfo(id)
     else if (actOf(id) === 'tree') treeInfo(id)
     else if (actOf(id) === 'rubber') rubberAction(id)
+    else if (actOf(id) === 'net') netInfo(id)
     else if (id === 'house') goScene('home')
     else if (id === 'exit') goScene('island')
     else if (BUILDINGS.has(id)) setSheet(id)
@@ -1526,6 +1536,7 @@ function islandSpot(catalog, id) {
   if (actOf(id) === 'windmill') return { id, label: 'Вітряк' }
   if (actOf(id) === 'tree') return { id, label: 'Посаджене дерево' }
   if (actOf(id) === 'rubber') return { id, label: 'Гевея' }
+  if (actOf(id) === 'net') return { id, label: 'Сітка' }
   return INTERACT.find((i) => i.id === id) ?? null
 }
 
@@ -1568,6 +1579,7 @@ function spotHint(catalog, levels, chestOpen, id) {
   if (actOf(id) === 'windmill') return 'Крутиться на вітрі — дає 40 Вт електрики'
   if (actOf(id) === 'tree') return 'Росте саме — згодом стане деревом'
   if (actOf(id) === 'rubber') return 'Каучукове дерево — 3 каучуку щогодини'
+  if (actOf(id) === 'net') return 'Сама ловить дари моря; дрібниці на березі поруч — тапай і збирай'
   if (actOf(id) === 'bed') return 'Перина й вишита ковдра'
   if (actOf(id) === 'stove') return 'Готують рибу — у рюкзаку'
   if (actOf(id) === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'

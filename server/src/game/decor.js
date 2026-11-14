@@ -123,7 +123,7 @@ const MAP_W = 512;
 const MAP_H = 448;
 const ITEM_ID = /^[a-z0-9]{6,16}$/;
 
-/** @returns {Promise<{ id: string, k: string, x: number, y: number, t?: number, sp?: string, c?: number }[]>} */
+/** @returns {Promise<{ id: string, k: string, x: number, y: number, t?: number, sp?: string, c?: number, nc?: number }[]>} */
 export async function getDecor(userId) {
   const h = await getRedis().hGetAll(await key(userId));
   const out = [];
@@ -132,7 +132,8 @@ export async function getDecor(userId) {
       const v = JSON.parse(raw);
       // Посаджене дерево ще й пам'ятає, коли посадили (t) і що виросте (sp).
       // Гевея — ще й коли востаннє збирали каучук (c).
-      if (BY_ID.has(v.k)) out.push({ id, k: v.k, x: v.x, y: v.y, ...(v.t && { t: v.t }), ...(v.sp && { sp: v.sp }), ...(v.c && { c: v.c }) });
+      // Сітка — ще nc: коли востаннє зарахували улов (nets.js).
+      if (BY_ID.has(v.k)) out.push({ id, k: v.k, x: v.x, y: v.y, ...(v.t && { t: v.t }), ...(v.sp && { sp: v.sp }), ...(v.c && { c: v.c }), ...(v.nc && { nc: v.nc }) });
     } catch {
       /* зіпсований запис — пропускаємо */
     }
@@ -182,7 +183,7 @@ export async function placeDecor(userId, kind, x, y) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
   const id = randomBytes(6).toString("hex");
-  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}) };
+  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }) };
   await r.hSet(k, id, JSON.stringify(item));
   return { item: { id, ...item } };
 }

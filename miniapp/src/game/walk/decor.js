@@ -62,7 +62,7 @@ export const DECO_GEOM = {
     act: 'rubber',
   },
   // Сітка лежить на воді (water — лише на мілині біля берега, atlas.shore) і приманює дари моря на пляж.
-  fishing_net: { sprite: 'deco_net', fw: 3, fh: 2, floor: true, water: true },
+  fishing_net: { sprite: 'deco_net', fw: 3, fh: 2, floor: true, water: true, act: 'net' },
 }
 
 /** Спрайт прикраси: посаджене дерево й гевея — за стадією росту (g), породою (sp) і чашкою (full), решта — свій. */

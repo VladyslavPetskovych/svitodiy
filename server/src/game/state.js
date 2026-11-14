@@ -23,6 +23,7 @@ import { ensureIsland, takenBoxes } from "./island.js";
 import { getNodes } from "./nodes.js";
 import { powerOf } from "./power.js";
 import { ripenTrees } from "./trees.js";
+import { creditNets } from "./nets.js";
 import { islandSnapshot } from "./presence.js";
 import { dailyClaimKey, jobKey, kyivDay, previousDay, quizRewardKey, userKey } from "./keys.js";
 
@@ -106,6 +107,8 @@ export async function getState(userId) {
   ]);
   // Дорослі посаджені дерева стають ресурсами — до читання ресурсів, щоб уже були в стані.
   const deco = await ripenTrees(userId, allDeco);
+  // Сітки самі ловлять дари моря: уловлене за час відсутності одразу в рюкзаку.
+  await creditNets(userId, deco);
   // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
   const [nodes, winterNodes, tools, wear] = await Promise.all([
     getNodes(userId, takenBoxes(home, deco, farm), "home", deco),

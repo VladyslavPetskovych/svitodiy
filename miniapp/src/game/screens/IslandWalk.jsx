@@ -883,7 +883,7 @@ export default function IslandWalk({ start = 'island' }) {
     if (!wireStart) {
       if (!engine.current?.routeWire(cell, cell)) {
         haptic('warning')
-        say('Кабель лежить лише на суші', at(ev), 'error')
+        say('Кабель лежить лише на суші чи помості', at(ev), 'error')
         return
       }
       haptic('select')
@@ -897,7 +897,7 @@ export default function IslandWalk({ start = 'island' }) {
     const route = engine.current?.routeWire(wireStart, cell)
     if (!route) {
       haptic('warning')
-      say('Туди кабель не дотягнеться — лише сушею', at(ev), 'error')
+      say('Туди кабель не дотягнеться — лише сушею чи помостом', at(ev), 'error')
       return
     }
     haptic('select')
@@ -1243,7 +1243,7 @@ export default function IslandWalk({ start = 'island' }) {
           <HudButton label={build ? '✓ Готово' : '←'} title={build ? 'Готово' : indoors ? 'Надвір' : 'Залишити острів'} onClick={build ? exitBuild : leave} wide={build} />
           {build ? (
             <span className="rounded-sm bg-black/45 px-2 py-1 font-pixel text-[9px] text-cream">
-              {indoors ? `РЕЧІ ${interior.length}/${catalog.interiorMax ?? 100}` : `ДЕКОР ${deco.length}/${catalog.decorMax ?? 150}`}
+              {indoors ? `РЕЧІ ${interior.length}/${catalog.interiorMax ?? 100}` : `ДЕКОР ${deco.length}/${catalog.decorMax ?? 2500}`}
               {!indoors && power.max > 0 && <span className="ml-2 text-[#ffe066]">⚡{liveGen} Вт</span>}
             </span>
           ) : (

@@ -60,7 +60,9 @@ def remove_background(rgb, tol, grey=3.0):
     f = rgb.astype(np.float64)
     dist = np.linalg.norm(f - bg, axis=-1)
     sat = f.max(-1) - f.min(-1)
-    close = (dist < tol) | ((sat < 18) & (f.mean(-1) > 120) & (dist < tol * grey))
+    # Z-Image кладе під предмет світлу блакитно-сіру тінь (≈212,219,238) — трохи насиченішу, тож для світлих ширший поріг.
+    shadowy = ((sat < 18) & (f.mean(-1) > 120)) | ((sat < 36) & (f.mean(-1) > 190))
+    close = (dist < tol) | (shadowy & (dist < tol * grey))
     seen = np.zeros((h, w), bool)
     q = deque()
     for x in range(w):

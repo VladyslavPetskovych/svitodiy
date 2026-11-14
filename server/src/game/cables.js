@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
+import { deckCells, getDecor } from "./decor.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { homeOwner } from "./household.js";
 import { cablesKey, takeCooldown } from "./keys.js";
@@ -9,8 +10,8 @@ import { cablesKey, takeCooldown } from "./keys.js";
  * у звичайній грі їх не видно. Зберігаються клітинками 8×8 px: hash «cx,cy» → «1».
  * Кожна клітинка коштує 1 дріт (bare_wire) з рюкзака; прибрав — дріт повертається.
  *
- * Сюди можна класти кабель лише на сушу: маску суші (island-walk.json) беремо з того ж атласу,
- * що й клієнт (miniapp/src/game/walk/atlas.json → walk).
+ * Кабель кладуть на сушу й на помости (у межах мапи): маску суші (island-walk.json) беремо з того ж атласу,
+ * що й клієнт (miniapp/src/game/walk/atlas.json → walk), помости — з декору (decor.js → deckCells).
  */
 const WALK = JSON.parse(readFileSync(new URL("./island-walk.json", import.meta.url), "utf8"));
 export const CABLE_CELL = WALK.cell;
@@ -20,6 +21,12 @@ export const CABLE_MAX = 400;
 
 /** Клітинка на суші (з маски острова). */
 export const onLand = (x, y) => WALK.rows[y]?.[x] === "1";
+
+/** Де можна класти кабель: суша або помост. */
+async function cableGround(userId) {
+  const deck = deckCells(await getDecor(userId));
+  return (x, y) => onLand(x, y) || deck.has(`${x},${y}`);
+}
 /** За один запит — не більше стількох клітинок (довший маршрут клієнт шле шматками). */
 const BATCH_MAX = 200;
 const WIRE = "bare_wire";
@@ -64,8 +71,9 @@ async function lock(userId) {
  * @returns {Promise<{ added: number, cells: [number, number][] }>}
  */
 export async function layCables(userId, list) {
-  // Вода — мимо: тягнеш смугу через море, кабель ляже лише на сушу.
-  const cells = parseCells(list).filter(([x, y]) => onLand(x, y));
+  // Вода — мимо: тягнеш смугу через море, кабель ляже лише на сушу й помости.
+  const ground = await cableGround(userId);
+  const cells = parseCells(list).filter(([x, y]) => ground(x, y));
   await lock(userId);
   const r = getRedis();
   const k = await key(userId);
@@ -100,3 +108,19 @@ export async function removeCables(userId, list) {
   return { refund, cells: await getCables(userId) };
 }
 
+/**
+ * Зняти кабель, що опинився над водою (розібрали чи перенесли помост), і повернути за нього дріт.
+ * @returns {Promise<number>} скільки дроту повернули
+ */
+export async function pruneCables(userId) {
+  const r = getRedis();
+  const k = await key(userId);
+  const ground = await cableGround(userId);
+  let refund = 0;
+  for (const f of await r.hKeys(k)) {
+    const [x, y] = f.split(",").map(Number);
+    if (!ground(x, y) && (await r.hDel(k, f)) === 1) refund++;
+  }
+  if (refund) await addResourceToInventory(userId, WIRE, refund);
+  return refund;
+}

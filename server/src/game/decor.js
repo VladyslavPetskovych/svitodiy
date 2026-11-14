@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
+import { pruneCables } from "./cables.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { FISH_HUT, hutRefund } from "./fishhut-def.js";
 import { homeOwner } from "./household.js";
@@ -161,7 +162,7 @@ export const DECOR = [
   { id: "campfire", cat: "decor", name: "Вогнище", emoji: "🔥", cost: { log: 2, stone: 2 } },
 ];
 
-export const DECOR_MAX = 150;
+export const DECOR_MAX = 2500;
 
 const BY_ID = new Map(DECOR.map((d) => [d.id, d]));
 /** Декор, що стоїть у воді, а не на суші. */
@@ -226,6 +227,17 @@ function checkPlatform(def, x, y, decor, selfId = null) {
   const walkable = (cx, cy) => isLand(cx, cy) || deck.has(`${cx},${cy}`);
   const touches = cells.some(([cx, cy]) => walkable(cx, cy) || walkable(cx + 1, cy) || walkable(cx - 1, cy) || walkable(cx, cy + 1) || walkable(cx, cy - 1));
   if (!touches) throw conflict("not_connected", `${def.emoji} ${def.name}: став поруч із берегом чи іншим помостом.`);
+}
+
+/** Клітинки «cx,cy» під помостами з декору — там, як і на суші, можна ходити й класти кабель. */
+export function deckCells(decor) {
+  const deck = new Set();
+  for (const d of decor) {
+    const def = BY_ID.get(d.k);
+    if (!def?.platform) continue;
+    for (const [cx, cy] of footCells(def, d.x, d.y)) deck.add(`${cx},${cy}`);
+  }
+  return deck;
 }
 
 /** Предмет у воді — лише на мілині; на суші — як і раніше, де завгодно в межах мапи. */
@@ -352,7 +364,9 @@ export async function moveDecor(userId, id, x, y) {
   if (BY_ID.get(old.k)?.shoreline) checkShoreline(BY_ID.get(old.k), pos.x, pos.y, await getDecor(userId));
   const item = { ...old, ...pos };
   await r.hSet(hk, id, JSON.stringify(item));
-  return { item: { id, ...item } };
+  // Переніс помост — кабель, що лишився над водою, знімаємо й повертаємо дріт.
+  const wire = BY_ID.get(old.k)?.platform ? await pruneCables(userId) : 0;
+  return { item: { id, ...item }, ...(wire && { refund: { bare_wire: wire } }) };
 }
 
 export async function removeDecor(userId, id) {
@@ -375,5 +389,10 @@ export async function removeDecor(userId, id) {
   // Розібрав рибальську хату — вкладене в покращення й риба, що лежала в ній, теж твої.
   if (old.k === FISH_HUT.kind) for (const [res, n] of Object.entries(hutRefund(old))) refund[res] = (refund[res] ?? 0) + n;
   for (const [res, n] of Object.entries(refund)) await addResourceToInventory(userId, res, n);
+  // Розібрав помост — кабель на ньому теж знімаємо (дріт повертає pruneCables).
+  if (def?.platform) {
+    const wire = await pruneCables(userId);
+    if (wire) refund.bare_wire = (refund.bare_wire ?? 0) + wire;
+  }
   return { refund };
 }

@@ -1163,7 +1163,7 @@ export function createWalk(canvas, assets, cb) {
     wireAt = t
     const ground = scene.outdoor ? land : homeLand
     if (mode === 'power') {
-      drawWires(ctx, ground)
+      drawWires(ctx, scene.outdoor ? wireGround() : ground)
       gridTex.needsUpdate = true
       return
     }
@@ -1189,10 +1189,21 @@ export function createWalk(canvas, assets, cb) {
   const cellKey = (x, y) => x + ',' + y
   const mid = (v) => v * CELL + CELL / 2
 
-  /** «Під землею»: суша темніє, тонка сітка клітинок — щоб влучати. Малюється раз на сцену. */
+  /** Де лежить кабель: суша острова й помости (як cableGround у server/src/game/cables.js). Рахуємо, лише коли змінився острів. */
+  let wireGroundCache = null
+  function wireGround() {
+    if (wireGroundCache?.list === list) return wireGroundCache.grid
+    const g = SCENES.island.geo
+    const grid = land.slice()
+    for (const p of list) if (p.platform && p.walk) for (const c of g.cellsOf(p.walk)) if (c >= 0) grid[c] = 1
+    wireGroundCache = { list, grid }
+    return grid
+  }
+
+  /** «Під землею»: суша темніє, тонка сітка клітинок — щоб влучати. Малюється раз на сцену (і заново, коли змінились помости). */
   let underlay = null
   function underlayFor(ground) {
-    if (underlay?.scene === scene.id) return underlay.canvas
+    if (underlay?.scene === scene.id && underlay.ground === ground) return underlay.canvas
     const c = document.createElement('canvas')
     c.width = gridCanvas.width
     c.height = gridCanvas.height
@@ -1208,7 +1219,7 @@ export function createWalk(canvas, assets, cb) {
       g.fillRect(x, y, CELL, 0.5)
       g.fillRect(x, y, 0.5, CELL)
     }
-    underlay = { scene: scene.id, canvas: c }
+    underlay = { scene: scene.id, ground, canvas: c }
     return c
   }
 
@@ -2798,13 +2809,15 @@ export function createWalk(canvas, assets, cb) {
       wireView = v ? { ...NO_VIEW, ...v } : NO_VIEW
       if (mode === 'power') drawGrid()
     },
-    /** Маршрут кабелю між клітинками: лише сушею, по своєму кабелю — даром. null — не дотягнутись. */
+    /** Маршрут кабелю між клітинками: сушею й помостами, по своєму кабелю — даром. null — не дотягнутись. */
     routeWire(from, to) {
       const W = wireData()
-      // Кабель — лише по суші мапи (помости в морі — без кабелю): клітинки мапи без запасу моря.
+      // Кабель — по суші й помостах у межах мапи (шар кабелів малюється лише над нею), без запасу моря довкола.
       const cols = atlas.walk[0].length
       const rows = atlas.walk.length
-      return findRoute(from, to, { cols, rows, land: (x, y) => landAt(x, y), has: (x, y) => W.has.has(cellKey(x, y)) })
+      const ground = wireGround()
+      const g = SCENES.island.geo
+      return findRoute(from, to, { cols, rows, land: (x, y) => ground[g.idx(x, y)] === 1, has: (x, y) => W.has.has(cellKey(x, y)) })
     },
     /** Ділянка кабелю під клітинкою (між розгалуженнями) — щоб зняти гілку одним тапом. */
     wireSegment(cell) {

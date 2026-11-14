@@ -47,21 +47,30 @@ export const DECO_GEOM = {
   tree_sprout: {
     sprite: 'tree_plant_0',
     icon: 'tree_young_oak',
-    stages: ['tree_plant_0', 'tree_plant_1', (sp) => `tree_young_${sp ?? 'oak'}`],
+    stages: ['tree_plant_0', 'tree_plant_1', (d) => `tree_young_${d.sp ?? 'oak'}`],
     fw: 2,
     fh: 1,
     act: 'tree',
+  },
+  // Гевея: росте (стадії як у дерева), доросла дає каучук — d.full: у чашці є що зібрати (server/src/game/rubber.js).
+  rubber_tree: {
+    sprite: 'tree_plant_0',
+    icon: 'rubber_tree_full',
+    stages: ['tree_plant_0', 'tree_plant_1', 'rubber_young', (d) => (d.full ? 'rubber_tree_full' : 'rubber_tree')],
+    fw: 2,
+    fh: 1,
+    act: 'rubber',
   },
   // Сітка лежить на воді (water — лише на мілині біля берега, atlas.shore) і приманює дари моря на пляж.
   fishing_net: { sprite: 'deco_net', fw: 3, fh: 2, floor: true, water: true },
 }
 
-/** Спрайт прикраси: посаджене дерево — за стадією росту (g) і породою (sp), решта — свій. */
+/** Спрайт прикраси: посаджене дерево й гевея — за стадією росту (g), породою (sp) і чашкою (full), решта — свій. */
 export function decoSprite(d) {
   const g = DECO_GEOM[d.k]
   if (!g?.stages) return g?.sprite
   const s = g.stages[Math.max(0, Math.min(g.stages.length - 1, d.g ?? 0))]
-  return typeof s === 'function' ? s(d.sp) : s
+  return typeof s === 'function' ? s(d) : s
 }
 
 /**

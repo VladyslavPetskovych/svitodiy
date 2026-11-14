@@ -60,7 +60,7 @@ export const NODES = {
     weight: 4,
     tool: null,
     hits: 1,
-    loot: { twig: [1, 2], plank: { chance: 0.25, n: 1 }, tree_seed: { chance: 0.15, n: 1 } },
+    loot: { twig: [1, 2], plank: { chance: 0.25, n: 1 }, tree_seed: { chance: 0.15, n: 1 }, rubber_seed: { chance: 0.06, n: 1 } },
   },
   shell: { name: "Мушля", emoji: "🐚", where: "sand", weight: 3, tool: null, hits: 1, loot: { shell: [1, 1] } },
   seaweed: { name: "Водорості", emoji: "🌿", where: "sand", weight: 3, tool: null, hits: 1, loot: { seaweed: [1, 2], tree_seed: { chance: 0.1, n: 1 } } },

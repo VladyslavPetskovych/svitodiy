@@ -26,9 +26,9 @@ const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', tree: '🌱' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', tree: '🌱', rubber: '🟤' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', tree: 'Глянути' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', tree: 'Глянути', rubber: 'Зібрати' }
 /** Ресурси на острові — «node:<id>». */
 const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
 /** Чим добувати: кнопка дії. */
@@ -52,6 +52,17 @@ function treeStage(trees, d, now) {
   const ms = (trees?.growMin ?? 40) * 60_000
   const stages = trees?.stages ?? 3
   return Math.max(0, Math.min(stages, Math.floor(((now - (d.t ?? 0)) / ms) * stages)))
+}
+/** Гевея (server/src/game/rubber.js): скільки каучуку в чашці на мить now і коли буде наступний. */
+const RUBBER_KIND = 'rubber_tree'
+function rubberNow(cfg, d, now) {
+  const ripe = (d.t ?? 0) + (cfg?.growMin ?? 60) * 60_000
+  const unit = 3_600_000 / (cfg?.perHour ?? 3)
+  const cap = cfg?.cap ?? 24
+  if (now < ripe) return { grown: false, ready: 0, nextIn: ripe - now }
+  const from = Math.max(ripe, d.c ?? 0)
+  const ready = Math.min(cap, Math.floor((now - from) / unit))
+  return { grown: true, ready, cap, nextIn: ready >= cap ? 0 : unit - ((now - from) % unit) }
 }
 
 /** Підказка по тапу на небо: що зараз і чим це корисно. */
@@ -159,17 +170,29 @@ export default function IslandWalk({ start = 'island' }) {
   const tools = state.tools ?? {}
   // Посаджені дерева ростуть самі: стадія — з часу посадки; рядок змінюється лише разом зі стадією,
   // тож острів перебудовується раз на стадію, а не щокілька секунд.
+  // Гевея — так само, плюс «f», коли в чашці є каучук (інший спрайт).
   const treeStages = rawDeco
-    .filter((d) => d.k === TREE_KIND)
-    .map((d) => treeStage(catalog.trees, d, now))
+    .filter((d) => d.k === TREE_KIND || d.k === RUBBER_KIND)
+    .map((d) =>
+      d.k === TREE_KIND ? String(treeStage(catalog.trees, d, now)) : `${treeStage(catalog.rubber, d, now)}${rubberNow(catalog.rubber, d, now).ready > 0 ? 'f' : ''}`
+    )
     .join(',')
   const deco = useMemo(() => {
     if (!treeStages) return rawDeco
-    const g = treeStages.split(',').map(Number)
+    const g = treeStages.split(',')
     const last = (catalog.trees?.stages ?? 3) - 1
     let i = 0
-    return rawDeco.map((d) => (d.k === TREE_KIND ? { ...d, g: Math.min(last, g[i++]) } : d))
+    return rawDeco.map((d) => {
+      if (d.k === TREE_KIND) return { ...d, g: Math.min(last, parseInt(g[i++], 10)) }
+      if (d.k === RUBBER_KIND) {
+        const v = g[i++]
+        return { ...d, g: parseInt(v, 10), full: v.endsWith('f') }
+      }
+      return d
+    })
   }, [rawDeco, treeStages, catalog.trees])
+  /** Посаджене дерево вже доросло — сервер має поставити на його місце справжнє. */
+  const ripe = rawDeco.some((d) => d.k === TREE_KIND && treeStage(catalog.trees, d, now) >= (catalog.trees?.stages ?? 3))
   /** Електрика острова: скільки Вт дають вітряки (server/src/game/power.js). */
   const power = state.power ?? { gen: 0, use: 0, sources: 0 }
   /**
@@ -436,6 +459,22 @@ export default function IslandWalk({ start = 'island' }) {
     say(left > 0 ? `🌱 ${d.g >= 2 ? name[0].toUpperCase() + name.slice(1) : 'Паросток'} · ще ${shortDuration(left)}` : `🌳 Ось-ось виросте ${name}!`, id, 'calm', 'leaves')
   }
 
+  /** Гевея: доросла — злити каучук із чашки; ні — скільки ще чекати. */
+  const collectingRubber = useRef(false)
+  const rubberAction = async (id) => {
+    const d = deco.find((x) => x.id === id.slice(7))
+    if (!d || collectingRubber.current) return
+    const v = rubberNow(catalog.rubber, d, now)
+    if (!v.grown) return say(`🌱 Гевея росте · ще ${shortDuration(v.nextIn)}`, id, 'calm', 'leaves')
+    if (v.ready < 1) return say(`⏳ Латекс капає · ще ${shortDuration(v.nextIn)}`, id, 'calm')
+    collectingRubber.current = true
+    const res = await act('POST', `/home/rubber/${d.id}/collect`)
+    collectingRubber.current = false
+    if (!res) return
+    haptic('success')
+    say(`${shortGot(items, res.got)}${v.ready >= v.cap ? ' · чашка була повна!' : ''}`, id, 'good', 'coins')
+  }
+
   const interact = (id) => {
     haptic('light')
     const dog = dogOf(id)
@@ -447,6 +486,7 @@ export default function IslandWalk({ start = 'island' }) {
     else if (actOf(id) === 'farmshop') setFarmTab('seeds')
     else if (actOf(id) === 'windmill') windmillInfo(id)
     else if (actOf(id) === 'tree') treeInfo(id)
+    else if (actOf(id) === 'rubber') rubberAction(id)
     else if (id === 'house') goScene('home')
     else if (id === 'exit') goScene('island')
     else if (BUILDINGS.has(id)) setSheet(id)
@@ -721,7 +761,6 @@ export default function IslandWalk({ start = 'island' }) {
   // Посаджене дерево доросло — просимо свіжий стан: сервер уже поставить на його місці справжнє дерево.
   // Не частіше, ніж раз на 10 с (годинник телефона може трохи випереджати серверний).
   const ripeAsked = useRef(0)
-  const ripe = (catalog.trees?.stages ?? 3) > 0 && treeStages.split(',').some((g) => Number(g) >= (catalog.trees?.stages ?? 3))
   useEffect(() => {
     if (!ready || !ripe || Date.now() - ripeAsked.current < 10_000) return
     ripeAsked.current = Date.now()
@@ -1486,6 +1525,7 @@ function islandSpot(catalog, id) {
   if (actOf(id) === 'farmshop') return { id, label: 'Комора городника' }
   if (actOf(id) === 'windmill') return { id, label: 'Вітряк' }
   if (actOf(id) === 'tree') return { id, label: 'Посаджене дерево' }
+  if (actOf(id) === 'rubber') return { id, label: 'Гевея' }
   return INTERACT.find((i) => i.id === id) ?? null
 }
 
@@ -1527,6 +1567,7 @@ function spotHint(catalog, levels, chestOpen, id) {
   if (actOf(id) === 'workbench') return 'Інструменти, дошки й дріт'
   if (actOf(id) === 'windmill') return 'Крутиться на вітрі — дає 40 Вт електрики'
   if (actOf(id) === 'tree') return 'Росте саме — згодом стане деревом'
+  if (actOf(id) === 'rubber') return 'Каучукове дерево — 3 каучуку щогодини'
   if (actOf(id) === 'bed') return 'Перина й вишита ковдра'
   if (actOf(id) === 'stove') return 'Готують рибу — у рюкзаку'
   if (actOf(id) === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'

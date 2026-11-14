@@ -1224,10 +1224,10 @@ export function createWalk(canvas, assets, cb) {
         if (!old) {
           juice.set(d.id, { t0: t, power: 1, drop: DECO_GEOM[d.k]?.floor ? 0 : 10 })
           particles.dust(d.x, d.y, 10, 1)
-          if (['wildflowers', 'flower_bed', 'sunflowers', 'bush', 'sapling', 'pine', 'pumpkins', 'hay', 'tree_sprout'].includes(d.k)) particles.leaves(d.x, d.y - 4)
+          if (['wildflowers', 'flower_bed', 'sunflowers', 'bush', 'sapling', 'pine', 'pumpkins', 'hay', 'tree_sprout', 'rubber_tree'].includes(d.k)) particles.leaves(d.x, d.y - 4)
           kick = Math.max(kick, 0.14)
-        } else if ((old.g ?? 0) !== (d.g ?? 0)) {
-          // Посаджене дерево підросло: поп і листочки.
+        } else if ((old.g ?? 0) !== (d.g ?? 0) || !!old.full !== !!d.full) {
+          // Посаджене дерево підросло (чи в чашці гевеї з'явився каучук): поп і листочки.
           juice.set(d.id, { t0: t, power: 0.9, drop: 0 })
           particles.leaves(d.x, d.y - 8)
         } else if (old.x !== d.x || old.y !== d.y) {

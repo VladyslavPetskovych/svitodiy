@@ -51,6 +51,8 @@ const ITEM_ART = new Set([
   'copper_ingot',
   'bare_wire',
   'tree_seed',
+  'rubber',
+  'rubber_seed',
   'relic_ring_wanderer',
   'relic_hook_silver',
   'relic_hook_gold',
@@ -141,8 +143,10 @@ export function sourceOf(catalog, id) {
   const node = catalog.nodes?.find((n) => n.loot[0] === id)
   if (node) return `Добувай на своєму острові: ${node.name.toLowerCase()}${node.tool ? (node.tool === 'axe' ? ' (сокирою)' : ' (кайлом)') : ''}`
   if (id === 'plank') return 'Зроби на верстаті з колод'
-  if (id === 'bare_wire') return 'Витягни на верстаті з мідного злиточка'
+  if (id === 'bare_wire') return 'Зроби на верстаті: з мідного злиточка або з 5 старих монет'
   if (id === 'copper_ingot') return 'Інколи чіпляється на вудку'
+  if (id === 'rubber') return 'Збирай з гевеї на острові — 3 щогодини'
+  if (id === 'rubber_seed') return 'Рідко: у рибі, на вудці й у корчах на пляжі. Посади гевею в будівництві 🔨'
   if (id === 'tree_seed') return 'Трапляється в рибі, на вудці й у корчах на пляжі. Посади в будівництві 🔨'
   if (catalog.cookDrops.includes(id)) return 'Готуй рибу в рюкзаку'
   const island = catalog.islands.find((i) => i.gather?.resourceId === id)

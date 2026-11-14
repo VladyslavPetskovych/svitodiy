@@ -310,6 +310,102 @@ export function powerArt({ Img, hash, canopy, shadow, LEAF }) {
     return img.outline('#1e3a12')
   }
 
+  /* ───────── Гевея (каучукове дерево) ───────── */
+
+  const HEVEA_LEAF = ['#7cc45e', '#3f9442', '#2a7436', '#1d572b', '#12401f']
+  const BARK = { hi: '#b3a690', mid: '#8d806b', lo: '#665b4b', dark: '#463e33' }
+
+  /** Гладкий сіро-бурий стовбур гевеї з легкими поперечними кільцями. */
+  function heveaTrunk(img, cx, top, bot, w) {
+    for (let y = top; y <= bot; y++) {
+      const flare = y > bot - 4 ? bot - 4 - y + 1 : 0 // розширення біля коріння
+      const x0 = cx - Math.floor(w / 2) + Math.min(0, flare)
+      const x1 = cx + Math.ceil(w / 2) - 1 - Math.min(0, flare)
+      for (let x = x0; x <= x1; x++) {
+        const u = (x - x0) / Math.max(1, x1 - x0)
+        img.set(x, y, u < 0.25 ? BARK.hi : u < 0.7 ? BARK.mid : BARK.lo)
+      }
+      img.set(x1, y, BARK.dark)
+      if (hash(cx, y, 77) < 0.12) img.hline(x0 + 1, x1 - 1, y, BARK.lo, 0.6)
+    }
+  }
+
+  /**
+   * Доросла гевея: високий стовбур із підсочкою — косим надрізом, з якого латекс стікає в чашку,
+   * прив'язану до стовбура. full — у чашці біліє латекс (є що зібрати).
+   */
+  function rubberTree(full) {
+    const img = new Img(44, 72)
+    shadow(img, 22, 68, 16, 4)
+    heveaTrunk(img, 22, 28, 69, 6)
+    img.rect(16, 67, 3, 2, BARK.mid)
+    img.rect(26, 67, 3, 2, BARK.lo)
+    // Гілки: стовбур розходиться рогаткою на три — між пучками крони їх видно.
+    const limb = (x0, y0, x1, y1) => {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))
+      for (let k = 0; k <= n; k++) {
+        const x = Math.round(x0 + ((x1 - x0) * k) / n)
+        const y = Math.round(y0 + ((y1 - y0) * k) / n)
+        img.set(x, y, BARK.mid)
+        img.set(x + 1, y, BARK.lo)
+      }
+    }
+    limb(21, 30, 11, 18)
+    limb(23, 30, 33, 17)
+    limb(22, 30, 22, 12)
+    // Крона — три окремі пучки глянцевого темного листя, а не одна «куля».
+    canopy(
+      img,
+      [
+        [11, 17, 7], [6, 22, 5], [15, 22, 5],
+        [33, 16, 7], [38, 21, 5], [29, 21, 5],
+        [22, 9, 7], [17, 5, 5], [27, 5, 5],
+      ],
+      HEVEA_LEAF,
+      71
+    )
+    // Глянець: світлі риски на верхніх листках.
+    for (const [x, y] of [[8, 13], [9, 13], [30, 12], [31, 12], [19, 4], [20, 4], [24, 2], [13, 19], [35, 18]]) img.tint(x, y, '#c8f09a', 0.9)
+    // Звислі довгасті листочки під пучками.
+    for (const [x, y] of [[4, 27], [9, 28], [15, 27], [29, 26], [34, 27], [39, 25], [18, 15], [26, 15]]) {
+      img.set(x, y, HEVEA_LEAF[3])
+      img.set(x, y + 1, HEVEA_LEAF[4])
+    }
+    // Насіннєві коробочки.
+    for (const [x, y] of [[12, 24], [32, 23], [24, 14]]) {
+      img.set(x, y, '#8aa043')
+      img.set(x + 1, y, '#667a32')
+    }
+    // Підсочка: косий надріз, свіжа світла кора, латекс тече жолобком.
+    for (let k = 0; k < 6; k++) {
+      img.set(19 + k, 44 + Math.round(k * 0.7), '#efe4c8')
+      img.set(19 + k, 45 + Math.round(k * 0.7), BARK.dark)
+    }
+    img.set(24, 49, '#9aa3a8') // носик
+    img.hline(19, 25, 51, '#6b4426') // стрічка
+    // Чашка (половинка кокоса).
+    img.rect(20, 52, 7, 5, '#7a4a24')
+    img.hline(20, 26, 52, '#a8693a')
+    img.hline(21, 25, 56, '#5b3a22')
+    img.set(20, 53, '#a8693a')
+    if (full) {
+      img.rect(21, 52, 5, 2, '#fbf7ec')
+      img.set(25, 53, '#e6dcc4')
+      img.set(24, 50, '#fbf7ec') // крапля латексу
+    } else img.set(24, 50, '#f3ecda', 0.7)
+    return img.outline('#10301a')
+  }
+
+  /** Молода гевея — стрункий прутик з кількома пучками листя. */
+  function rubberYoung() {
+    const img = new Img(22, 36)
+    shadow(img, 11, 34, 8, 2)
+    mound(img, 11, 35)
+    heveaTrunk(img, 11, 16, 33, 2)
+    canopy(img, [[11, 10, 7], [5, 14, 4], [17, 14, 4], [11, 4, 4]], HEVEA_LEAF, 73)
+    return img.outline('#16361a')
+  }
+
   /* ───────── Іконки ───────── */
 
   /** Мідний злиточок: трапеція в три чверті — верх, лицьова грань і бік, відблиск. */
@@ -376,12 +472,48 @@ export function powerArt({ Img, hash, canopy, shadow, LEAF }) {
     return img.outline(K, 0.9)
   }
 
+  /** Каучук: брила-кулька натурального каучуку, бурштинова, з глянцем і слідами пальців. */
+  function rubber() {
+    const img = new Img(18, 16)
+    img.ellipse(9, 9, 7.5, 6.2, '#9a5f2a')
+    img.ellipse(8, 8, 5.6, 4.6, '#c47f3c')
+    img.ellipse(7, 7, 3.2, 2.4, '#e2a862')
+    img.set(5, 6, '#fde2b8')
+    img.set(6, 5, '#fde2b8')
+    // Тінь знизу і «складка» — каучук м'який.
+    img.hline(5, 13, 14, '#6e3f1c')
+    img.hline(10, 14, 11, '#8a5226')
+    img.set(12, 9, '#8a5226')
+    // Крапля латексу згори — ще свіжий.
+    img.set(11, 2, '#fbf7ec')
+    img.set(11, 3, '#efe8d6')
+    return img.outline(K, 0.9)
+  }
+
+  /** Насінина гевеї: глянцева овальна, плямиста — як справжнє насіння каучуконоса. */
+  function rubberSeed() {
+    const img = new Img(16, 14)
+    img.ellipse(8, 7.5, 6.4, 5, '#a9824f')
+    for (let y = 2; y < 13; y++)
+      for (let x = 1; x < 15; x++)
+        if (img.alpha(x, y) && hash(Math.floor(x / 2), Math.floor(y / 2), 81) < 0.38) img.set(x, y, '#5a3a20')
+    img.hline(3, 13, 12, '#4a2f19')
+    img.set(5, 4, '#f3dcae')
+    img.set(6, 4, '#f3dcae')
+    img.set(5, 5, '#d8b98a')
+    return img.outline(K, 0.9)
+  }
+
   const sprites = {}
   for (let f = 0; f < WINDMILL_FRAMES; f++) sprites[`windmill_${f}`] = windmillFrame(f)
   sprites.tree_plant_0 = plant0()
   sprites.tree_plant_1 = plant1()
   for (const kind of ['oak', 'birch', 'pine']) sprites[`tree_young_${kind}`] = young(kind)
 
-  const items = { copper_ingot: copperIngot(), bare_wire: bareWire(), tree_seed: treeSeed() }
+  sprites.rubber_young = rubberYoung()
+  sprites.rubber_tree = rubberTree(false)
+  sprites.rubber_tree_full = rubberTree(true)
+
+  const items = { copper_ingot: copperIngot(), bare_wire: bareWire(), tree_seed: treeSeed(), rubber: rubber(), rubber_seed: rubberSeed() }
   return { sprites, items }
 }

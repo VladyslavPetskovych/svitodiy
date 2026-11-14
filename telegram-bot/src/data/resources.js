@@ -20,13 +20,15 @@ export const RESOURCE_TYPES = [
   { id: "copper_ingot", emoji: "🟧", name: "Мідний злиточок" },
   { id: "bare_wire", emoji: "➰", name: "Голий дріт" },
   { id: "tree_seed", emoji: "🌰", name: "Насінина дерева" },
+  { id: "rubber_seed", emoji: "🫘", name: "Насінина гевеї" },
+  { id: "rubber", emoji: "🟤", name: "Каучук" },
 ];
 
 /**
  * Що може «висмоктати» вудка замість риби (простий дроп) і як часто — вага.
- * Мідний злиточок (з нього на верстаті Mini App тягнуть дріт) і насінина дерева — рідше.
+ * Мідний злиточок (з нього на верстаті Mini App тягнуть дріт), насінина дерева й гевеї — рідше.
  */
-export const FISHING_RESOURCE_WEIGHTS = { twig: 4, stone: 4, shell: 4, tree_seed: 2, copper_ingot: 2 };
+export const FISHING_RESOURCE_WEIGHTS = { twig: 4, stone: 4, shell: 4, tree_seed: 2, copper_ingot: 2, rubber_seed: 1 };
 export const FISHING_SURFACE_RESOURCE_IDS = Object.keys(FISHING_RESOURCE_WEIGHTS);
 
 const BY_ID = new Map(RESOURCE_TYPES.map((r) => [r.id, r]));

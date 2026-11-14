@@ -5,6 +5,7 @@ import { GameError, badRequest, conflict } from "./errors.js";
 import { homeOwner } from "./household.js";
 import { decoKey, takeCooldown } from "./keys.js";
 import { NET } from "./nodes.js";
+import { RUBBER, rubberReady } from "./rubber.js";
 import { TREE, plantedTree } from "./trees.js";
 
 /**
@@ -48,8 +49,18 @@ export const DECOR = [
     name: "Посадка",
     emoji: "🌰",
     cost: { tree_seed: 1 },
-    grows: true,
+    grows: "tree",
     hint: `Насінина проросте й за ${TREE.growMs / 60_000} хв стане деревом, яке можна рубати.`,
+  },
+  // Гевея не рубається: доросла дає каучук, його збирають з чашки на стовбурі (server/src/game/rubber.js).
+  {
+    id: RUBBER.kind,
+    cat: "plants",
+    name: "Гевея",
+    emoji: "🌳",
+    cost: { rubber_seed: 1 },
+    grows: "rubber",
+    hint: `Каучукове дерево: росте ${RUBBER.growMs / 60_000} хв, потім дає ${RUBBER.perHour} каучуку щогодини — збирай з чашки.`,
   },
   { id: "wildflowers", cat: "plants", name: "Польові квіти", emoji: "🌼", cost: {} },
   { id: "flower_bed", cat: "plants", name: "Клумба", emoji: "🌷", cost: { twig: 1 } },
@@ -107,7 +118,7 @@ const MAP_W = 512;
 const MAP_H = 448;
 const ITEM_ID = /^[a-z0-9]{6,16}$/;
 
-/** @returns {Promise<{ id: string, k: string, x: number, y: number, t?: number, sp?: string }[]>} */
+/** @returns {Promise<{ id: string, k: string, x: number, y: number, t?: number, sp?: string, c?: number }[]>} */
 export async function getDecor(userId) {
   const h = await getRedis().hGetAll(await key(userId));
   const out = [];
@@ -115,7 +126,8 @@ export async function getDecor(userId) {
     try {
       const v = JSON.parse(raw);
       // Посаджене дерево ще й пам'ятає, коли посадили (t) і що виросте (sp).
-      if (BY_ID.has(v.k)) out.push({ id, k: v.k, x: v.x, y: v.y, ...(v.t && { t: v.t, sp: v.sp }) });
+      // Гевея — ще й коли востаннє збирали каучук (c).
+      if (BY_ID.has(v.k)) out.push({ id, k: v.k, x: v.x, y: v.y, ...(v.t && { t: v.t }), ...(v.sp && { sp: v.sp }), ...(v.c && { c: v.c }) });
     } catch {
       /* зіпсований запис — пропускаємо */
     }
@@ -165,7 +177,7 @@ export async function placeDecor(userId, kind, x, y) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
   const id = randomBytes(6).toString("hex");
-  const item = { k: def.id, ...pos, ...(def.grows && plantedTree()) };
+  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}) };
   await r.hSet(k, id, JSON.stringify(item));
   return { item: { id, ...item } };
 }
@@ -195,8 +207,14 @@ export async function removeDecor(userId, id) {
   if (!raw) throw new GameError(404, "not_found", "Цієї прикраси вже немає.");
   // hDel повертає 1 лише першому — повторний запит не поверне ресурси вдруге.
   if ((await r.hDel(hk, id)) !== 1) throw new GameError(404, "not_found", "Цієї прикраси вже немає.");
-  const def = BY_ID.get(JSON.parse(raw).k);
-  const refund = def?.cost ?? {};
+  const old = JSON.parse(raw);
+  const def = BY_ID.get(old.k);
+  const refund = { ...(def?.cost ?? {}) };
+  // Викопав гевею — каучук із чашки теж твій.
+  if (old.k === RUBBER.kind) {
+    const n = rubberReady(old);
+    if (n > 0) refund.rubber = n;
+  }
   for (const [res, n] of Object.entries(refund)) await addResourceToInventory(userId, res, n);
   return { refund };
 }

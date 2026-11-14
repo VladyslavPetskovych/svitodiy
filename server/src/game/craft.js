@@ -50,6 +50,8 @@ export const RECIPES = [
   { id: "planks", name: "Дошки", emoji: "🪵", in: { log: 1 }, out: { plank: 2 } },
   // Мідний злиточок ловиться на вудку; з нього витягують дріт для вітряка (decor.js).
   { id: "bare_wire", name: "Голий дріт", emoji: "➰", in: { copper_ingot: 1 }, out: { bare_wire: 2 } },
+  // Старі монети (з риби, заметів) переплавляють на дріт — повільніше, але без удачі на вудці.
+  { id: "coin_wire", name: "Дріт із монет", emoji: "➰", in: { old_coin: 5 }, out: { bare_wire: 1 } },
 ];
 
 const MAX_BATCH = 20;

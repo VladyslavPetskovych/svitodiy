@@ -28,7 +28,7 @@ function Cost({ cost }) {
   )
 }
 
-/** Верстат: сокира, кайло й лопата (по два рівні) і дошки з колод. */
+/** Верстат: сокира, кайло й лопата (по два рівні), дошки з колод і дріт із мідного злиточка. */
 export function CraftSheet({ open, onClose }) {
   const { state, catalog, items, act, toast } = useGame()
   const [busy, setBusy] = useState(false)
@@ -106,7 +106,7 @@ export function CraftSheet({ open, onClose }) {
           const n = timesOf(r)
           return (
             <div key={r.id} className="flex items-center gap-2 rounded-sm bg-parch-dark/50 p-2">
-              <span className="text-3xl">{r.emoji}</span>
+              <ItemIcon item={itemOf(items, Object.keys(r.out)[0])} size={32} className="shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-extrabold">{r.name}</p>
                 <p className="flex flex-wrap items-center gap-1 text-xs text-ink-soft">

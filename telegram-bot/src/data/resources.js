@@ -17,10 +17,17 @@ export const RESOURCE_TYPES = [
   { id: "metal_scrap", emoji: "⚙️", name: "Металевий брухт" },
   { id: "fish_bone", emoji: "🦴", name: "Риб'яча кістка" },
   { id: "silver_piece", emoji: "🤍", name: "Кусочок срібла" },
+  { id: "copper_ingot", emoji: "🟧", name: "Мідний злиточок" },
+  { id: "bare_wire", emoji: "➰", name: "Голий дріт" },
+  { id: "tree_seed", emoji: "🌰", name: "Насінина дерева" },
 ];
 
-/** Що може «висмоктати» вудка замість риби (простий дроп) */
-export const FISHING_SURFACE_RESOURCE_IDS = ["twig", "stone", "shell"];
+/**
+ * Що може «висмоктати» вудка замість риби (простий дроп) і як часто — вага.
+ * Мідний злиточок (з нього на верстаті Mini App тягнуть дріт) і насінина дерева — рідше.
+ */
+export const FISHING_RESOURCE_WEIGHTS = { twig: 4, stone: 4, shell: 4, tree_seed: 2, copper_ingot: 2 };
+export const FISHING_SURFACE_RESOURCE_IDS = Object.keys(FISHING_RESOURCE_WEIGHTS);
 
 const BY_ID = new Map(RESOURCE_TYPES.map((r) => [r.id, r]));
 
@@ -33,9 +40,8 @@ export function isResourceId(id) {
 }
 
 export function pickRandomFishingResource() {
-  const pool = RESOURCE_TYPES.filter((r) =>
-    FISHING_SURFACE_RESOURCE_IDS.includes(r.id)
-  );
-  const i = Math.floor(Math.random() * pool.length);
-  return pool[i];
+  const entries = Object.entries(FISHING_RESOURCE_WEIGHTS);
+  let r = Math.random() * entries.reduce((s, [, w]) => s + w, 0);
+  for (const [id, w] of entries) if ((r -= w) < 0) return BY_ID.get(id);
+  return BY_ID.get(entries.at(-1)[0]);
 }

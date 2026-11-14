@@ -48,6 +48,8 @@ export const TOOL_NAMES = Object.fromEntries(Object.entries(TOOLS).map(([id, t])
 /** Заготовки: з чого → що. */
 export const RECIPES = [
   { id: "planks", name: "Дошки", emoji: "🪵", in: { log: 1 }, out: { plank: 2 } },
+  // Мідний злиточок ловиться на вудку; з нього витягують дріт для вітряка (decor.js).
+  { id: "bare_wire", name: "Голий дріт", emoji: "➰", in: { copper_ingot: 1 }, out: { bare_wire: 2 } },
 ];
 
 const MAX_BATCH = 20;

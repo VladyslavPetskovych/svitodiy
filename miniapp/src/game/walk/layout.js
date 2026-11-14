@@ -1,4 +1,4 @@
-import { BUILDING_GEOM, DECO_GEOM, NODE_GEOM, decoFootprint, nodeFootprint } from './decor.js'
+import { BUILDING_GEOM, DECO_GEOM, NODE_GEOM, decoFootprint, decoSprite, nodeFootprint } from './decor.js'
 
 /**
  * Рідний острів «зсередини»: розміри мапи, рельєф і де що стоїть.
@@ -123,7 +123,8 @@ export function placements(home, chestOpen, deco = [], nodes = []) {
   for (const d of deco) {
     const g = DECO_GEOM[d.k]
     if (!g) continue
-    out.push({ s: g.sprite, x: d.x, y: d.y, layer: g.floor ? 'floor' : 'obj', uid: d.id, kind: d.k, blocks: g.floor ? [] : [decoFootprint(d.k, d.x, d.y)] })
+    const at = { x: d.x, y: d.y, layer: g.floor ? 'floor' : 'obj', uid: d.id, kind: d.k, blocks: g.floor ? [] : [decoFootprint(d.k, d.x, d.y)] }
+    out.push({ s: decoSprite(d), ...at, ...(g.anim && { anim: g.anim }) })
   }
 
   // Дерева, каміння, кущі й дари моря.

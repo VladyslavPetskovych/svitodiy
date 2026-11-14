@@ -20,6 +20,7 @@ import { BUILDINGS } from "./homestead.js";
 import { craftCatalog } from "./craft.js";
 import { wearCatalog } from "./wardrobe.js";
 import { nodesCatalog } from "./nodes.js";
+import { treesCatalog } from "./trees.js";
 
 /**
  * Налаштування, яких у боті немає — лише для Mini App.
@@ -142,6 +143,7 @@ export function buildCatalog() {
     decorMax: DECOR_MAX,
     farm: farmCatalog(),
     nodes: nodesCatalog(),
+    trees: treesCatalog(),
     craft: craftCatalog(),
     wear: wearCatalog(),
     interior: INTERIOR,

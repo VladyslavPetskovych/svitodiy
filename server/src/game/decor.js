@@ -5,6 +5,7 @@ import { GameError, badRequest, conflict } from "./errors.js";
 import { homeOwner } from "./household.js";
 import { decoKey, takeCooldown } from "./keys.js";
 import { NET } from "./nodes.js";
+import { TREE, plantedTree } from "./trees.js";
 
 /**
  * Пісочниця рідного острова: гравець сам розставляє декор.
@@ -29,6 +30,26 @@ export const DECOR = [
     foot: [3, 2],
     limit: NET.max,
     hint: "Став у воду біля пляжу — на берег частіше винесе корчі, мушлі й водорості.",
+  },
+  // Вітряк дає електрику (watts, server/src/game/power.js). Дріт тягнуть на верстаті з мідного злиточка.
+  {
+    id: "windmill",
+    cat: "survival",
+    name: "Вітряк",
+    emoji: "🌬️",
+    cost: { plank: 6, log: 2, stone: 4, bare_wire: 4 },
+    watts: 40,
+    hint: "Крила крутить вітер — генератор дає 40 Вт електрики.",
+  },
+  // Посаджене дерево росте само й за TREE.growMs стає справжнім деревом (server/src/game/trees.js).
+  {
+    id: TREE.kind,
+    cat: "plants",
+    name: "Посадка",
+    emoji: "🌰",
+    cost: { tree_seed: 1 },
+    grows: true,
+    hint: `Насінина проросте й за ${TREE.growMs / 60_000} хв стане деревом, яке можна рубати.`,
   },
   { id: "wildflowers", cat: "plants", name: "Польові квіти", emoji: "🌼", cost: {} },
   { id: "flower_bed", cat: "plants", name: "Клумба", emoji: "🌷", cost: { twig: 1 } },
@@ -86,14 +107,15 @@ const MAP_W = 512;
 const MAP_H = 448;
 const ITEM_ID = /^[a-z0-9]{6,16}$/;
 
-/** @returns {Promise<{ id: string, k: string, x: number, y: number }[]>} */
+/** @returns {Promise<{ id: string, k: string, x: number, y: number, t?: number, sp?: string }[]>} */
 export async function getDecor(userId) {
   const h = await getRedis().hGetAll(await key(userId));
   const out = [];
   for (const [id, raw] of Object.entries(h)) {
     try {
       const v = JSON.parse(raw);
-      if (BY_ID.has(v.k)) out.push({ id, k: v.k, x: v.x, y: v.y });
+      // Посаджене дерево ще й пам'ятає, коли посадили (t) і що виросте (sp).
+      if (BY_ID.has(v.k)) out.push({ id, k: v.k, x: v.x, y: v.y, ...(v.t && { t: v.t, sp: v.sp }) });
     } catch {
       /* зіпсований запис — пропускаємо */
     }
@@ -143,8 +165,9 @@ export async function placeDecor(userId, kind, x, y) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
   const id = randomBytes(6).toString("hex");
-  await r.hSet(k, id, JSON.stringify({ k: def.id, ...pos }));
-  return { item: { id, k: def.id, ...pos } };
+  const item = { k: def.id, ...pos, ...(def.grows && plantedTree()) };
+  await r.hSet(k, id, JSON.stringify(item));
+  return { item: { id, ...item } };
 }
 
 export async function moveDecor(userId, id, x, y) {
@@ -155,10 +178,12 @@ export async function moveDecor(userId, id, x, y) {
   const hk = await key(userId);
   const raw = await r.hGet(hk, id);
   if (!raw) throw new GameError(404, "not_found", "Цієї прикраси вже немає.");
-  const { k } = JSON.parse(raw);
-  if (BY_ID.has(k)) checkSpot(BY_ID.get(k), pos.x, pos.y);
-  await r.hSet(hk, id, JSON.stringify({ k, ...pos }));
-  return { item: { id, k, ...pos } };
+  // Переносимо разом з усім, що прикраса пам'ятає (посаджене дерево — коли посадили й що виросте).
+  const old = JSON.parse(raw);
+  if (BY_ID.has(old.k)) checkSpot(BY_ID.get(old.k), pos.x, pos.y);
+  const item = { ...old, ...pos };
+  await r.hSet(hk, id, JSON.stringify(item));
+  return { item: { id, ...item } };
 }
 
 export async function removeDecor(userId, id) {

@@ -20,6 +20,8 @@ export const COOK_DROP_WEIGHTS = [
   { id: "glass_shard", weight: 16 },
   { id: "metal_scrap", weight: 16 },
   { id: "fish_bone", weight: 20 },
+  // Риба ковтає насіння, що пливе водою, — у череві трапляється насінина дерева.
+  { id: "tree_seed", weight: 8 },
 ];
 
 function pickWeighted(entries) {

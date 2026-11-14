@@ -33,8 +33,35 @@ export const DECO_GEOM = {
   seed_stand: { sprite: 'seed_stand', fw: 3, fh: 1, act: 'farmshop' },
   // Дощувач поливає грядки довкола (радіус — catalog.farm.sprinklerR), бризкає водою.
   sprinkler: { sprite: 'sprinkler', fw: 1, fh: 1, spray: true },
+  // Вітряк: кадри крил гортаються (anim), лампочка над дверима світить уночі. Дає електрику (catalog.decor[].watts).
+  windmill: {
+    sprite: 'windmill_0',
+    anim: { frames: ['windmill_0', 'windmill_1', 'windmill_2', 'windmill_3', 'windmill_4', 'windmill_5'], fps: 9 },
+    fw: 4,
+    fh: 3,
+    act: 'windmill',
+    light: { dy: -26, r: 12 },
+  },
+  // Посаджене дерево: спрайт за стадією росту (d.g рахує IslandWalk); останню — за породою (d.sp).
+  // Коли виросте, сервер ставить на його місце справжнє дерево (server/src/game/trees.js).
+  tree_sprout: {
+    sprite: 'tree_plant_0',
+    icon: 'tree_young_oak',
+    stages: ['tree_plant_0', 'tree_plant_1', (sp) => `tree_young_${sp ?? 'oak'}`],
+    fw: 2,
+    fh: 1,
+    act: 'tree',
+  },
   // Сітка лежить на воді (water — лише на мілині біля берега, atlas.shore) і приманює дари моря на пляж.
   fishing_net: { sprite: 'deco_net', fw: 3, fh: 2, floor: true, water: true },
+}
+
+/** Спрайт прикраси: посаджене дерево — за стадією росту (g) і породою (sp), решта — свій. */
+export function decoSprite(d) {
+  const g = DECO_GEOM[d.k]
+  if (!g?.stages) return g?.sprite
+  const s = g.stages[Math.max(0, Math.min(g.stages.length - 1, d.g ?? 0))]
+  return typeof s === 'function' ? s(d.sp) : s
 }
 
 /**

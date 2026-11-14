@@ -1224,8 +1224,12 @@ export function createWalk(canvas, assets, cb) {
         if (!old) {
           juice.set(d.id, { t0: t, power: 1, drop: DECO_GEOM[d.k]?.floor ? 0 : 10 })
           particles.dust(d.x, d.y, 10, 1)
-          if (['wildflowers', 'flower_bed', 'sunflowers', 'bush', 'sapling', 'pine', 'pumpkins', 'hay'].includes(d.k)) particles.leaves(d.x, d.y - 4)
+          if (['wildflowers', 'flower_bed', 'sunflowers', 'bush', 'sapling', 'pine', 'pumpkins', 'hay', 'tree_sprout'].includes(d.k)) particles.leaves(d.x, d.y - 4)
           kick = Math.max(kick, 0.14)
+        } else if ((old.g ?? 0) !== (d.g ?? 0)) {
+          // Посаджене дерево підросло: поп і листочки.
+          juice.set(d.id, { t0: t, power: 0.9, drop: 0 })
+          particles.leaves(d.x, d.y - 8)
         } else if (old.x !== d.x || old.y !== d.y) {
           juice.set(d.id, { t0: t, power: 0.7, drop: DECO_GEOM[d.k]?.floor ? 0 : 6 })
           particles.dust(d.x, d.y, 8, 0.8)
@@ -2122,6 +2126,15 @@ export function createWalk(canvas, assets, cb) {
       const m = it.mesh
       m.visible = it.wall ? wallShown[it.p.wall] : !(ghost?.uid && it.p.uid === ghost.uid)
       if (!it.flat && !it.wall) m.quaternion.copy(camera.quaternion)
+      // Анімований спрайт (крила вітряка): гортаємо кадри — усі одного розміру, якір той самий.
+      if (it.p.anim) {
+        const a = it.p.anim
+        const fr = a.frames[Math.floor(t * a.fps) % a.frames.length]
+        if (fr !== it.frame) {
+          it.frame = fr
+          m.geometry = spriteGeo(fr, it.flat) ?? m.geometry
+        }
+      }
       const j = it.key && juice.get(it.key)
       if (j) {
         const age = t - j.t0

@@ -21,6 +21,8 @@ import { getTools } from "./craft.js";
 import { getWear } from "./wardrobe.js";
 import { ensureIsland, takenBoxes } from "./island.js";
 import { getNodes } from "./nodes.js";
+import { powerOf } from "./power.js";
+import { ripenTrees } from "./trees.js";
 import { islandSnapshot } from "./presence.js";
 import { dailyClaimKey, jobKey, kyivDay, previousDay, quizRewardKey, userKey } from "./keys.js";
 
@@ -85,7 +87,7 @@ export async function getState(userId) {
   await grantAdminResources(userId);
   await ensureIsland(userId);
   const r = getRedis();
-  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, deco, goal, farm, dogs, interior, floor] = await Promise.all([
+  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, allDeco, goal, farm, dogs, interior, floor] = await Promise.all([
     r.hGetAll(userKey(userId)),
     getInventory(userId),
     getJob(userId),
@@ -102,6 +104,8 @@ export async function getState(userId) {
     getInterior(userId),
     getFloor(userId),
   ]);
+  // Дорослі посаджені дерева стають ресурсами — до читання ресурсів, щоб уже були в стані.
+  const deco = await ripenTrees(userId, allDeco);
   // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
   const [nodes, winterNodes, tools, wear] = await Promise.all([
     getNodes(userId, takenBoxes(home, deco, farm), "home", deco),
@@ -137,6 +141,8 @@ export async function getState(userId) {
     job,
     home,
     deco,
+    // Електрика острова: скільки Вт дають вітряки (power.js).
+    power: powerOf(deco),
     farm,
     dogs,
     interior,

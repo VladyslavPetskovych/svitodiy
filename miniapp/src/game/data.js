@@ -47,6 +47,10 @@ const ITEM_ART = new Set([
   'glass_shard',
   'metal_scrap',
   'silver_piece',
+  // Намальовані кодом (scripts/power-art.mjs).
+  'copper_ingot',
+  'bare_wire',
+  'tree_seed',
   'relic_ring_wanderer',
   'relic_hook_silver',
   'relic_hook_gold',
@@ -137,6 +141,9 @@ export function sourceOf(catalog, id) {
   const node = catalog.nodes?.find((n) => n.loot[0] === id)
   if (node) return `Добувай на своєму острові: ${node.name.toLowerCase()}${node.tool ? (node.tool === 'axe' ? ' (сокирою)' : ' (кайлом)') : ''}`
   if (id === 'plank') return 'Зроби на верстаті з колод'
+  if (id === 'bare_wire') return 'Витягни на верстаті з мідного злиточка'
+  if (id === 'copper_ingot') return 'Інколи чіпляється на вудку'
+  if (id === 'tree_seed') return 'Трапляється в рибі, на вудці й у корчах на пляжі. Посади в будівництві 🔨'
   if (catalog.cookDrops.includes(id)) return 'Готуй рибу в рюкзаку'
   const island = catalog.islands.find((i) => i.gather?.resourceId === id)
   if (island) return `Добувай на острові: ${island.name}`

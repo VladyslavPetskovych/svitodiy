@@ -26,9 +26,9 @@ const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', tree: '🌱' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', tree: 'Глянути' }
 /** Ресурси на острові — «node:<id>». */
 const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
 /** Чим добувати: кнопка дії. */
@@ -41,6 +41,18 @@ const WARM = ['🔥 Руки відігріті', '🔥 Тепло…', '🔥 Щ
 const dogOf = (id) => (id?.startsWith('dog:') ? dogById(id.slice(4)) : null)
 /** Грядки на полі — «plot:<№>». */
 const plotOf = (id) => (id?.startsWith('plot:') ? Number(id.slice(5)) : null)
+/** Посаджене дерево (декор, server/src/game/trees.js). */
+const TREE_KIND = 'tree_sprout'
+const TREE_NAMES = { oak: 'дуб', birch: 'береза', pine: 'ялинка' }
+/**
+ * Скільки стадій пройшло посаджене дерево на мить now: 0…stages-1 — росте,
+ * stages — уже доросло (сервер при наступному читанні стану поставить на його місце справжнє дерево).
+ */
+function treeStage(trees, d, now) {
+  const ms = (trees?.growMin ?? 40) * 60_000
+  const stages = trees?.stages ?? 3
+  return Math.max(0, Math.min(stages, Math.floor(((now - (d.t ?? 0)) / ms) * stages)))
+}
 
 /** Підказка по тапу на небо: що зараз і чим це корисно. */
 function skyHint(sky, wild) {
@@ -136,7 +148,7 @@ export default function IslandWalk({ start = 'island' }) {
   const [resetSeen, setResetSeen] = useState(false)
   const now = useNow()
   const { home } = state
-  const deco = state.deco ?? NO_DECO
+  const rawDeco = state.deco ?? NO_DECO
   const interior = state.interior ?? NO_DECO
   const floor = state.floor ?? DEFAULT_FLOOR_STATE
   const houseLevel = Math.max(1, home.levels.house ?? 1)
@@ -145,6 +157,21 @@ export default function IslandWalk({ start = 'island' }) {
   /** Ресурси острова, на якому ти зараз. */
   const sceneNodes = wild ? winterNodes : nodes
   const tools = state.tools ?? {}
+  // Посаджені дерева ростуть самі: стадія — з часу посадки; рядок змінюється лише разом зі стадією,
+  // тож острів перебудовується раз на стадію, а не щокілька секунд.
+  const treeStages = rawDeco
+    .filter((d) => d.k === TREE_KIND)
+    .map((d) => treeStage(catalog.trees, d, now))
+    .join(',')
+  const deco = useMemo(() => {
+    if (!treeStages) return rawDeco
+    const g = treeStages.split(',').map(Number)
+    const last = (catalog.trees?.stages ?? 3) - 1
+    let i = 0
+    return rawDeco.map((d) => (d.k === TREE_KIND ? { ...d, g: Math.min(last, g[i++]) } : d))
+  }, [rawDeco, treeStages, catalog.trees])
+  /** Електрика острова: скільки Вт дають вітряки (server/src/game/power.js). */
+  const power = state.power ?? { gen: 0, use: 0, sources: 0 }
   /**
    * Що можна поставити на острові: будівлі (будуються одразу на місці), грядки, верстат і комора,
    * декор. Будівля — «b:<id>», грядка — «bed»; усе інше — декор за id.
@@ -395,6 +422,20 @@ export default function IslandWalk({ start = 'island' }) {
     }
   }
 
+  /** Вітряк: скільки дає він і весь острів — напис над ним. */
+  const windmillInfo = (id) => {
+    const watts = catalog.decor?.find((d) => d.id === 'windmill')?.watts ?? 40
+    say(power.sources > 1 ? `⚡ ${watts} Вт · острів: ${power.gen} Вт` : `⚡ ${watts} Вт електрики`, id, 'good')
+  }
+  /** Посаджене дерево: скільки ще рости й що з нього буде. */
+  const treeInfo = (id) => {
+    const d = deco.find((x) => x.id === id.slice(5))
+    if (!d) return
+    const left = (d.t ?? 0) + (catalog.trees?.growMin ?? 40) * 60_000 - now
+    const name = TREE_NAMES[d.sp] ?? 'дерево'
+    say(left > 0 ? `🌱 ${d.g >= 2 ? name[0].toUpperCase() + name.slice(1) : 'Паросток'} · ще ${shortDuration(left)}` : `🌳 Ось-ось виросте ${name}!`, id, 'calm', 'leaves')
+  }
+
   const interact = (id) => {
     haptic('light')
     const dog = dogOf(id)
@@ -404,6 +445,8 @@ export default function IslandWalk({ start = 'island' }) {
     else if (nodeOf(id)) gather(nodeOf(id))
     else if (actOf(id) === 'workbench') setCraft(true)
     else if (actOf(id) === 'farmshop') setFarmTab('seeds')
+    else if (actOf(id) === 'windmill') windmillInfo(id)
+    else if (actOf(id) === 'tree') treeInfo(id)
     else if (id === 'house') goScene('home')
     else if (id === 'exit') goScene('island')
     else if (BUILDINGS.has(id)) setSheet(id)
@@ -675,6 +718,16 @@ export default function IslandWalk({ start = 'island' }) {
     if (ready) engine.current?.setWinter({ nodes: winterNodes })
   }, [ready, winterNodes])
 
+  // Посаджене дерево доросло — просимо свіжий стан: сервер уже поставить на його місці справжнє дерево.
+  // Не частіше, ніж раз на 10 с (годинник телефона може трохи випереджати серверний).
+  const ripeAsked = useRef(0)
+  const ripe = (catalog.trees?.stages ?? 3) > 0 && treeStages.split(',').some((g) => Number(g) >= (catalog.trees?.stages ?? 3))
+  useEffect(() => {
+    if (!ready || !ripe || Date.now() - ripeAsked.current < 10_000) return
+    ripeAsked.current = Date.now()
+    act('GET', '/state', undefined, { silent: true })
+  }, [ready, ripe, now, act])
+
   // Рівні будівель, скриня й декор → що стоїть на острові.
   const chestOpen = state.daily.claimedToday
   useEffect(() => {
@@ -830,6 +883,7 @@ export default function IslandWalk({ start = 'island' }) {
           {build ? (
             <span className="rounded-sm bg-black/45 px-2 py-1 font-pixel text-[9px] text-cream">
               {indoors ? `РЕЧІ ${interior.length}/${catalog.interiorMax ?? 100}` : `ДЕКОР ${deco.length}/${catalog.decorMax ?? 150}`}
+              {!indoors && power.gen > 0 && <span className="ml-2 text-[#ffe066]">⚡{power.gen} Вт</span>}
             </span>
           ) : (
             !indoors && (
@@ -840,6 +894,7 @@ export default function IslandWalk({ start = 'island' }) {
                     {tools[t.id] || '–'}
                   </span>
                 ))}
+                {!wild && power.gen > 0 && <span className="text-[#ffe066]">⚡{power.gen}Вт</span>}
               </span>
             )
           )}
@@ -1235,6 +1290,7 @@ function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost
                     {count}/{d.limit}
                   </span>
                 )}
+                {d.watts > 0 && <span className="absolute top-0.5 left-1 font-pixel text-[8px] text-[#9a6a00]">⚡{d.watts}Вт</span>}
                 <span className="w-full truncate px-1 text-center text-[10px] leading-tight font-extrabold text-ink">{d.name}</span>
                 <span className="flex min-h-[14px] flex-wrap justify-center gap-x-1 px-0.5 text-[9px] leading-tight text-ink-soft">
                   {built ? (
@@ -1366,7 +1422,7 @@ const ICON_SHEETS = [
 
 /** Спрайт декору чи речі для хати, вписаний у квадрат box×box (пікселі лишаються чіткими). */
 function DecoIcon({ kind, box, indoor = false }) {
-  const sprite = indoor ? INTERIOR_GEOM[kind]?.sprite : geomOf(kind)?.sprite
+  const sprite = indoor ? INTERIOR_GEOM[kind]?.sprite : (geomOf(kind)?.icon ?? geomOf(kind)?.sprite)
   const sheet = ICON_SHEETS.find((sh) => sh.atlas.frames[sprite])
   if (!sheet) return null
   const f = sheet.atlas.frames[sprite]
@@ -1428,6 +1484,8 @@ function islandSpot(catalog, id) {
   if (b) return { id, label: b.name }
   if (actOf(id) === 'workbench') return { id, label: 'Верстат' }
   if (actOf(id) === 'farmshop') return { id, label: 'Комора городника' }
+  if (actOf(id) === 'windmill') return { id, label: 'Вітряк' }
+  if (actOf(id) === 'tree') return { id, label: 'Посаджене дерево' }
   return INTERACT.find((i) => i.id === id) ?? null
 }
 
@@ -1466,7 +1524,9 @@ function spotHint(catalog, levels, chestOpen, id) {
   if (id === 'winter_sign') return 'Що тут і як'
   if (id === 'winter_fire') return 'Тут тепло — можна відігріти руки'
   if (actOf(id) === 'farmshop') return 'Насіння, продаж урожаю й поради'
-  if (actOf(id) === 'workbench') return 'Інструменти й дошки з колод'
+  if (actOf(id) === 'workbench') return 'Інструменти, дошки й дріт'
+  if (actOf(id) === 'windmill') return 'Крутиться на вітрі — дає 40 Вт електрики'
+  if (actOf(id) === 'tree') return 'Росте саме — згодом стане деревом'
   if (actOf(id) === 'bed') return 'Перина й вишита ковдра'
   if (actOf(id) === 'stove') return 'Готують рибу — у рюкзаку'
   if (actOf(id) === 'shelf') return 'Щоденник: Думосвіт, Літописець, Арки'

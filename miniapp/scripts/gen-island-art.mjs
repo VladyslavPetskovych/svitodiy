@@ -18,6 +18,7 @@ import { modernArt } from './modern-art.mjs'
 import { floorSheet } from './floor-art.mjs'
 import { heroFrames, wearSheet } from './hero-wear.mjs'
 import { winterArt } from './winter-art.mjs'
+import { powerArt } from './power-art.mjs'
 import { WINTER_INTERACT, WINTER_MAP, WINTER_SPAWN, winterPlacements } from '../src/game/walk/winter.js'
 import { BEDS, BOARDWALK, CELL, INTERACT, LAND, MAP, PATH, PIER, PLAZA, RESERVED, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
@@ -2940,7 +2941,7 @@ function dogSheet(anims, cell, image, scale = 1) {
 
 /* ───────── Атлас ───────── */
 
-function buildSprites(farm, room, winter) {
+function buildSprites(farm, room, winter, power) {
   const s = {
     // Мандрівник у стартовому вбранні — для прев'ю; у грі рушій збирає його з шарів hero-wear.png.
     ...heroFrames({ Img }),
@@ -2980,6 +2981,8 @@ function buildSprites(farm, room, winter) {
     ...modernArt({ Img }),
     // Острів Хуртовини: замети, лід, засніжені ялини (scripts/winter-art.mjs).
     ...winter.sprites,
+    // Вітряк (кадри крил) і посаджені дерева за стадіями (scripts/power-art.mjs).
+    ...power.sprites,
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)
@@ -3100,7 +3103,8 @@ const water = waterImage()
 const farm = farmArt({ Img })
 const room = homeArt({ Img, hash })
 const winter = winterArt({ Img, hash, fbm, worley, distanceTo })
-const sprites = buildSprites(farm, room, winter)
+const power = powerArt({ Img, hash, canopy, shadow, LEAF })
+const sprites = buildSprites(farm, room, winter, power)
 const split = (keep) => Object.fromEntries(Object.entries(sprites).filter(([name]) => keep(name)))
 const { atlas, frames } = pack(split((n) => !isInterior(n) && !isDecor(n)))
 const interior = pack(split(isInterior), 256)
@@ -3150,6 +3154,8 @@ console.log(`одяг мандрівника: ${wear.image.w}×${wear.image.h} (
 const OUT_ITEMS = join(ROOT, 'public/game/items')
 for (const [id, img] of Object.entries(farm.items)) writeFileSync(join(OUT_ITEMS, `${id}.png`), encodePng(img))
 console.log(`город: ${Object.keys(farm.items).length} іконок, культури ${JSON.stringify(farm.meta)}`)
+// Мідний злиточок, голий дріт і насінина дерева.
+for (const [id, img] of Object.entries(power.items)) writeFileSync(join(OUT_ITEMS, `${id}.png`), encodePng(img))
 for (const [name, anims, cell, scale] of [
   ['dog', dogAnims(), DOG_CELL, 1],
   ['sirko', sirkoAnims(), SIRKO_CELL, SIRKO_SCALE],
@@ -3166,7 +3172,7 @@ for (const [name, anims, cell, scale] of [
 {
   const h = createHash('sha1')
   const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'dog', 'sirko', 'hero-wear', 'winter-ground', 'winter-foam'].map((n) => join(OUT_PUBLIC, `${n}.png`))
-  for (const id of Object.keys(farm.items).sort()) pngs.push(join(OUT_ITEMS, `${id}.png`))
+  for (const id of [...Object.keys(farm.items), ...Object.keys(power.items)].sort()) pngs.push(join(OUT_ITEMS, `${id}.png`))
   // Іконки одягу (scripts/sd-wardrobe.mjs).
   const OUT_WEAR = join(ROOT, 'public/game/wear')
   if (existsSync(OUT_WEAR)) for (const f of readdirSync(OUT_WEAR).filter((f) => f.endsWith('.png')).sort()) pngs.push(join(OUT_WEAR, f))

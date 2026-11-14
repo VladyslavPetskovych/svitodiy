@@ -1886,8 +1886,11 @@ export function createWalk(canvas, assets, cb) {
       const test = walkGrid(atlas.walk, [...others, { blocks: [fp] }])
       const me = geo.cellOf(body.x, body.y)
       if (!test[me]) return { ok: false, reason: 'Тут стоїть мандрівник' }
-      // Ресурси не рахуємо: заросле дерево можна й зрубати.
-      const must = interact.filter((it) => !it.node && it.id !== ignoreUid?.slice(2) && !it.id.endsWith(`:${ignoreUid}`))
+      // Ресурси не рахуємо: заросле дерево можна й зрубати. Те, до чого вже не дійти, не блокує —
+      // інакше одна відрізана точка (напр. біля вітряка) не дає ставити ніщо інше на острові.
+      const must = interact.filter(
+        (it) => !it.node && it.id !== ignoreUid?.slice(2) && !it.id.endsWith(`:${ignoreUid}`) && geo.allReachable(grid, me, [it])
+      )
       if (!geo.allReachable(test, me, must)) return { ok: false, reason: 'Це перекриє прохід' }
     }
     return { ok: true }

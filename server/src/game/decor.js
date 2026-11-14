@@ -9,6 +9,7 @@ import { PLATFORM_REACH, onIsland } from "./island-bounds.js";
 import { decoKey, takeCooldown } from "./keys.js";
 import { NET } from "./nodes.js";
 import { RUBBER, rubberReady } from "./rubber.js";
+import { MINE, mineReady } from "./mine.js";
 import { TREE, plantedTree } from "./trees.js";
 
 /**
@@ -27,6 +28,15 @@ export const DECOR = [
   { id: "workbench", cat: "survival", name: "Верстат", emoji: "🪚", cost: { twig: 4, stone: 2 } },
   { id: "seed_stand", cat: "survival", name: "Комора городника", emoji: "🌱", cost: { twig: 3 } },
   { id: "sprinkler", cat: "survival", name: "Дощувач", emoji: "💦", cost: { plank: 2, metal_scrap: 2 } },
+  // Шахта сама добуває камінь (server/src/game/mine.js): тапнув — забрав, що набралося.
+  {
+    id: MINE.kind,
+    cat: "survival",
+    name: "Шахта",
+    emoji: "⛏️",
+    cost: { plank: 6, log: 4, stone: 10 },
+    hint: `Сама добуває камінь — по одному що ${MINE.everyMs / 1000} с, вміщає ${MINE.cap}. Тапни, щоб забрати.`,
+  },
   // Поміст: дощатий майданчик на воді. Ступається й на ньому ставлять усе, як на березі.
   // Кладеться у воду чи на пляж біля води, поруч із сушею або іншим помостом (checkPlatform).
   {
@@ -344,7 +354,7 @@ export async function placeDecor(userId, kind, x, y) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
   const id = randomBytes(6).toString("hex");
-  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }), ...(def.hut && { lv: 1, f: {}, fc: Date.now() }) };
+  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }), ...(def.id === MINE.kind && { c: Date.now() }), ...(def.hut && { lv: 1, f: {}, fc: Date.now() }) };
   await r.hSet(k, id, JSON.stringify(item));
   return { item: { id, ...item } };
 }
@@ -385,6 +395,11 @@ export async function removeDecor(userId, id) {
   if (old.k === RUBBER.kind) {
     const n = rubberReady(old);
     if (n > 0) refund.rubber = n;
+  }
+  // Розібрав шахту — накопаний камінь теж твій.
+  if (old.k === MINE.kind) {
+    const n = mineReady(old);
+    if (n > 0) refund[MINE.res] = (refund[MINE.res] ?? 0) + n;
   }
   // Розібрав рибальську хату — вкладене в покращення й риба, що лежала в ній, теж твої.
   if (old.k === FISH_HUT.kind) for (const [res, n] of Object.entries(hutRefund(old))) refund[res] = (refund[res] ?? 0) + n;

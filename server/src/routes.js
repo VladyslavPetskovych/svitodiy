@@ -17,6 +17,7 @@ import { buySeeds, clearPlot, harvestPlot, moveBed, placeBed, plantPlot, removeB
 import { ackReset, collectHome, demolishBuilding, moveBuilding, placeBuilding, upgradeBuilding } from "./game/homestead.js";
 import { gatherNode, stealNode } from "./game/nodes.js";
 import { collectRubber } from "./game/rubber.js";
+import { collectMine } from "./game/mine.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
 import {
   answerQuiz,
@@ -176,6 +177,8 @@ export function buildApiRouter(botToken) {
   api.post("/winter/nodes/:id/gather", handler(island((req) => gatherNode(uid(req), req.params.id, "winter"))));
   // Гевея: зібрати каучук із чашки.
   api.post("/home/rubber/:id/collect", handler(island((req) => collectRubber(uid(req), req.params.id))));
+  // Шахта: забрати камінь, що набрався.
+  api.post("/home/mine/:id/collect", handler(island((req) => collectMine(uid(req), req.params.id))));
   api.post("/craft/tool", handler((req) => craftTool(uid(req), body(req).tool)));
   api.post("/craft/recipe", handler((req) => craftRecipe(uid(req), body(req).recipe, body(req).count)));
 

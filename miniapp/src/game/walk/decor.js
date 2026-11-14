@@ -31,6 +31,8 @@ export const DECO_GEOM = {
   // Споруди для виживання: з ними можна взаємодіяти (act — що відкриває тап).
   workbench: { sprite: 'workbench', fw: 3, fh: 1, act: 'workbench' },
   seed_stand: { sprite: 'seed_stand', fw: 3, fh: 1, act: 'farmshop' },
+  // Шахта (server/src/game/mine.js): сама добуває камінь, тап — забрати. Спрайт — scripts/mine-art.py (з еталонного аркуша).
+  mine: { sprite: 'mine', fw: 8, fh: 3, act: 'mine', light: { dy: -38, r: 12 } },
   // Дощувач поливає грядки довкола (радіус — catalog.farm.sprinklerR), бризкає водою.
   sprinkler: { sprite: 'sprinkler', fw: 1, fh: 1, spray: true },
   // Вітряк: кадри крил гортаються (anim) — тим швидше, чим сильніший вітер (wind: true, game/wind.js),

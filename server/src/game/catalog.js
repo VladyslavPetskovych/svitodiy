@@ -24,6 +24,7 @@ import { wearCatalog } from "./wardrobe.js";
 import { nodesCatalog } from "./nodes.js";
 import { treesCatalog } from "./trees.js";
 import { rubberCatalog } from "./rubber.js";
+import { mineCatalog } from "./mine.js";
 import { netsCatalog } from "./nets.js";
 import { fishHutCatalog } from "./fishhut.js";
 
@@ -150,6 +151,8 @@ export function buildCatalog() {
     nodes: nodesCatalog(),
     trees: treesCatalog(),
     rubber: rubberCatalog(),
+    // Шахта: камінь раз на everySec секунд, вміщає cap.
+    mine: mineCatalog(),
     nets: netsCatalog(),
     // Рибальська хата: рівні (комора, як часто ловить, ціна покращення), Вт·год за рибу, місце для конвеєра.
     fishHut: fishHutCatalog(),

@@ -3012,6 +3012,8 @@ function buildSprites(farm, room, winter, power) {
     ...power.sprites,
     // Рибальська хата за рівнями, з мотором і ліхтарем (scripts/fishhut-art.mjs, основа — з еталонного аркуша).
     ...fishHutArt({ Img, base: readPng(join(ROOT, 'art/fish-hut/base.png')) }),
+    // Шахта 96×96 (scripts/mine-art.py: кузня, руда й вагонетка з еталонного аркуша + штрек і рейки).
+    mine: readPng(join(ROOT, 'art/mine/mine.png')),
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)

@@ -29,9 +29,9 @@ const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', solar: '☀️', battery: '🔋', furnace: '🔥', e_bench: '⚙️', tree: '🌱', rubber: '🟤', net: '🥅', fishhut: '🛖' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', solar: '☀️', battery: '🔋', furnace: '🔥', e_bench: '⚙️', tree: '🌱', rubber: '🟤', mine: '⛏️', net: '🥅', fishhut: '🛖' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', solar: 'Глянути', battery: 'Глянути', furnace: 'Плавити', e_bench: 'Майструвати', tree: 'Глянути', rubber: 'Зібрати', net: 'Глянути', fishhut: 'Забрати' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', solar: 'Глянути', battery: 'Глянути', furnace: 'Плавити', e_bench: 'Майструвати', tree: 'Глянути', rubber: 'Зібрати', mine: 'Забрати', net: 'Глянути', fishhut: 'Забрати' }
 /** Ресурси на острові — «node:<id>». */
 const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
 /** Чим добувати: кнопка дії. */
@@ -70,6 +70,15 @@ function rubberNow(cfg, d, now) {
   const from = Math.max(ripe, d.c ?? 0)
   const ready = Math.min(cap, Math.floor((now - from) / unit))
   return { grown: true, ready, cap, nextIn: ready >= cap ? 0 : unit - ((now - from) % unit) }
+}
+
+/** Шахта (server/src/game/mine.js): скільки каменю набралося на мить now і коли буде наступний. */
+function mineNow(cfg, d, now) {
+  const unit = (cfg?.everySec ?? 30) * 1000
+  const cap = cfg?.cap ?? 20
+  const from = d.c ?? d.t ?? now
+  const ready = Math.max(0, Math.min(cap, Math.floor((now - from) / unit)))
+  return { ready, cap, nextIn: ready >= cap ? 0 : unit - ((now - from) % unit) }
 }
 
 /** Підказка по тапу на небо: що зараз і чим це корисно. */
@@ -562,6 +571,21 @@ export default function IslandWalk({ start = 'island' }) {
     say(`${shortGot(items, res.got)}${v.ready >= v.cap ? ' · чашка була повна!' : ''}`, id, 'good', 'coins')
   }
 
+  /** Шахта: забрати накопаний камінь; порожня — скільки ще чекати. */
+  const collectingMine = useRef(false)
+  const mineAction = async (id) => {
+    const d = deco.find((x) => x.id === id.slice('mine:'.length))
+    if (!d || collectingMine.current) return
+    const v = mineNow(catalog.mine, d, now)
+    if (v.ready < 1) return say(`⛏️ Копають · камінь за ${shortDuration(v.nextIn)}`, id, 'calm')
+    collectingMine.current = true
+    const res = await act('POST', `/home/mine/${d.id}/collect`)
+    collectingMine.current = false
+    if (!res) return
+    haptic('success')
+    say(`${shortGot(items, res.got)}${v.ready >= v.cap ? ' · шахта була повна!' : ''}`, id, 'good', 'coins')
+  }
+
   /** Рибальська хата: стан для панелі — рівень, скільки риби, чи ловить, що коштує покращення. */
   const hutView = (id) => {
     const d = actOf(id) === 'fishhut' ? deco.find((x) => x.id === id.slice('fishhut:'.length)) : null
@@ -628,6 +652,7 @@ export default function IslandWalk({ start = 'island' }) {
     else if (id === 'workshop' && home.levels.workshop > 0) setWorkshop({ station: 'workbench' })
     else if (actOf(id) === 'tree') treeInfo(id)
     else if (actOf(id) === 'rubber') rubberAction(id)
+    else if (actOf(id) === 'mine') mineAction(id)
     else if (actOf(id) === 'net') netInfo(id)
     else if (actOf(id) === 'fishhut') hutCollect(id)
     else if (id === 'house') goScene('home')
@@ -2063,6 +2088,7 @@ function islandSpot(catalog, id) {
   if (actOf(id) === 'e_bench') return { id, label: 'Електроверстат' }
   if (actOf(id) === 'tree') return { id, label: 'Посаджене дерево' }
   if (actOf(id) === 'rubber') return { id, label: 'Гевея' }
+  if (actOf(id) === 'mine') return { id, label: 'Шахта' }
   if (actOf(id) === 'net') return { id, label: 'Сітка' }
   if (actOf(id) === 'fishhut') return { id, label: 'Рибальська хата' }
   return INTERACT.find((i) => i.id === id) ?? null
@@ -2111,6 +2137,7 @@ function spotHint(catalog, levels, chestOpen, id) {
   if (actOf(id) === 'e_bench') return 'Пластини, ізольований дріт і сонячні панелі'
   if (actOf(id) === 'tree') return 'Росте саме — згодом стане деревом'
   if (actOf(id) === 'rubber') return 'Каучукове дерево — 3 каучуку щогодини'
+  if (actOf(id) === 'mine') return 'Сама добуває камінь — тапни, щоб забрати'
   if (actOf(id) === 'net') return 'Сама ловить дари моря; дрібниці на березі поруч — тапай і збирай'
   if (actOf(id) === 'fishhut') return 'Сама ловить рибу, поки є струм'
   if (actOf(id) === 'bed') return 'Перина й вишита ковдра'

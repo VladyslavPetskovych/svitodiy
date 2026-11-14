@@ -34,6 +34,8 @@ export const E_BENCH_RECIPES = [
     out: { solar_panel: 1 },
     energy: 6,
   },
+  // Електромотор: мідна обмотка на залізному осерді, виводи в ізоляції. Крутить невід рибальської хати.
+  { id: "motor", name: "Електромотор", emoji: "🧲", in: { copper_ingot: 2, iron_ingot: 2, insulated_wire: 2 }, out: { motor: 1 }, energy: 10 },
 ];
 
 /** Машина за видом декору: рецепти й написи. */

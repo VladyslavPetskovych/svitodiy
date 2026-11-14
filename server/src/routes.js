@@ -6,6 +6,7 @@ import { cast, cookFish, craft, equip, sellAllFish, sellFish } from "./game/chas
 import { claimDaily } from "./game/daily.js";
 import { layCables, removeCables } from "./game/cables.js";
 import { runMachine, smelt } from "./game/furnace.js";
+import { collectFishHut, upgradeFishHut } from "./game/fishhut.js";
 import { moveDecor, placeDecor, removeDecor } from "./game/decor.js";
 import { commandDog, feedDog, petDog } from "./game/dogs.js";
 import { GameError } from "./game/errors.js";
@@ -136,6 +137,9 @@ export function buildApiRouter(botToken) {
   // Електропіч: переплавити (скло, мідь, залізо) за енергію з акумуляторів своєї мережі
   api.post("/home/furnace/:id/smelt", handler(island((req) => smelt(uid(req), req.params.id, body(req).recipe, body(req).count))));
   api.post("/home/e-bench/:id/craft", handler(island((req) => runMachine(uid(req), "e_bench", req.params.id, body(req).recipe, body(req).count))));
+  // Рибальська хата: забрати улов і покращити (більша комора, швидший мотор).
+  api.post("/home/fish-hut/:id/collect", handler(island((req) => collectFishHut(uid(req), req.params.id))));
+  api.post("/home/fish-hut/:id/upgrade", handler(island((req) => upgradeFishHut(uid(req), req.params.id))));
 
   // Пісочниця в хатинці: меблі й речі на стінах
   api.post("/home/interior", handler(island((req) => placeInterior(uid(req), body(req)))));

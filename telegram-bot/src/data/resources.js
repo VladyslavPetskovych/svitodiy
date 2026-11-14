@@ -32,6 +32,8 @@ export const RESOURCE_TYPES = [
   { id: "silicon_wafer", emoji: "🔲", name: "Кремнієва пластина" },
   { id: "insulated_wire", emoji: "➿", name: "Ізольований дріт" },
   { id: "solar_panel", emoji: "☀️", name: "Сонячна панель" },
+  // Електромотор — з електроверстата; на ньому працює рибальська хата.
+  { id: "motor", emoji: "🧲", name: "Електромотор" },
 ];
 
 /**

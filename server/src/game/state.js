@@ -23,6 +23,7 @@ import { ensureIsland, takenBoxes } from "./island.js";
 import { getNodes } from "./nodes.js";
 import { getCables } from "./cables.js";
 import { settleEnergy } from "./energy.js";
+import { settleFishHuts } from "./fishhut.js";
 import { networksOf, powerOf } from "./power.js";
 import { ripenTrees } from "./trees.js";
 import { creditNets } from "./nets.js";
@@ -135,7 +136,8 @@ export async function getState(userId) {
   await creditNets(userId, deco);
   // Вітряки заряджають акумулятори своїх мереж за час, що минув (energy.js).
   const now = Date.now();
-  const charged = await settleEnergy(userId, deco, cells, now);
+  // Рибальські хати ловлять рибу за енергію своїх мереж (fishhut.js) — після зарядки, з уже свіжим зарядом.
+  const charged = await settleFishHuts(userId, await settleEnergy(userId, deco, cells, now), cells, now);
   // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
   const [nodes, winterNodes, tools, wear] = await Promise.all([
     getNodes(userId, takenBoxes(home, deco, farm), "home", deco),

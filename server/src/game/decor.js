@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
+import { FISH_HUT, hutRefund } from "./fishhut-def.js";
 import { homeOwner } from "./household.js";
 import { PLATFORM_REACH, onIsland } from "./island-bounds.js";
 import { decoKey, takeCooldown } from "./keys.js";
@@ -100,6 +101,22 @@ export const DECOR = [
     cost: { plank: 4, iron_ingot: 4, obsidian: 2, bare_wire: 4, glass: 1 },
     machine: true,
     hint: "Пластини, ізольований дріт і сонячні панелі. Бере енергію з акумулятора в тій самій мережі.",
+  },
+  // Рибальська хата: на березі чи помості біля води сама ловить рибу за енергію своєї мережі (fishhut.js).
+  // Мотор для неї — з електроверстата. shoreline — хоч одна клітинка довкола «ніжок» має бути відкритою водою.
+  {
+    id: FISH_HUT.kind,
+    cat: "power",
+    name: "Рибальська хата",
+    emoji: "🛖",
+    cost: { plank: 8, log: 2, iron_ingot: 2, insulated_wire: 2, motor: 1 },
+    foot: [6, 3],
+    shoreline: true,
+    hut: true,
+    levels: FISH_HUT.levels.map((l) => ({ cap: l.cap, everyMin: l.everyMs / 60_000, cost: l.cost ?? null })),
+    energy: FISH_HUT.energy,
+    port: FISH_HUT.port,
+    hint: `Став на березі чи помості біля води й протягни кабель від акумулятора. Ловить рибу сама — ${FISH_HUT.energy} Вт·год за рибу; вміщає ${FISH_HUT.levels[0].cap}, покращення — більше.`,
   },
   // Посаджене дерево росте само й за TREE.growMs стає справжнім деревом (server/src/game/trees.js).
   {
@@ -215,6 +232,28 @@ function checkPlatform(def, x, y, decor, selfId = null) {
 function checkSpot(def, x, y) {
   if (def.water && !onShore(def, x, y)) throw conflict("not_water", `${def.emoji} ${def.name}: став у воду біля берега.`);
 }
+
+/**
+ * Біля води (рибальська хата): «ніжки» на суші чи помості, а хоч одна клітинка поруч із ними
+ * (по стороні) — відкрита вода: не суша й не поміст. decor — поточний декор (для помостів).
+ */
+function checkShoreline(def, x, y, decor, selfId = null) {
+  const { rows } = LAND;
+  const isLand = (cx, cy) => rows[cy]?.[cx] === "1";
+  const deck = new Set();
+  for (const d of decor) {
+    if (d.id === selfId || !BY_ID.get(d.k)?.platform) continue;
+    for (const [cx, cy] of footCells(BY_ID.get(d.k), d.x, d.y)) deck.add(`${cx},${cy}`);
+  }
+  const cells = footCells(def, x, y);
+  const ground = (cx, cy) => isLand(cx, cy) || deck.has(`${cx},${cy}`);
+  if (cells.some(([cx, cy]) => !ground(cx, cy))) throw conflict("not_ground", `${def.emoji} ${def.name}: став на березі чи на помості.`);
+  const mine = new Set(cells.map(([cx, cy]) => `${cx},${cy}`));
+  const wet = cells.some(([cx, cy]) =>
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => !mine.has(`${cx + dx},${cy + dy}`) && !ground(cx + dx, cy + dy))
+  );
+  if (!wet) throw conflict("not_shore", `${def.emoji} ${def.name}: став біля самої води — на краю берега чи помосту.`);
+}
 const ITEM_ID = /^[a-z0-9]{6,16}$/;
 
 /** @returns {Promise<{ id: string, k: string, x: number, y: number, t?: number, sp?: string, c?: number, nc?: number }[]>} */
@@ -227,8 +266,20 @@ export async function getDecor(userId) {
       // Посаджене дерево ще й пам'ятає, коли посадили (t) і що виросте (sp).
       // Гевея — ще й коли востаннє збирали каучук (c).
       // Сітка — ще nc: коли востаннє зарахували улов (nets.js). Акумулятор — e: скільки Вт·год у ньому (energy.js).
+      // Рибальська хата — lv (рівень), f (риба всередині) і fc (коли востаннє ловила, fishhut.js).
       if (BY_ID.has(v.k))
-        out.push({ id, k: v.k, x: v.x, y: v.y, ...(v.t && { t: v.t }), ...(v.sp && { sp: v.sp }), ...(v.c && { c: v.c }), ...(v.nc && { nc: v.nc }), ...(v.e != null && { e: v.e }) });
+        out.push({
+          id,
+          k: v.k,
+          x: v.x,
+          y: v.y,
+          ...(v.t && { t: v.t }),
+          ...(v.sp && { sp: v.sp }),
+          ...(v.c && { c: v.c }),
+          ...(v.nc && { nc: v.nc }),
+          ...(v.e != null && { e: v.e }),
+          ...(v.k === FISH_HUT.kind && { lv: v.lv ?? 1, f: v.f ?? {}, ...(v.fc && { fc: v.fc }) }),
+        });
     } catch {
       /* зіпсований запис — пропускаємо */
     }
@@ -272,6 +323,7 @@ export async function placeDecor(userId, kind, x, y) {
   if ((await r.hLen(k)) >= DECOR_MAX) throw conflict("full", `На острові вже ${DECOR_MAX} прикрас — прибери щось.`);
   checkSpot(def, pos.x, pos.y);
   if (def.platform) checkPlatform(def, pos.x, pos.y, await getDecor(userId));
+  if (def.shoreline) checkShoreline(def, pos.x, pos.y, await getDecor(userId));
   if (def.limit) {
     const same = (await r.hVals(k)).filter((raw) => raw.includes(`"k":"${def.id}"`)).length;
     if (same >= def.limit) throw conflict("limit", `${def.emoji} Більше ${def.limit} сіток пляж не прогодує.`);
@@ -280,7 +332,7 @@ export async function placeDecor(userId, kind, x, y) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
   const id = randomBytes(6).toString("hex");
-  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }) };
+  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }), ...(def.hut && { lv: 1, f: {}, fc: Date.now() }) };
   await r.hSet(k, id, JSON.stringify(item));
   return { item: { id, ...item } };
 }
@@ -297,6 +349,7 @@ export async function moveDecor(userId, id, x, y) {
   const old = JSON.parse(raw);
   if (BY_ID.has(old.k)) checkSpot(BY_ID.get(old.k), pos.x, pos.y);
   if (BY_ID.get(old.k)?.platform) checkPlatform(BY_ID.get(old.k), pos.x, pos.y, await getDecor(userId), id);
+  if (BY_ID.get(old.k)?.shoreline) checkShoreline(BY_ID.get(old.k), pos.x, pos.y, await getDecor(userId));
   const item = { ...old, ...pos };
   await r.hSet(hk, id, JSON.stringify(item));
   return { item: { id, ...item } };
@@ -319,6 +372,8 @@ export async function removeDecor(userId, id) {
     const n = rubberReady(old);
     if (n > 0) refund.rubber = n;
   }
+  // Розібрав рибальську хату — вкладене в покращення й риба, що лежала в ній, теж твої.
+  if (old.k === FISH_HUT.kind) for (const [res, n] of Object.entries(hutRefund(old))) refund[res] = (refund[res] ?? 0) + n;
   for (const [res, n] of Object.entries(refund)) await addResourceToInventory(userId, res, n);
   return { refund };
 }

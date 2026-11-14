@@ -599,7 +599,7 @@ export function createWalk(canvas, assets, cb) {
   /** Режим «електрика»: кабелі під землею, підсвічені пристрої, решта — притемнена. */
   const editing = () => mode === 'build' || mode === 'power'
   /** Прилади, що під'єднуються кабелем: вітряк дає струм, акумулятор запасає, піч витрачає. */
-  const ELECTRIC = new Set(['windmill', 'solar', 'battery', 'furnace', 'e_bench'])
+  const ELECTRIC = new Set(['windmill', 'solar', 'battery', 'furnace', 'e_bench', 'fish_hut'])
   const NO_CABLES = { cells: [], networks: [], wired: [] }
   /** Кабелі острова з сервера: клітинки, мережі, під'єднані прикраси (server/src/game/state.js → cables). */
   let cables = NO_CABLES
@@ -1267,7 +1267,9 @@ export function createWalk(canvas, assets, cb) {
         joints: n.cells.filter(([x, y]) => degree(x, y) >= 3),
       }
     })
-    wireCache = { cables, list, has, devices, nets, netOf }
+    // Гнізда для конвеєра (жолоб рибальської хати): px на мапі й куди дивиться вихід.
+    const ports = list.filter((p) => p.uid && DECO_GEOM[p.kind]?.port).map((p) => ({ x: p.x + DECO_GEOM[p.kind].port.dx, y: p.y + DECO_GEOM[p.kind].port.dy }))
+    wireCache = { cables, list, has, devices, nets, netOf, ports }
     return wireCache
   }
 
@@ -1351,7 +1353,7 @@ export function createWalk(canvas, assets, cb) {
         continue
       }
       if (GENERATORS.has(d.kind)) deviceRing(cx, cy, genWatts(d.kind, d.uid, Date.now()) > 0 ? '#ffe066' : '#c9b8a8', 0.95)
-      else if (d.kind === 'furnace' || d.kind === 'e_bench') deviceRing(cx, cy, net.stored > 0 ? '#ff9a3c' : '#c9b8a8', 0.95)
+      else if (d.kind === 'furnace' || d.kind === 'e_bench' || d.kind === 'fish_hut') deviceRing(cx, cy, net.stored > 0 ? '#ff9a3c' : '#c9b8a8', 0.95)
       else if (d.kind === 'battery') {
         deviceRing(cx, cy, '#5a6b5e', 0.9)
         if (d.charge > 0) {
@@ -1364,6 +1366,22 @@ export function createWalk(canvas, assets, cb) {
         }
       }
     }
+    ctx.globalAlpha = 1
+
+    // Гнізда для конвеєра: пунктирний квадрат і стрілка «звідси поїде» — щоб було видно, куди його під'єднають.
+    ctx.setLineDash([2, 2])
+    for (const p of W.ports) {
+      ctx.strokeStyle = '#ffd27a'
+      ctx.lineWidth = 1.2
+      ctx.globalAlpha = 0.6 + Math.sin(t * 3) * 0.3
+      ctx.strokeRect(p.x - 4, p.y - 4, 8, 8)
+      ctx.beginPath()
+      ctx.moveTo(p.x + 6, p.y - 3)
+      ctx.lineTo(p.x + 10, p.y)
+      ctx.lineTo(p.x + 6, p.y + 3)
+      ctx.stroke()
+    }
+    ctx.setLineDash([])
     ctx.globalAlpha = 1
 
     // Ділянка, яку знімаємо: червона, «мурахи» біжать.
@@ -1413,6 +1431,8 @@ export function createWalk(canvas, assets, cb) {
     } else if (scene.outdoor) {
       list = [...placements(home, chestOpen, deco, nodes), ...farmPlacements(farmView)]
       list.push(...platformFronts(list))
+      // Прохідність — до точок взаємодії: до хати біля води підходять з того боку, де можна стати.
+      grid = walkGrid(scene.walk, list, geo.pad)
       interact = islandInteract()
       fx = effectsFor(home, deco)
     } else {
@@ -1493,10 +1513,24 @@ export function createWalk(canvas, assets, cb) {
     const out = [...INTERACT]
     for (const p of list) {
       if (p.building) out.push({ id: p.building, near: [p.x, p.y + 10], r: 22, box: spriteBox(p) })
-      else if (p.uid && DECO_GEOM[p.kind]?.act) out.push({ id: `${DECO_GEOM[p.kind].act}:${p.uid}`, near: [p.x, p.y + 9], r: 16, box: spriteBox(p) })
+      else if (p.uid && DECO_GEOM[p.kind]?.act) out.push({ id: `${DECO_GEOM[p.kind].act}:${p.uid}`, near: nearOf(p), r: 16, box: spriteBox(p) })
       else if (p.node) out.push(nodeSpot(p))
     }
     return out
+  }
+
+  /**
+   * Куди стати, щоб узаємодіяти з прикрасою: перед нею (знизу). Хату біля води (sides) — з боку, де можна
+   * стати: спереду, ліворуч, праворуч чи ззаду (спереду часто вода).
+   */
+  function nearOf(p) {
+    const front = [p.x, p.y + 9]
+    const g = DECO_GEOM[p.kind]
+    if (!g?.sides || !grid) return front
+    const w = (g.fw * CELL) / 2
+    const h = g.fh * CELL
+    const spots = [front, [p.x - w - 6, p.y - h / 2], [p.x + w + 6, p.y - h / 2], [p.x, p.y - h - 6]]
+    return spots.find(([x, y]) => geo.canStand(grid, x, y)) ?? front
   }
 
   /** Хуртовина: човен, вказівник, вогнище й ресурси. */
@@ -1941,6 +1975,23 @@ export function createWalk(canvas, assets, cb) {
       if (!nearWater) return { ok: false, reason: 'Помост ставлять у воду чи на пляж біля води' }
       if (!cells.some((c) => land[c] || nextToGround(c))) return { ok: false, reason: 'Помост ставлять поруч із берегом чи іншим помостом' }
     } else if (!g.water && cells.some((c) => c < 0 || !ground[c])) return { ok: false, reason: 'Тут будувати не можна' }
+    // Рибальська хата — біля самої води: хоч одна клітинка поруч із «ніжками» (по стороні) — відкрита вода,
+    // не суша й не поміст. Як checkShoreline у server/src/game/decor.js.
+    if (g.shoreline) {
+      const mine = new Set(cells)
+      const wet = cells.some((c) => {
+        const cx = c % geo.cols
+        const cy = Math.floor(c / geo.cols)
+        return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+          const nx = cx + dx
+          const ny = cy + dy
+          if (nx < 0 || ny < 0 || nx >= geo.cols || ny >= geo.rows) return true
+          const n = ny * geo.cols + nx
+          return !mine.has(n) && !ground[n]
+        })
+      })
+      if (!wet) return { ok: false, reason: 'Хату ставлять біля самої води' }
+    }
     const busy = new Uint8Array(geo.cols * geo.rows)
     let tree = false
     for (const p of others) {
@@ -2681,7 +2732,8 @@ export function createWalk(canvas, assets, cb) {
 
     // Бульбашки врожаю над будівлями.
     for (const [id, sprite] of bubbleSprites) {
-      const p = list.find((q) => q.s === id || q.s.startsWith(`${id}_`))
+      // Будівля — за назвою спрайта (garden → garden_2), прикраса (рибальська хата) — за своїм id.
+      const p = list.find((q) => q.uid === id || q.s === id || q.s.startsWith(`${id}_`))
       sprite.visible = !!p && scene.farm && mode === 'walk'
       if (!sprite.visible) continue
       const f = frames[p.s]

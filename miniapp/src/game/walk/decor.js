@@ -72,6 +72,20 @@ export const DECO_GEOM = {
     fh: 2,
     act: 'e_bench',
   },
+  // Рибальська хата (server/src/game/fishhut.js): спрайт за рівнем (d.lv 1…3), ліхтар світить, коли в її мережі
+  // є енергія (d.g 1). shoreline — ставлять на березі чи помості, біля самої води; sides — підходять з будь-якого
+  // боку, де можна стати (спереду часто вода). port — жолоб праворуч на помості, куди під'єднається конвеєр.
+  fish_hut: {
+    sprite: 'fish_hut_1',
+    icon: 'fish_hut_3_on',
+    stages: [(d) => `fish_hut_${d.lv ?? 1}`, (d) => `fish_hut_${d.lv ?? 1}_on`],
+    fw: 6,
+    fh: 3,
+    act: 'fishhut',
+    shoreline: true,
+    sides: true,
+    port: { dx: 28, dy: -8 },
+  },
   // Посаджене дерево: спрайт за стадією росту (d.g рахує IslandWalk); останню — за породою (d.sp).
   // Коли виросте, сервер ставить на його місце справжнє дерево (server/src/game/trees.js).
   tree_sprout: {

@@ -19,6 +19,7 @@ import { floorSheet } from './floor-art.mjs'
 import { heroFrames, wearSheet } from './hero-wear.mjs'
 import { winterArt } from './winter-art.mjs'
 import { powerArt } from './power-art.mjs'
+import { fishHutArt, motorIcon } from './fishhut-art.mjs'
 import { WINTER_INTERACT, WINTER_MAP, WINTER_SPAWN, winterPlacements } from '../src/game/walk/winter.js'
 import { BEDS, BOARDWALK, CELL, INTERACT, LAND, MAP, PATH, PIER, PLAZA, RESERVED, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
@@ -3009,6 +3010,8 @@ function buildSprites(farm, room, winter, power) {
     ...winter.sprites,
     // Вітряк (кадри крил) і посаджені дерева за стадіями (scripts/power-art.mjs).
     ...power.sprites,
+    // Рибальська хата за рівнями, з мотором і ліхтарем (scripts/fishhut-art.mjs, основа — з еталонного аркуша).
+    ...fishHutArt({ Img, base: readPng(join(ROOT, 'art/fish-hut/base.png')) }),
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)
@@ -3130,6 +3133,8 @@ const farm = farmArt({ Img })
 const room = homeArt({ Img, hash })
 const winter = winterArt({ Img, hash, fbm, worley, distanceTo })
 const power = powerArt({ Img, hash, canopy, shadow, LEAF })
+// Електромотор для рибальської хати — іконка в рюкзак (scripts/fishhut-art.mjs).
+power.items.motor = motorIcon(Img)
 const sprites = buildSprites(farm, room, winter, power)
 const split = (keep) => Object.fromEntries(Object.entries(sprites).filter(([name]) => keep(name)))
 const { atlas, frames } = pack(split((n) => !isInterior(n) && !isDecor(n)))

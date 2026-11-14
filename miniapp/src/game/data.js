@@ -61,6 +61,7 @@ const ITEM_ART = new Set([
   'silicon_wafer',
   'insulated_wire',
   'solar_panel',
+  'motor',
   'relic_ring_wanderer',
   'relic_hook_silver',
   'relic_hook_gold',
@@ -161,6 +162,7 @@ export function sourceOf(catalog, id) {
   if (id === 'silicon_wafer') return 'Зроби на електроверстаті ⚙️ з кварцу'
   if (id === 'insulated_wire') return 'Зроби на електроверстаті ⚙️: голий дріт у каучуку'
   if (id === 'solar_panel') return 'Зроби на електроверстаті ⚙️. Постав у будові → ⚡ Електрика'
+  if (id === 'motor') return 'Зроби на електроверстаті ⚙️: мідь, залізо й ізольований дріт. Потрібен для рибальської хати 🛖'
   if (id === 'rubber') return 'Збирай з гевеї на острові — 3 щогодини'
   if (id === 'rubber_seed') return 'Рідко: у рибі, на вудці й у корчах на пляжі. Посади гевею в будівництві 🔨'
   if (id === 'tree_seed') return 'Трапляється в рибі, на вудці й у корчах на пляжі. Посади в будівництві 🔨'

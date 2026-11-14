@@ -103,7 +103,12 @@ export async function getState(userId) {
     getFloor(userId),
   ]);
   // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
-  const [nodes, tools, wear] = await Promise.all([getNodes(userId, takenBoxes(home, deco, farm)), getTools(userId), getWear(userId)]);
+  const [nodes, winterNodes, tools, wear] = await Promise.all([
+    getNodes(userId, takenBoxes(home, deco, farm)),
+    getNodes(userId, [], "winter"),
+    getTools(userId),
+    getWear(userId),
+  ]);
 
   for (const k of Object.keys(inventory)) {
     if (inventory[k] <= 0) delete inventory[k];
@@ -137,6 +142,8 @@ export async function getState(userId) {
     interior,
     floor,
     nodes,
+    // Острів Хуртовини: замети, лід і хмиз (сцена «winter» у Mini App).
+    winter: { nodes: winterNodes },
     tools,
     wear,
     // phone — чи є номер узагалі: без нього персональні розділи не відкрити.

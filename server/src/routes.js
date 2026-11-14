@@ -156,6 +156,8 @@ export function buildApiRouter(botToken) {
 
   // Виживання: дерева й каміння на острові, верстат
   api.post("/island/nodes/:id/gather", handler(island((req) => gatherNode(uid(req), req.params.id))));
+  // Острів Хуртовини: розкопати замет лопатою, розбити брилу, підняти хмиз
+  api.post("/winter/nodes/:id/gather", handler(island((req) => gatherNode(uid(req), req.params.id, "winter"))));
   api.post("/craft/tool", handler((req) => craftTool(uid(req), body(req).tool)));
   api.post("/craft/recipe", handler((req) => craftRecipe(uid(req), body(req).recipe, body(req).count)));
 

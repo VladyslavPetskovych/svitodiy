@@ -67,6 +67,11 @@ export const NODE_GEOM = {
   driftwood: { sprite: 'driftwood' },
   shell: { sprite: 'shell' },
   seaweed: { sprite: 'seaweed_pile' },
+  // Острів Хуртовини (walk/winter.js): замети копають лопатою, брили б'ють кайлом.
+  snow_drift: { sprite: 'w_drift', block: [12, 4] },
+  big_drift: { sprite: 'w_drift_big', block: [24, 7] },
+  ice_chunk: { sprite: 'w_ice', block: [14, 6] },
+  brushwood: { sprite: 'w_brush' },
 }
 
 /**

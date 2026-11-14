@@ -8,12 +8,14 @@ import { decoKey, takeCooldown, toolsKey } from "./keys.js";
  *
  * Інструменти особисті (як рюкзак): hash «інструмент → рівень». 0 — немає, тоді добуваєш руками
  * лише кущі, камінчики й дари моря. Сокира рубає дерева, кайло — каміння; залізні — валуни
- * й дають більше (server/src/game/nodes.js).
+ * й дають більше (server/src/game/nodes.js). Лопата копає замети на Острові Хуртовини —
+ * під снігом трапляється брухт, скло, монети; залізна бере й великі замети.
  * Майструвати можна лише біля верстата — його ставлять у пісочниці (декор «workbench»).
  */
 export const TOOLS = {
   axe: {
     emoji: "🪓",
+    none: "Сокири немає",
     levels: [
       null,
       { name: "Кам'яна сокира", cost: { twig: 3, stone: 2 } },
@@ -22,10 +24,20 @@ export const TOOLS = {
   },
   pickaxe: {
     emoji: "⛏️",
+    none: "Кайла немає",
     levels: [
       null,
       { name: "Кам'яне кайло", cost: { twig: 3, stone: 3 } },
       { name: "Залізне кайло", cost: { plank: 2, metal_scrap: 3 } },
+    ],
+  },
+  shovel: {
+    emoji: "🪏",
+    none: "Лопати немає",
+    levels: [
+      null,
+      { name: "Дерев'яна лопата", cost: { twig: 3, plank: 1 } },
+      { name: "Залізна лопата", cost: { plank: 2, metal_scrap: 2 } },
     ],
   },
 };
@@ -40,7 +52,7 @@ export const RECIPES = [
 
 const MAX_BATCH = 20;
 
-/** Рівні інструментів гравця: { axe, pickaxe }. */
+/** Рівні інструментів гравця: { axe, pickaxe, shovel }. */
 export async function getTools(userId) {
   const h = await getRedis().hGetAll(toolsKey(userId));
   return Object.fromEntries(Object.keys(TOOLS).map((id) => [id, Math.max(0, Math.min(TOOLS[id].levels.length - 1, Number(h[id]) || 0))]));
@@ -98,7 +110,7 @@ export async function craftRecipe(userId, recipeId, count) {
 /** Для каталогу. */
 export function craftCatalog() {
   return {
-    tools: Object.entries(TOOLS).map(([id, t]) => ({ id, emoji: t.emoji, levels: t.levels.slice(1) })),
+    tools: Object.entries(TOOLS).map(([id, t]) => ({ id, emoji: t.emoji, none: t.none, levels: t.levels.slice(1) })),
     recipes: RECIPES,
   };
 }

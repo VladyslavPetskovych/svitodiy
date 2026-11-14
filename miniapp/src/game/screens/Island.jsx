@@ -8,8 +8,11 @@ import { Bar, Paper, PxButton, ScreenTitle } from '../ui.jsx'
 const MONSTER_ART = { snake: '/game/art/snake.webp', golem: '/game/art/golem.webp' }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/** Острови, на які можна висадитися й походити (сцена в IslandWalk). */
+const WALKABLE = { blizzard: 'winter' }
+
 export default function Island({ id }) {
-  const { catalog, state, act, reward, items } = useGame()
+  const { catalog, state, act, reward, items, go } = useGame()
   const island = catalog.islands.find((i) => i.id === id)
   const [exploring, setExploring] = useState(false)
   if (!island) return null
@@ -72,6 +75,12 @@ export default function Island({ id }) {
           </div>
         )}
       </motion.div>
+
+      {WALKABLE[id] && (
+        <PxButton variant="blue" size="lg" className="w-full" onClick={() => go('walk', { start: WALKABLE[id] })}>
+          🚶 Висадитися на острів
+        </PxButton>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <Paper className="flex flex-col gap-2 p-2">

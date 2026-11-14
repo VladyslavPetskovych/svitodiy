@@ -71,7 +71,7 @@ export function plotCenter(p) {
 }
 
 export const CHEST = { x: 200, y: 336 }
-export const BOAT = { x: 300, y: 392 }
+export const BOAT = { x: 292, y: 392 }
 export const START = { x: 256, y: 186 }
 
 /**
@@ -169,5 +169,5 @@ export const INTERACT = [
   { id: 'chest', label: 'Скриня', near: [200, 324], r: 16, box: [188, 318, 24, 22] },
   { id: 'pier', label: 'Причал', near: [256, 352], r: 14, box: [240, 344, 32, 30] },
   { id: 'fishing', label: 'Рибалити', near: [256, 418], r: 14, box: [240, 396, 32, 34] },
-  { id: 'boat', label: 'Човен', near: [264, 392], r: 18, box: [280, 380, 40, 24] },
+  { id: 'boat', label: 'Човен', near: [264, 392], r: 18, box: [276, 372, 34, 20] },
 ]

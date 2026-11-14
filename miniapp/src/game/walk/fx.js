@@ -12,9 +12,10 @@ const SMOKE = [0.93, 0.93, 0.91]
 const PUFF = [0.96, 0.95, 0.9]
 const RAIN = [0.72, 0.84, 1]
 const FIREFLY = [0.92, 1, 0.45]
+const SNOWFLAKE = [0.97, 0.98, 1]
 const rand = (a) => (Math.random() * 2 - 1) * a
 
-export const P = { smoke: 0, fire: 1, dust: 2, puff: 3, leaf: 4, rain: 5, firefly: 6 }
+export const P = { smoke: 0, fire: 1, dust: 2, puff: 3, leaf: 4, rain: 5, firefly: 6, snow: 7 }
 
 const FIRE = [
   [1, 0.95, 0.66],
@@ -129,6 +130,15 @@ export function createParticles(max = 900) {
         kill(i)
         continue
       }
+      if (k === P.snow) {
+        // Сніжинка ліниво гойдається з боку в бік, а на землі просто зникає.
+        if (pos[o + 1] <= 0.5) {
+          kill(i)
+          continue
+        }
+        pos[o] += Math.cos(age[i] * 2.1 + i) * 5 * dt
+        pos[o + 2] += Math.sin(age[i] * 1.7 + i) * 3 * dt
+      }
       if (k === P.firefly) {
         vel[o] += rand(40) * dt
         vel[o + 1] += rand(30) * dt
@@ -166,7 +176,7 @@ export function createParticles(max = 900) {
         col[c] = tint[o] * sky[0]
         col[c + 1] = tint[o + 1] * sky[1]
         col[c + 2] = tint[o + 2] * sky[2]
-        col[c + 3] = k === P.rain ? 0.6 : (k === P.smoke ? 0.75 : 0.85) * (1 - t)
+        col[c + 3] = k === P.rain ? 0.6 : k === P.snow ? 0.9 * Math.min(1, (1 - t) * 8) : (k === P.smoke ? 0.75 : 0.85) * (1 - t)
       }
       i++
     }
@@ -216,6 +226,16 @@ export function createParticles(max = 900) {
     rain(x, z, wind = -14) {
       const h = 50 + Math.random() * 30
       emit(P.rain, x, h, z, wind, -180 - Math.random() * 30, 4, h / 170 + 0.2, 5, 5, RAIN)
+    },
+    /**
+     * Сніжинка: падає повільно, з вітром, і лягає на землю. Коли пул і так повний на дві третини —
+     * пропускаємо: завірюха не повинна з'їсти місце диму, вогню й пилу з-під лопати.
+     */
+    snow(x, z, wind = -8) {
+      if (count > max * 0.65) return
+      const h = 40 + Math.random() * 40
+      const vy = -(15 + Math.random() * 10)
+      emit(P.snow, x, h, z, wind + rand(4), vy, rand(3), h / -vy + 0.3, 1.3 + Math.random() * 0.7, 1.3, SNOWFLAKE)
     },
     /** Світлячок: повільно кружляє над землею кілька секунд. */
     firefly(x, z) {
@@ -389,6 +409,7 @@ export function waterMaterial(tex, ground, size) {
       ground: { value: ground },
       size: { value: new THREE.Vector2(size.w, size.h) },
       time: { value: 0 },
+      cold: { value: 0 },
     },
     vertexShader: /* glsl */ `
       varying vec2 vWorld;
@@ -402,6 +423,7 @@ export function waterMaterial(tex, ground, size) {
       uniform sampler2D ground;
       uniform vec2 size;
       uniform float time;
+      uniform float cold;
       varying vec2 vWorld;
       void main() {
         vec2 p = vWorld / 64.0;
@@ -411,13 +433,16 @@ export function waterMaterial(tex, ground, size) {
         // Кадр i займає рядки i·64…(i+1)·64 зверху; flipY — тож v рахуємо від низу.
         vec2 uv = vec2(fract(p.x), 1.0 - (frame + fract(p.y)) / 4.0);
         gl_FragColor = vec4(texture2D(map, uv).rgb, 1.0);
+        // Крижане море (cold = 1): та сама брижа, але сталево-бірюзова, без літньої синяви.
+        float luma = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(luma) * vec3(0.62, 0.95, 1.12), cold * 0.6);
         #include <colorspace_fragment>
         // Продовження відтінку глибини за край мапи (усередині мапи його малює сама земля).
         float out_ = length(vWorld - clamp(vWorld, vec2(0.0), size));
         vec2 edge = clamp(vWorld, vec2(0.5), size - 0.5); // центр крайового текселя
         float edgeA = texture2D(ground, vec2(edge.x / size.x, 1.0 - edge.y / size.y)).a;
         float a = mix(edgeA, 0.4, smoothstep(0.0, 140.0, out_)) * step(0.001, out_);
-        gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(15.0, 53.0, 112.0) / 255.0, a);
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(vec3(15.0, 53.0, 112.0), vec3(12.0, 44.0, 76.0), cold) / 255.0, a);
       }`,
     depthWrite: false,
   })

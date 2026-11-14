@@ -20,6 +20,7 @@ import { createInput } from './input.js'
 import { HERO_CELL, HERO_FRAME, HERO_FRAMES, composeHero, heroFrameIndex, outfitKey, outfitOf } from './outfit.js'
 import { CELL, INTERACT, LIGHTHOUSE_LAMP, MAP, PIER, SPOTS, START, placements, plotCenter, plotRect, walkGrid } from './layout.js'
 import { FIXED_DT, PHYS, accelerate, createBody, followPath, move, teleport } from './physics.js'
+import { WINTER_FIRE, WINTER_INTERACT, WINTER_MAP, WINTER_PIER, WINTER_SPAWN, winterPlacements } from './winter.js'
 import { createPeers } from './peers.js'
 
 /**
@@ -32,10 +33,11 @@ import { createPeers } from './peers.js'
  * так виглядають точно як 2D-арт, але камеру можна обертати й наближати.
  *
  * Без React — екран IslandWalk лише створює рушій і передає йому стан гри.
- * Сцени: «island» (острів надворі) і «home» (кімната хатинки).
+ * Сцени: «island» (острів надворі), «home» (кімната хатинки) і «winter» (Острів Хуртовини,
+ * walk/winter.js): там нічого не будують, а копають замети, б'ють лід і збирають хмиз.
  */
 
-const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'hero-wear', ...Object.keys(DOG_SHEETS)]
+const ASSETS = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'hero-wear', 'winter-ground', 'winter-foam', ...Object.keys(DOG_SHEETS)]
 
 /**
  * Аркуші спрайтів: острів (будівлі, декор, город, мандрівник) і окремо — хатинка зсередини
@@ -77,6 +79,7 @@ export function loadAssets() {
     a.alpha = Object.fromEntries(SHEETS.map((sh) => [sh.tex, alphaOf(a[sh.tex].image)]))
     a.sheetAlpha = Object.fromEntries(Object.keys(DOG_SHEETS).map((k) => [k, alphaOf(a[k].image)]))
     a.foamFrames = Math.round(a.foam.image.height / MAP.h)
+    a.winterFoamFrames = Math.round(a['winter-foam'].image.height / WINTER_MAP.h)
     return a
   })
 }
@@ -154,25 +157,33 @@ function farmPlacements(view) {
 const overlaps = (a, b) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
 
 /** Що показати над мандрівником під час роботи на городі й добування. */
-const TOOL_EMOJI = { till: '⛏️', plant: '🌱', water: '💧', harvest: '🧺', clear: '🧹', axe: '🪓', pickaxe: '⛏️', hand: '🤲' }
+const TOOL_EMOJI = { till: '⛏️', plant: '🌱', water: '💧', harvest: '🧺', clear: '🧹', axe: '🪓', pickaxe: '⛏️', shovel: '🪏', hand: '🤲' }
 /** Значок над грядкою: що їй зараз треба (видно здалеку, не підходячи). */
 const NEED_EMOJI = { water: '💧', harvest: '🧺', plant: '🌱', till: '⛏️' }
 /** Колір спливаючого напису за видом події. */
 const FLOAT_COLORS = { info: '#fff4dc', good: '#ffe27a', error: '#ff9d8c', calm: '#cfe8ff' }
 /** Скільки написів одночасно — старші зникають, щоб острів не захаращувало. */
 const FLOAT_MAX = 6
-/** Чим сиплеться ресурс під час добування: тріски, листя чи кам'яний пил. */
+/** Чим сиплеться ресурс під час добування: тріски, листя, кам'яний пил, сніг чи крижані скалки. */
 const CHIPS = {
-  oak: 'wood', birch: 'wood', pine: 'wood', driftwood: 'wood',
+  oak: 'wood', birch: 'wood', pine: 'wood', driftwood: 'wood', brushwood: 'wood',
   bush: 'leaf', berry_bush: 'leaf', seaweed: 'leaf',
   rock: 'stone', boulder: 'stone', pebble: 'stone', shell: 'stone',
+  snow_drift: 'snow', big_drift: 'snow', ice_chunk: 'ice',
 }
+/** Колір частинок для CHIPS (листя — окремі частинки). */
+const CHIP_RGB = { wood: [0.72, 0.52, 0.3], stone: [0.7, 0.67, 0.62], snow: [0.95, 0.97, 1], ice: [0.7, 0.88, 1] }
 /** Будівлі, які гравець ставить сам — підписи для панелі дії рушій не знає, лише id. */
 const PLACED_BUILDINGS = Object.keys(BUILDING_GEOM)
 
+/**
+ * outdoor — надворі (вода, прибій, погода); farm — рідний острів (город, будівництво, будівлі);
+ * snowy — сніг: сніжить завжди, лишаються сліди, вода холодна.
+ */
 const SCENES = {
-  island: { id: 'island', map: MAP, walk: atlas.walk, bg: 'ground', outdoor: true, spawn: { x: SPOTS.house.x, y: SPOTS.house.y + 12, dir: 'down' } },
+  island: { id: 'island', map: MAP, walk: atlas.walk, bg: 'ground', foam: 'foam', outdoor: true, farm: true, spawn: { x: SPOTS.house.x, y: SPOTS.house.y + 12, dir: 'down' } },
   home: { id: 'home', map: HOME_MAP, walk: atlas.homeWalk, bg: 'home', outdoor: false, spawn: { ...HOME_START, dir: 'up' } },
+  winter: { id: 'winter', map: WINTER_MAP, walk: atlas.winterWalk, bg: 'winter-ground', foam: 'winter-foam', outdoor: true, snowy: true, spawn: { ...WINTER_SPAWN } },
 }
 for (const sc of Object.values(SCENES)) sc.geo = geometry(sc.walk, sc.map)
 
@@ -264,13 +275,23 @@ export function createWalk(canvas, assets, cb) {
   ground.renderOrder = -20
   scene3.add(ground)
 
-  const foamTex = assets.foam.clone()
-  foamTex.repeat.set(1, 1 / assets.foamFrames)
-  foamTex.needsUpdate = true
-  const foam = new THREE.Mesh(
-    new THREE.PlaneGeometry(MAP.w, MAP.h).rotateX(-Math.PI / 2),
-    crispPixels(new THREE.MeshBasicMaterial({ map: foamTex, transparent: true, depthWrite: false }))
+  /** Прибій кожної сцени надворі: кадри стовпчиком у своєму аркуші. */
+  const foamSheets = Object.fromEntries(
+    [
+      ['foam', assets.foamFrames],
+      ['winter-foam', assets.winterFoamFrames],
+    ].map(([name, frames]) => {
+      const tex = assets[name].clone()
+      tex.repeat.set(1, 1 / frames)
+      tex.needsUpdate = true
+      return [name, { tex, frames }]
+    })
   )
+  const foam = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+    crispPixels(new THREE.MeshBasicMaterial({ map: foamSheets.foam.tex, transparent: true, depthWrite: false }))
+  )
+  foam.scale.set(MAP.w, 1, MAP.h)
   foam.position.set(MAP.w / 2, 0.05, MAP.h / 2)
   foam.renderOrder = -19
   scene3.add(foam)
@@ -462,6 +483,7 @@ export function createWalk(canvas, assets, cb) {
   let flash = 0
   let nextFlash = 0
   let rainAcc = 0
+  let snowAcc = 0
   let flyAcc = 0
 
   /** Крок неба: колір, туман, блискавка, дощ і світлячки. */
@@ -475,6 +497,11 @@ export function createWalk(canvas, assets, cb) {
     const n = skyNow.night
     // У хаті погоди не видно: уночі там тепло й притемнено, а піч і лампи світять.
     const tint = out ? [...skyNow.tint] : [0, 1, 2].map((i) => 1 + (INDOOR_NIGHT[i] - 1) * n)
+    if (scene.snowy) {
+      // На Хуртовині світло холодне: сніг відбиває синє небо.
+      tint[0] *= 0.93
+      tint[1] *= 0.97
+    }
 
     if (out && storm && t >= nextFlash) {
       flash = 1
@@ -498,7 +525,14 @@ export function createWalk(canvas, assets, cb) {
 
     if (!out) return
     const spread = 1.1 * rig.zoom
-    if (skyNow.rain > 0.02) {
+    if (scene.snowy) {
+      // Тут завжди сніжить, а в негоду — завірюха (замість дощу).
+      snowAcc += dt * (20 + skyNow.rain * 110) * spread * spread
+      while (snowAcc >= 1) {
+        snowAcc -= 1
+        particles.snow(rig.focus.x + (Math.random() - 0.5) * 340 * spread, rig.focus.y + (Math.random() - 0.5) * 320 * spread, storm ? -28 : -8 - skyNow.rain * 12)
+      }
+    } else if (skyNow.rain > 0.02) {
       rainAcc += dt * 260 * skyNow.rain * spread * spread
       while (rainAcc >= 1) {
         rainAcc -= 1
@@ -506,7 +540,7 @@ export function createWalk(canvas, assets, cb) {
       }
     }
     // Світлячки — тихими ночами, без дощу.
-    if (n > 0.6 && skyNow.rain < 0.2) {
+    if (n > 0.6 && skyNow.rain < 0.2 && !scene.snowy) {
       flyAcc += dt * 3 * (n - 0.6) * 2.5
       while (flyAcc >= 1) {
         flyAcc -= 1
@@ -525,7 +559,11 @@ export function createWalk(canvas, assets, cb) {
   let grid = null
   let fx = { smoke: [], lights: [], fires: [] }
   const body = createBody(START.x, START.y)
-  const hero = { dir: 'down', step: 0, moving: false, dustT: 0, x: START.x, y: START.y }
+  const hero = { dir: 'down', step: 0, moving: false, dustT: 0, printT: 0, printSide: 1, x: START.x, y: START.y }
+  /** Замети, лід і хмиз на Острові Хуртовини (state.winter.nodes). */
+  let winterNodes = []
+  /** Ресурси сцени, де ти зараз: рідного острова чи Хуртовини. */
+  const sceneNodes = () => (scene.id === 'winter' ? winterNodes : (world?.nodes ?? []))
   let mode = 'walk'
   let ghost = null // { kind, x, y, uid?, ok, reason? }
   const ghostVis = { x: 0, y: 0, born: -1, badAt: -1 }
@@ -644,8 +682,13 @@ export function createWalk(canvas, assets, cb) {
     if (mode === 'follow') {
       if (dog.sceneId !== scene.id || !dog.visible || fresh) {
         // Прибігає з хати чи з місця, де сидів: з'являється біля дверей або біля тебе.
+        // На Хуртовину пес, що лишався вдома, припливає й біжить від причалу.
         const from =
-          scene.outdoor && dog.sceneId === 'home' && !fresh ? doorSpot() : { x: body.x + side, y: body.y + (scene.outdoor ? 6 : -6) + dog.index * 4 }
+          scene.farm && dog.sceneId === 'home' && !fresh
+            ? doorSpot()
+            : scene.id === 'winter' && dog.sceneId !== 'winter' && !fresh
+              ? { x: WINTER_SPAWN.x + side * 0.4, y: WINTER_SPAWN.y + 6 }
+              : { x: body.x + side, y: body.y + (scene.outdoor ? 6 : -6) + dog.index * 4 }
         dog.place(from.x, from.y)
       }
       dog.sceneId = scene.id
@@ -672,7 +715,17 @@ export function createWalk(canvas, assets, cb) {
       dog.sceneId = 'home'
       dog.setVisible(true)
       dog.stay(bed.x, bed.y, true)
-    } else if (dog.visible && dog.sceneId === scene.id && !fresh) {
+    } else if (scene.id === 'winter' && dog.visible && dog.sceneId === 'winter' && !fresh) {
+      // На Хуртовині сказали «Додому» — біжить до човна й пливе додому.
+      dog.runTo(WINTER_SPAWN.x, WINTER_SPAWN.y + 6, () => {
+        if (dog.cfg.mode !== 'house' || scene.id !== 'winter') return
+        dog.sceneId = 'home'
+        dog.setVisible(false)
+        dog.place(bed.x, bed.y)
+        dog.stay(bed.x, bed.y, true)
+        particles.puff(WINTER_SPAWN.x, WINTER_SPAWN.y + 4, 6)
+      })
+    } else if (scene.farm && dog.visible && dog.sceneId === scene.id && !fresh) {
       // Надворі сказали «Додому» — біжить до дверей і зникає в хаті.
       const door = doorSpot()
       dog.runTo(door.x, door.y, () => {
@@ -787,7 +840,7 @@ export function createWalk(canvas, assets, cb) {
         const d = dogById(at.slice(4))
         if (d?.visible && d.sceneId === scene.id) return { x: d.body.x, y: d.body.y, h: 22 }
       } else if (at.startsWith('node:')) {
-        const n = world?.nodes.find((q) => q.id === at.slice(5))
+        const n = sceneNodes().find((q) => q.id === at.slice(5))
         const it = list.find((p) => p.node === at.slice(5))
         if (n) return { x: n.x, y: n.y, h: (it ? frames[it.s]?.h : 0) || 18 }
       } else if (at !== 'hero') {
@@ -847,7 +900,8 @@ export function createWalk(canvas, assets, cb) {
       const base = f.s.material.map.image
       f.s.scale.set((base.width / 4) * sx, (base.height / 4) * sy, 1)
       f.s.material.opacity = age > f.dur - 0.45 ? (f.dur - age) / 0.45 : 1
-      f.s.visible = scene.outdoor || !(typeof f.at === 'string' && (f.at.startsWith('plot:') || f.at.startsWith('node:')))
+      const at = typeof f.at === 'string' ? f.at : ''
+      f.s.visible = !(at.startsWith('plot:') && !scene.farm) && !(at.startsWith('node:') && !scene.outdoor)
     }
   }
 
@@ -872,7 +926,7 @@ export function createWalk(canvas, assets, cb) {
     }
   }
   function plotIconStep() {
-    const show = scene.outdoor && mode === 'walk'
+    const show = scene.farm && mode === 'walk'
     for (const [i, ic] of plotIcons) {
       const v = show ? plotById(i) : null
       ic.s.visible = !!v
@@ -896,6 +950,57 @@ export function createWalk(canvas, assets, cb) {
 
   /** Бульбашки врожаю: id будівлі → спрайт. */
   const bubbleSprites = new Map()
+
+  /* ───── Сліди на снігу й розкопані ямки: пласкі плями на землі, що поволі тануть ───── */
+
+  const DECAL_MAX = 80
+  /** @type {{ m: THREE.Mesh, born: number, life: number, base: number }[]} */
+  const decals = []
+  const printGeo = new THREE.PlaneGeometry(2, 3).rotateX(-Math.PI / 2) // 2×3 px арту: на телефоні ~5×7 px екрана
+  function addDecal(geo, mat, x, y, life) {
+    const m = new THREE.Mesh(geo, mat)
+    m.position.set(x, 0.03, y)
+    m.renderOrder = -11 // над землею й прибоєм, під настилом, грядками й усім, що стоїть
+    scene3.add(m)
+    decals.push({ m, born: t, life, base: mat.opacity })
+    while (decals.length > DECAL_MAX) dropDecal(0)
+  }
+  function dropDecal(k) {
+    const d = decals[k]
+    scene3.remove(d.m)
+    d.m.material.dispose()
+    decals.splice(k, 1)
+  }
+  function decalStep() {
+    for (let k = decals.length - 1; k >= 0; k--) {
+      const d = decals[k]
+      const age = t - d.born
+      if (age >= d.life) {
+        dropDecal(k)
+        continue
+      }
+      d.m.material.opacity = d.base * Math.min(1, (d.life - age) / 3)
+    }
+  }
+  /** Відбиток чобота: ліва й права нога по черзі, трохи вбік від сліду руху. На дошках причалу — без слідів. */
+  function footprint() {
+    const P = WINTER_PIER
+    if (Math.abs(hero.x - P.x) <= P.w / 2 && hero.y >= P.y0 - 2) return
+    const sp = Math.hypot(body.vx, body.vy) || 1
+    const side = (hero.printSide = -hero.printSide)
+    const x = hero.x - (body.vy / sp) * 1.6 * side
+    const y = hero.y + (body.vx / sp) * 1.6 * side - 1
+    // Темніше за найглибшу тінь снігу (#7f98bf) — інакше на дизерингу дюн відбитків не видно.
+    addDecal(printGeo, new THREE.MeshBasicMaterial({ color: 0x3d5585, transparent: true, opacity: 0.5, depthWrite: false }), x, y, 9)
+  }
+  /** Ямка там, де був замет: тане за кілька десятків секунд. */
+  function dugPatch(x, y) {
+    const geo = spriteGeo('w_dug', true)
+    if (!geo) return
+    const mat = crispPixels(matOf('w_dug').clone())
+    mat.alphaTest = 0.01 // альфа піксель-арту 0 або 1 — поріг лише відсікає прозоре, поки ямка тане
+    addDecal(geo, mat, x, y, 40)
+  }
 
   function clearItems() {
     for (const it of items) scene3.remove(it.mesh)
@@ -1008,7 +1113,11 @@ export function createWalk(canvas, assets, cb) {
   function rebuild() {
     if (!world) return
     const { home, chestOpen, deco, interior, nodes } = world
-    if (scene.outdoor) {
+    if (scene.id === 'winter') {
+      list = winterPlacements(winterNodes)
+      interact = winterInteract()
+      fx = winterEffects()
+    } else if (scene.outdoor) {
       list = [...placements(home, chestOpen, deco, nodes), ...farmPlacements(farmView)]
       interact = islandInteract()
       fx = effectsFor(home, deco)
@@ -1046,19 +1155,36 @@ export function createWalk(canvas, assets, cb) {
    */
   function islandInteract() {
     const out = [...INTERACT]
-    const boxOf = (p) => {
-      const f = frames[p.s]
-      return f ? [p.x - f.w / 2, p.y - f.h, f.w, f.h] : [p.x - 8, p.y - 16, 16, 16]
-    }
     for (const p of list) {
-      if (p.building) out.push({ id: p.building, near: [p.x, p.y + 10], r: 22, box: boxOf(p) })
-      else if (p.uid && DECO_GEOM[p.kind]?.act) out.push({ id: `${DECO_GEOM[p.kind].act}:${p.uid}`, near: [p.x, p.y + 9], r: 16, box: boxOf(p) })
-      else if (p.node) {
-        const small = !NODE_GEOM[p.nodeKind]?.block
-        out.push({ id: `node:${p.node}`, node: true, near: [p.x, p.y + (small ? 2 : 9)], r: small ? 12 : 16, box: grow(boxOf(p), small ? 4 : 0) })
-      }
+      if (p.building) out.push({ id: p.building, near: [p.x, p.y + 10], r: 22, box: spriteBox(p) })
+      else if (p.uid && DECO_GEOM[p.kind]?.act) out.push({ id: `${DECO_GEOM[p.kind].act}:${p.uid}`, near: [p.x, p.y + 9], r: 16, box: spriteBox(p) })
+      else if (p.node) out.push(nodeSpot(p))
     }
     return out
+  }
+
+  /** Хуртовина: човен, вказівник, вогнище й ресурси. */
+  function winterInteract() {
+    return [...WINTER_INTERACT, ...list.filter((p) => p.node).map(nodeSpot)]
+  }
+
+  /** Прямокутник спрайта на мапі — область тапу. */
+  function spriteBox(p) {
+    const f = frames[p.s]
+    return f ? [p.x - f.w / 2, p.y - f.h, f.w, f.h] : [p.x - 8, p.y - 16, 16, 16]
+  }
+
+  /** Ресурс як точка взаємодії: до дрібного підходиш впритул, до великого — стаєш перед ним. */
+  function nodeSpot(p) {
+    const small = !NODE_GEOM[p.nodeKind]?.block
+    return { id: `node:${p.node}`, node: true, near: [p.x, p.y + (small ? 2 : 9)], r: small ? 12 : 16, box: grow(spriteBox(p), small ? 4 : 0) }
+  }
+
+  /** Вогнище біля причалу на Хуртовині: полум'я, дим і тепле світло вночі. */
+  function winterEffects() {
+    const f = WINTER_FIRE
+    const at = (x, y, extra = {}) => ({ ax: f.x, ay: f.y, dx: x - f.x, h: f.y - y, ...extra })
+    return { smoke: [at(f.x, f.y - 9)], lights: [at(f.x, f.y - 6, { r: 26, warm: true, flicker: true })], fires: [at(f.x, f.y - 5)] }
   }
 
   /** Грядка за номером (з поточного поля) і грядка під точкою. */
@@ -1074,7 +1200,7 @@ export function createWalk(canvas, assets, cb) {
   /** Сік на зміни світу: новий предмет падає й «попає», прибраний — пуф, покращена будівля — поп. */
   function celebrate(home, chestOpen, deco, nodes) {
     const { levels } = home
-    if (!scene.outdoor) return
+    if (!scene.farm) return
     if (prevNodes) {
       // Ресурс зник — розсипався трісками/листям; новий — виріс із землі.
       const now = new Set(nodes.map((n) => n.id))
@@ -1132,6 +1258,23 @@ export function createWalk(canvas, assets, cb) {
     prevChest = chestOpen
   }
 
+  let prevWinter = null
+  /** Хуртовина: розкопаний замет — сніг угору й ямка на його місці, новий — «виріс» із поп-ом. */
+  function celebrateWinter(nodes) {
+    if (prevWinter && scene.id === 'winter') {
+      const now = new Set(nodes.map((n) => n.id))
+      for (const [id, n] of prevWinter) {
+        if (now.has(id)) continue
+        const chips = CHIPS[n.k]
+        particles.dust(n.x, n.y - 2, 14, 1.1, CHIP_RGB[chips] ?? CHIP_RGB.snow)
+        particles.puff(n.x, n.y - 3, chips === 'snow' ? 12 : 6)
+        if (chips === 'snow') dugPatch(n.x, n.y + 3)
+      }
+      for (const n of nodes) if (!prevWinter.has(n.id)) juice.set(`node:${n.id}`, { t0: t, power: 0.8, drop: 0 })
+    }
+    prevWinter = new Map(nodes.map((n) => [n.id, n]))
+  }
+
   let prevInterior = null
   /** Сік у хаті: нова річ «падає» й попає, пересунута — попає, прибрана — пуф. */
   function celebrateInterior(interior) {
@@ -1171,7 +1314,7 @@ export function createWalk(canvas, assets, cb) {
     farmView = view
     farmKey = key
     syncPlotIcons()
-    if (prev && scene.outdoor)
+    if (prev && scene.farm)
       for (const v of view) {
         const o = prev.get(v.i)
         if (!o) {
@@ -1199,6 +1342,18 @@ export function createWalk(canvas, assets, cb) {
     for (const c of clouds) c.visible = outdoor
     groundMat.map = assets[scene.bg]
     groundMat.needsUpdate = true
+    if (outdoor) {
+      const map = scene.map
+      foam.material.map = foamSheets[scene.foam].tex
+      foam.material.needsUpdate = true
+      foam.scale.set(map.w, 1, map.h)
+      foam.position.set(map.w / 2, 0.05, map.h / 2)
+      const wu = water.material.uniforms
+      wu.ground.value = assets[scene.bg]
+      wu.size.value.set(map.w, map.h)
+      wu.cold.value = scene.snowy ? 1 : 0
+      water.position.set(map.w / 2, 0, map.h / 2)
+    }
     ground.scale.set(scene.map.w, 1, scene.map.h)
     ground.position.set(scene.map.w / 2, 0, scene.map.h / 2)
     renderer.setClearColor(outdoor ? 0x3b7fd0 : 0x120c08)
@@ -1220,6 +1375,7 @@ export function createWalk(canvas, assets, cb) {
     held = null
     input.clear()
     particles.clear()
+    while (decals.length) dropDecal(0)
     near = null
     cb.onNear(null)
     applySceneLook()
@@ -1304,7 +1460,7 @@ export function createWalk(canvas, assets, cb) {
     out.wall = scene.outdoor ? null : wallHit()
     // Грядка під пальцем, але її заступає вищий спрайт перед нею (будівля, дерево) — грядка важливіша:
     // вона маленька, а будівлю легко тапнути деінде.
-    if (best && scene.outdoor && out.ground) {
+    if (best && scene.farm && out.ground) {
       const i = plotAt(out.ground.x, out.ground.y)
       const front = best.object.userData.item
       if (i >= 0 && front.p.plot == null && front.p.y > plotById(i).y) {
@@ -1321,7 +1477,7 @@ export function createWalk(canvas, assets, cb) {
       out.art = { x: it.p.x - f.w / 2 + (best.uv.x * AW - f.x), y: it.p.y - f.h + ((1 - best.uv.y) * AH - f.y) }
       if (it.p.plot != null) out.plot = it.p.plot
     } else if (out.ground) {
-      if (scene.outdoor) {
+      if (scene.farm) {
         const i = plotAt(out.ground.x, out.ground.y)
         if (i >= 0) out.plot = i
       }
@@ -1889,7 +2045,7 @@ export function createWalk(canvas, assets, cb) {
         }
       }
       // Грядка перед тобою (або під ногами) — як курсор клітинки в Stardew.
-      if (scene.outdoor) {
+      if (scene.farm) {
         let pi = plotAt(body.x + face.x * 10, body.y + face.y * 10)
         if (pi < 0) pi = plotAt(body.x, body.y)
         if (pi >= 0) {
@@ -1938,7 +2094,13 @@ export function createWalk(canvas, assets, cb) {
       hero.dustT -= dt
       if (scene.outdoor && speed > PHYS.maxSpeed * 0.7 && hero.dustT <= 0) {
         hero.dustT = 0.32
-        particles.dust(hero.x, hero.y, 2, 0.35)
+        particles.dust(hero.x, hero.y, 2, 0.35, scene.snowy ? CHIP_RGB.snow : undefined)
+      }
+      // На снігу лишаються сліди.
+      hero.printT -= dt
+      if (scene.snowy && hero.printT <= 0) {
+        hero.printT = 0.2
+        footprint()
       }
     } else hero.step = 0
     const fi = hero.moving ? HERO_SEQ[Math.floor(hero.step * 9) % 4] : 0
@@ -1999,8 +2161,9 @@ export function createWalk(canvas, assets, cb) {
     // Вода, прибій і тіні хмар — лише надворі.
     if (scene.outdoor) {
       water.material.uniforms.time.value = t
-      foam.material.map.offset.y = 1 - ((Math.floor(t / 0.3) % assets.foamFrames) + 1) / assets.foamFrames
-      clouds.forEach((c, k) => c.position.set(((t * 6 + k * 230) % (MAP.w + 240)) - 120, 0.3, 80 + k * 130))
+      const frames = foamSheets[scene.foam].frames
+      foam.material.map.offset.y = 1 - ((Math.floor(t / 0.3) % frames) + 1) / frames
+      clouds.forEach((c, k) => c.position.set(((t * 6 + k * 230) % (scene.map.w + 240)) - 120, 0.3, 80 + k * 130))
     }
 
     // Будівництво: виділена прикраса й привид нового місця.
@@ -2019,7 +2182,7 @@ export function createWalk(canvas, assets, cb) {
     }
 
     // Рамка грядки, з якою працюватимеш.
-    const nearPlot = mode === 'walk' && scene.outdoor && near?.startsWith('plot:') ? plotById(Number(near.slice(5))) : null
+    const nearPlot = mode === 'walk' && scene.farm && near?.startsWith('plot:') ? plotById(Number(near.slice(5))) : null
     if (nearPlot) {
       const r = plotRect(nearPlot)
       const pulse = 0.65 + Math.sin(t * 5) * 0.2
@@ -2028,6 +2191,7 @@ export function createWalk(canvas, assets, cb) {
 
     floatStep()
     plotIconStep()
+    decalStep()
 
     // Інструмент над головою — злітає й тане.
     if (toolAt >= 0) {
@@ -2077,7 +2241,7 @@ export function createWalk(canvas, assets, cb) {
     // Бульбашки врожаю над будівлями.
     for (const [id, sprite] of bubbleSprites) {
       const p = list.find((q) => q.s === id || q.s.startsWith(`${id}_`))
-      sprite.visible = !!p && scene.outdoor && mode === 'walk'
+      sprite.visible = !!p && scene.farm && mode === 'walk'
       if (!sprite.visible) continue
       const f = frames[p.s]
       anchored({ ax: p.x, ay: p.y, dx: 0, h: f.h + 9 + Math.sin(t * 3 + p.x) * 1.5 }, sprite.position)
@@ -2113,7 +2277,7 @@ export function createWalk(canvas, assets, cb) {
     snap: (kind, tap) => snapOf(kind, tap),
     /** 'walk' — гуляємо, 'build' — пісочниця: палець рухає камеру, тап — вибір місця. */
     setMode(m) {
-      if (m === mode) return
+      if (m === mode || (m === 'build' && !scene.farm && scene.outdoor)) return
       mode = m
       held = null
       input.clear()
@@ -2222,6 +2386,12 @@ export function createWalk(canvas, assets, cb) {
     },
     /** Поле з fieldView(): грядки, рослини, бур'ян. */
     setFarm,
+    /** Острів Хуртовини (state.winter): замети, лід і хмиз. Розкопаний замет лишає ямку. */
+    setWinter({ nodes = [] } = {}) {
+      celebrateWinter(nodes)
+      winterNodes = nodes
+      if (scene.id === 'winter' && world) rebuild()
+    },
     /** Небо зі skyAt() (sky.js): перший раз — одразу, далі зміна тягнеться кілька секунд. */
     setSky(s) {
       const first = !skyWant
@@ -2258,10 +2428,10 @@ export function createWalk(canvas, assets, cb) {
     /**
      * Добування ресурсу: мандрівник стає лицем до нього й робить hits замахів (тріски, листя,
      * кам'яний пил, легка тряска). Повертає Promise, що завершиться разом з останнім замахом.
-     * tool — 'axe' | 'pickaxe' | 'hand' (емодзі над головою).
+     * tool — 'axe' | 'pickaxe' | 'shovel' | 'hand' (емодзі над головою).
      */
     gatherFx(nodeId, hits, tool) {
-      const n = world?.nodes.find((q) => q.id === nodeId)
+      const n = sceneNodes().find((q) => q.id === nodeId)
       if (!n) return Promise.resolve()
       path = []
       goal = null
@@ -2270,9 +2440,13 @@ export function createWalk(canvas, assets, cb) {
       const chips = CHIPS[n.k]
       const swing = () => {
         juice.set(`node:${nodeId}`, { t0: t, power: 0.45, drop: 0 })
-        if (chips === 'wood') particles.dust(n.x, n.y - 6, 7, 0.9, [0.72, 0.52, 0.3])
+        if (chips === 'wood') particles.dust(n.x, n.y - 6, 7, 0.9, CHIP_RGB.wood)
         else if (chips === 'leaf') particles.leaves(n.x, n.y - 6, 4)
-        else particles.dust(n.x, n.y - 3, 8, 0.8, [0.7, 0.67, 0.62])
+        else if (chips === 'snow') {
+          // Лопата кидає сніг убік — і трохи «пуху».
+          particles.dust(n.x, n.y - 3, 12, 1.1, CHIP_RGB.snow)
+          particles.puff(n.x, n.y - 2, 3)
+        } else particles.dust(n.x, n.y - 3, 8, 0.8, chips === 'ice' ? CHIP_RGB.ice : CHIP_RGB.stone)
         rig.addTrauma(tool === 'hand' ? 0.03 : 0.08)
         const emoji = TOOL_EMOJI[tool] ?? TOOL_EMOJI.hand
         if (!bubbleTex.has(emoji)) bubbleTex.set(emoji, bubbleTexture(emoji))
@@ -2298,7 +2472,7 @@ export function createWalk(canvas, assets, cb) {
     floatText,
     /** Підійти до грядки й попрацювати на ній (як тап по ній). false — грядки немає чи зараз не ходимо. */
     goToPlot(i) {
-      if (mode !== 'walk' || !scene.outdoor || !plotById(i)) return false
+      if (mode !== 'walk' || !scene.farm || !plotById(i)) return false
       tap({ plot: i })
       return true
     },
@@ -2339,7 +2513,7 @@ export function createWalk(canvas, assets, cb) {
       const dogsInfo = Object.fromEntries(
         dogs.map((d) => [d.id, { x: d.body.x, y: d.body.y, state: d.state, mode: d.mode, scene: d.sceneId, visible: d.visible, dist: dogDist(d) }])
       )
-      return { player: { x: body.x, y: body.y }, hero: { x: hero.x, y: hero.y, dir: hero.dir, moving: hero.moving, my: heroMesh.position.y }, focus: { ...rig.focus }, dogs: dogsInfo, peers: peers.info(), near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count }
+      return { player: { x: body.x, y: body.y }, hero: { x: hero.x, y: hero.y, dir: hero.dir, moving: hero.moving, my: heroMesh.position.y }, focus: { ...rig.focus }, dogs: dogsInfo, peers: peers.info(), near, mode, scene: scene.id, sky: { ...skyNow, storm }, particles: particles.points.geometry.drawRange.count, decals: decals.length }
     },
     destroy() {
       renderer.setAnimationLoop(null)
@@ -2356,6 +2530,8 @@ export function createWalk(canvas, assets, cb) {
       for (const d of dogs) d.dispose()
       for (const s of bubbleSprites.values()) s.material.dispose()
       while (floats.length) dropFloat(0)
+      while (decals.length) dropDecal(0)
+      printGeo.dispose()
       for (const ic of plotIcons.values()) ic.s.material.dispose()
       for (const tex of bubbleTex.values()) tex.dispose()
       for (const g of geoCache.values()) g.dispose()
@@ -2366,7 +2542,7 @@ export function createWalk(canvas, assets, cb) {
         if (o.material) o.material.dispose()
       })
       for (const m of [...Object.values(sheetMats), ...Object.values(ghostMats)]) m.dispose() // і ті, якими цього разу не малювали
-      for (const tex of [glowTex, blobTex, beamTex, gridTex, foamTex, heroTex]) tex.dispose()
+      for (const tex of [glowTex, blobTex, beamTex, gridTex, heroTex, ...Object.values(foamSheets).map((f) => f.tex)]) tex.dispose()
       for (const g of heroGeos) g.dispose()
       lightScene.traverse((o) => o.material?.dispose())
       lightQuad.dispose()

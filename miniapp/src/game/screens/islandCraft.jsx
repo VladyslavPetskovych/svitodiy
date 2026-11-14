@@ -28,7 +28,7 @@ function Cost({ cost }) {
   )
 }
 
-/** Верстат: сокира й кайло (два рівні) і дошки з колод. */
+/** Верстат: сокира, кайло й лопата (по два рівні) і дошки з колод. */
 export function CraftSheet({ open, onClose }) {
   const { state, catalog, items, act, toast } = useGame()
   const [busy, setBusy] = useState(false)
@@ -59,7 +59,10 @@ export function CraftSheet({ open, onClose }) {
   return (
     <Sheet open={open} onClose={onClose} title="🪚 Верстат">
       <div className="flex flex-col gap-3">
-        <p className="text-center text-sm text-ink-soft">Сокира рубає дерева, кайло б'є каміння. Залізні — швидші, дають більше й беруть валуни на скелях.</p>
+        <p className="text-center text-sm text-ink-soft">
+          Сокира рубає дерева, кайло б'є каміння, лопата копає замети на Острові Хуртовини. Залізні — швидші, дають більше й беруть валуни та
+          великі замети.
+        </p>
 
         {tools.map((t, i) => {
           const lvl = state.tools?.[t.id] ?? 0
@@ -76,7 +79,7 @@ export function CraftSheet({ open, onClose }) {
             >
               <span className={`text-3xl ${lvl ? '' : 'opacity-40 grayscale'}`}>{t.emoji}</span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-extrabold">{cur ? cur.name : t.id === 'axe' ? 'Сокири немає' : 'Кайла немає'}</p>
+                <p className="truncate font-extrabold">{cur ? cur.name : (t.none ?? 'Немає')}</p>
                 {next ? (
                   <>
                     <p className="mb-1 text-xs text-ink-soft">Далі: {next.name}</p>

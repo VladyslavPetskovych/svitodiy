@@ -52,6 +52,11 @@ Telegram ──initData──▶ Гра (Netlify) ──/api/*──▶ edge-ф�
   спрайти (мандрівник, будівлі всіх рівнів, дерева, причал) генеруються кодом:
   `npm run gen:island` → `public/game/walk/*.png` і `src/game/walk/atlas.json`.
   Розкладка острова й точки взаємодії — `src/game/walk/layout.js`, рушій — `src/game/walk/engine.js`.
+- Острів Хуртовини (мапа → Хуртовина → «🚶 Висадитися на острів») — та сама прогулянка, сцена `winter`:
+  земля, прибій і спрайти `w_*` малює `scripts/winter-art.mjs` (той самий `npm run gen:island` пише
+  `winter-ground.png`, `winter-foam.png` і `server/src/game/winter-slots.json`), розкладка — `src/game/walk/winter.js`.
+  Замети копають лопатою 🪏 з верстата (під снігом — брухт, скло, монети, як улов із вудки), великі — залізною;
+  крижані брили б'є кайло, хмиз — руками. Ресурси ростуть самі (`server/src/game/nodes.js`, `REALMS.winter`).
 - Острів рівний — ходити можна всюди, крім води й предметів. Тап по хатинці — заходиш досередини
   (`src/game/walk/home.js`: кімната, меблі за рівнем хатинки, ліжко/піч/полиця); фон кімнати й меблі
   малює той самий генератор (`public/game/walk/home.png`, кадри `home_*`).

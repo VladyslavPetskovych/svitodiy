@@ -48,7 +48,7 @@ def game_palette():
     return np.unique(px, axis=0).astype(np.float64)
 
 
-def remove_background(rgb, tol):
+def remove_background(rgb, tol, grey=3.0):
     """
     Заливка від країв: усе, що схоже на колір кутів і з'єднане з краєм, — фон.
     М'яку сіру тінь, яку модель кладе під предмет, теж вважаємо фоном: вона безбарвна
@@ -60,7 +60,7 @@ def remove_background(rgb, tol):
     f = rgb.astype(np.float64)
     dist = np.linalg.norm(f - bg, axis=-1)
     sat = f.max(-1) - f.min(-1)
-    close = (dist < tol) | ((sat < 18) & (f.mean(-1) > 120) & (dist < tol * 3))
+    close = (dist < tol) | ((sat < 18) & (f.mean(-1) > 120) & (dist < tol * grey))
     seen = np.zeros((h, w), bool)
     q = deque()
     for x in range(w):
@@ -261,6 +261,8 @@ def main():
     p.add_argument('dst')
     p.add_argument('--size', required=True, help='WxH спрайта, напр. 54x64')
     p.add_argument('--tol', type=float, default=40, help='допуск кольору фону (0..441)')
+    p.add_argument('--grey', type=float, default=3, help='у скільки разів більший допуск для сірої тіні від моделі під предметом')
+    p.add_argument('--rotate', type=int, default=0, help='повернути сиру картинку на N° проти годинникової (модель малює човни носом угору)')
     p.add_argument('--fill', type=float, default=0.5, help='частка блоку, щоб піксель був непрозорим')
     p.add_argument('--colors', type=int, default=0, help='максимум кольорів (0 — без обмеження; обмеження з'"'"'їдає рідкісні яскраві акценти)')
     p.add_argument('--grid', action='store_true', help='спершу знайти «піксельну» сітку AI (≈8 px на піксель)')
@@ -272,8 +274,11 @@ def main():
     tw, th = map(int, a.size.lower().split('x'))
     # Під контур і тінь лишаємо по пікселю з боків і два знизу.
     pad_x, pad_y = (1, 2) if a.outline else (0, 0)
-    src = np.asarray(Image.open(a.src).convert('RGB'))
-    mask = remove_background(src, a.tol)
+    raw = Image.open(a.src).convert('RGB')
+    if a.rotate:
+        raw = raw.rotate(a.rotate, expand=True, fillcolor=raw.getpixel((0, 0)))
+    src = np.asarray(raw)
+    mask = remove_background(src, a.tol, a.grey)
     if a.main:
         mask = keep_main(mask, a.main)
     if a.grid:

@@ -17,6 +17,8 @@ import { decorArt } from './decor-art.mjs'
 import { modernArt } from './modern-art.mjs'
 import { floorSheet } from './floor-art.mjs'
 import { heroFrames, wearSheet } from './hero-wear.mjs'
+import { winterArt } from './winter-art.mjs'
+import { WINTER_INTERACT, WINTER_MAP, WINTER_SPAWN, winterPlacements } from '../src/game/walk/winter.js'
 import { BEDS, BOARDWALK, CELL, INTERACT, LAND, MAP, PATH, PIER, PLAZA, RESERVED, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -1533,7 +1535,74 @@ function postLantern() {
   return img
 }
 
+/** Корпус човника від локальної моделі (scripts/sd-boat.mjs): 30×18, носом праворуч. */
+const BOAT_AI = join(ROOT, 'art/boat-ai/boat.png')
+
+/**
+ * Маленький човник біля пірса: корпус намалювала модель, а тут — те, що в 30×18 вона не втримує:
+ * чистий контур, весла в кочетах із лопатями на воді, відблиск під днищем, брижі й хвилька біля носа.
+ */
 function boat() {
+  if (!existsSync(BOAT_AI)) return boatDrawn()
+  const hull = readPng(BOAT_AI)
+  // Обрубки весел від моделі: рядки, де лише 1–2 пікселі, геть; на краю — рівний темний контур.
+  const count = (y) => [...Array(hull.w).keys()].filter((x) => hull.alpha(x, y)).length
+  for (let y = 0; y < hull.h; y++) if (count(y) <= 2) for (let x = 0; x < hull.w; x++) hull.d[(y * hull.w + x) * 4 + 3] = 0
+  const edge = []
+  for (let y = 0; y < hull.h; y++)
+    for (let x = 0; x < hull.w; x++)
+      if (hull.alpha(x, y) && (!hull.alpha(x - 1, y) || !hull.alpha(x + 1, y) || !hull.alpha(x, y - 1) || !hull.alpha(x, y + 1))) edge.push([x, y])
+  for (const [x, y] of edge) hull.set(x, y, C.K)
+  // Сірі плями від тіні моделі всередині корпусу — у темне дерево.
+  for (let i = 0; i < hull.w * hull.h; i++) {
+    const [r, g, b] = hull.d.subarray(i * 4, i * 4 + 3)
+    if (hull.d[i * 4 + 3] && Math.max(r, g, b) - Math.min(r, g, b) < 40 && r > 60) hull.set(i % hull.w, (i / hull.w) | 0, '#6b4426')
+  }
+  // Межі корпусу.
+  let top = hull.h, bot = 0, left = hull.w, right = 0
+  for (let y = 0; y < hull.h; y++)
+    for (let x = 0; x < hull.w; x++)
+      if (hull.alpha(x, y)) [top, bot, left, right] = [Math.min(top, y), Math.max(bot, y), Math.min(left, x), Math.max(right, x)]
+  const PAD = 4
+  const img = new Img(right - left + 1 + 2 * PAD, bot - top + 1 + 2 * PAD)
+  const X = PAD - left // зсув корпусу на полотні
+  const Y = PAD - top
+  const R = right + X // ніс
+  const B = bot + Y // днище (контур)
+  const T = top + Y
+  const cy = Math.round((T + B) / 2)
+  const WATER = '#cfeaff'
+  // Відблиск корпусу на воді — темна смуга під днищем, що тане донизу.
+  for (let x = 0; x < hull.w; x++) {
+    let low = -1
+    for (let y = 0; y < hull.h; y++) if (hull.alpha(x, y)) low = y
+    if (low < 0) continue
+    img.set(x + X, low + Y + 1, '#0d2c5c', 0.45)
+    img.set(x + X, low + Y + 2, '#0d2c5c', 0.2)
+  }
+  // Брижі вздовж днища й слід за кормою.
+  for (let x = X + left + 3; x < R - 4; x++) if ((x * 7) % 5 !== 0) img.set(x, B + 3, WATER, 0.4)
+  for (let x = 0; x < X + left; x++) img.set(x, cy + (x % 2), WATER, 0.25 + 0.1 * x)
+  img.blit(hull, X, Y)
+  // Хвилька біля носа.
+  for (const [dx, dy, a] of [[1, -1, 0.8], [1, 1, 0.8], [2, -2, 0.6], [2, 2, 0.6], [3, -3, 0.35], [3, 3, 0.35]]) img.set(R + dx, cy + dy, WATER, a)
+  // Весла: кочети на бортах трохи ближче до носа, ручки всередині, лопаті лежать на воді за кормою.
+  const ox = Math.round((left + right) / 2 + X) + 2
+  const OAR = ['bBBB......', '.bbbs.....', '.....ss...', '.......ss.', '.........o']
+  const pal = { b: '#c08a4e', B: '#f0cf8e', s: '#e3b878', o: '#4a4f5c' }
+  img.rows(OAR, ox - 9, T - 4, pal)
+  img.rows([...OAR].reverse(), ox - 9, B, pal)
+  img.set(ox + 1, T + 1, pal.s)
+  img.set(ox + 1, B - 1, pal.s)
+  for (const [dx, dy, a] of [[-10, 1, 0.6], [-10, 2, 0.35], [-8, 2, 0.45], [-7, 2, 0.3]]) {
+    img.set(ox + dx, T - 4 + dy, WATER, a)
+    img.set(ox + dx, B + 4 - dy, WATER, a)
+  }
+  return img
+}
+
+/** Запасний човник кодом — якщо art/boat-ai/boat.png ще немає. */
+function boatDrawn() {
   const img = new Img(40, 20)
   // Човник згори: корпус, борти, лавки, весла.
   for (let y = 0; y < 16; y++)
@@ -2824,7 +2893,7 @@ function dogSheet(anims, cell, image, scale = 1) {
 
 /* ───────── Атлас ───────── */
 
-function buildSprites(farm, room) {
+function buildSprites(farm, room, winter) {
   const s = {
     // Мандрівник у стартовому вбранні — для прев'ю; у грі рушій збирає його з шарів hero-wear.png.
     ...heroFrames({ Img }),
@@ -2863,6 +2932,8 @@ function buildSprites(farm, room) {
     ...room.sprites,
     ...decorArt({ Img }),
     ...modernArt({ Img }),
+    // Острів Хуртовини: замети, лід, засніжені ялини (scripts/winter-art.mjs).
+    ...winter.sprites,
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)
@@ -2884,18 +2955,22 @@ function handmade() {
     ...(existsSync(AI_ART) ? readdirSync(AI_ART).filter((f) => /^hd_[a-z_]+\.png$/.test(f)).map((f) => join(AI_ART, f)) : []),
   ]
   for (const path of files) {
-    const file = basename(path)
-    const { w, h, bpp, px } = decodePng(readFileSync(path))
-    const img = new Img(w, h)
-    for (let i = 0; i < w * h; i++) {
-      img.d[i * 4] = px[i * bpp]
-      img.d[i * 4 + 1] = px[i * bpp + 1]
-      img.d[i * 4 + 2] = px[i * bpp + 2]
-      img.d[i * 4 + 3] = bpp === 4 ? px[i * bpp + 3] : 255
-    }
-    out[file.slice(0, -4)] = img
+    out[basename(path).slice(0, -4)] = readPng(path)
   }
   return out
+}
+
+/** PNG з диска → Img. */
+function readPng(path) {
+  const { w, h, bpp, px } = decodePng(readFileSync(path))
+  const img = new Img(w, h)
+  for (let i = 0; i < w * h; i++) {
+    img.d[i * 4] = px[i * bpp]
+    img.d[i * 4 + 1] = px[i * bpp + 1]
+    img.d[i * 4 + 2] = px[i * bpp + 2]
+    img.d[i * 4 + 3] = bpp === 4 ? px[i * bpp + 3] : 255
+  }
+  return img
 }
 
 /** Полиці: спрайти за висотою, 1 px проміжку, ширина атласу W. */
@@ -2978,7 +3053,8 @@ const foam = shoreImage(t)
 const water = waterImage()
 const farm = farmArt({ Img })
 const room = homeArt({ Img, hash })
-const sprites = buildSprites(farm, room)
+const winter = winterArt({ Img, hash, fbm, worley, distanceTo })
+const sprites = buildSprites(farm, room, winter)
 const split = (keep) => Object.fromEntries(Object.entries(sprites).filter(([name]) => keep(name)))
 const { atlas, frames } = pack(split((n) => !isInterior(n) && !isDecor(n)))
 const interior = pack(split(isInterior), 256)
@@ -3004,7 +3080,12 @@ console.log(`нові речі для хати: ${decorSheet.atlas.w}×${decorSh
 writeFileSync(join(OUT_PUBLIC, 'home-walls.png'), encodePng(walls.image))
 const wallsMeta = { size: { w: walls.image.w, h: walls.image.h }, ...walls.rects }
 writeFileSync(OUT_HOME_ATLAS, JSON.stringify({ size: { w: interior.atlas.w, h: interior.atlas.h }, frames: interior.frames, walls: wallsMeta }) + '\n')
-writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid() }) + '\n')
+writeFileSync(OUT_ATLAS, JSON.stringify({ size: { w: atlas.w, h: atlas.h }, frames, walk: walkGrid(t), homeWalk: homeWalkGrid(), winterWalk: winter.walk }) + '\n')
+// Острів Хуртовини: земля, прибій і місця, де ростуть замети й лід (server/src/game/winter-slots.json).
+writeFileSync(join(OUT_PUBLIC, 'winter-ground.png'), encodePng(winter.ground))
+writeFileSync(join(OUT_PUBLIC, 'winter-foam.png'), encodePng(winter.foam))
+writeFileSync(join(ROOT, '../server/src/game/winter-slots.json'), JSON.stringify(winter.slots) + '\n')
+console.log(`острів Хуртовини: ${winter.ground.w}×${winter.ground.h}, місця: сніг ${winter.slots.snow.length}, лід ${winter.slots.ice.length}`)
 // Де можуть вирости дерева, каміння й дари моря — сервер сам садить їх (server/src/game/nodes.js).
 const slots = nodeSlots(t)
 writeFileSync(join(ROOT, '../server/src/game/island-slots.json'), JSON.stringify(slots) + '\n')
@@ -3034,7 +3115,7 @@ for (const [name, anims, cell, scale] of [
 // лише разом із самими картинками, тож довгий кеш і далі працює.
 {
   const h = createHash('sha1')
-  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'dog', 'sirko', 'hero-wear'].map((n) => join(OUT_PUBLIC, `${n}.png`))
+  const pngs = ['ground', 'foam', 'water', 'home', 'sprites', 'home-sprites', 'home-decor', 'home-walls', 'home-floors', 'dog', 'sirko', 'hero-wear', 'winter-ground', 'winter-foam'].map((n) => join(OUT_PUBLIC, `${n}.png`))
   for (const id of Object.keys(farm.items).sort()) pngs.push(join(OUT_ITEMS, `${id}.png`))
   // Іконки одягу (scripts/sd-wardrobe.mjs).
   const OUT_WEAR = join(ROOT, 'public/game/wear')
@@ -3145,6 +3226,68 @@ if (pi > 0) {
         }
       writeFileSync(join(dir, file), encodePng(big))
     }
+  }
+  // Острів Хуртовини: уся мапа з декораціями й заметами на кожному другому місці (і сітка прохідності).
+  {
+    const { w: WW, h: WH } = WINTER_MAP
+    const kinds = { snow: ['snow_drift', 'big_drift', 'snow_drift', 'brushwood'], ice: ['ice_chunk'] }
+    const nodes = Object.entries(winter.slots).flatMap(([where, list]) =>
+      list.filter((_, i) => i % 2 === 0).map(([x, y], i) => ({ id: `${where}${i}`, k: kinds[where][i % kinds[where].length], x, y }))
+    )
+    const list = winterPlacements(nodes)
+    list.push({ s: 'hero_up_0', x: WINTER_SPAWN.x, y: WINTER_SPAWN.y, layer: 'obj' })
+    for (const debug of [false, true]) {
+      const img = new Img(WW, WH)
+      for (let y = 0; y < WH; y++)
+        for (let x = 0; x < WW; x++) {
+          const i = ((y % 64) * 64 + (x % 64)) * 4
+          img.set(x, y, '#' + [water.d[i], water.d[i + 1], water.d[i + 2]].map((v) => v.toString(16).padStart(2, '0')).join(''))
+        }
+      img.blit(winter.ground, 0, 0)
+      const f0 = new Img(WW, WH)
+      f0.d.set(winter.foam.d.subarray(0, WW * WH * 4))
+      img.blit(f0, 0, 0)
+      for (const p of [...list.filter((p) => p.layer === 'floor'), ...list.filter((p) => p.layer !== 'floor').sort((a, b) => a.y - b.y)]) {
+        const sp = sprites[p.s]
+        if (sp) img.blit(sp, Math.round(p.x - sp.w / 2), Math.round(p.y - sp.h))
+      }
+      if (debug) {
+        const grid = mergeWalk(winter.walk, list)
+        const cols = winter.walk[0].length
+        grid.forEach((v, i) => {
+          if (!v) img.rect((i % cols) * CELL, Math.floor(i / cols) * CELL, CELL, CELL, '#ff0000', 0.3)
+        })
+        for (const it of WINTER_INTERACT) img.ellipse(it.near[0], it.near[1], 2, 2, '#ffff00')
+      }
+      const z = 2
+      const big = new Img(WW * z, WH * z)
+      for (let y = 0; y < big.h; y++)
+        for (let x = 0; x < big.w; x++) {
+          const si = (Math.floor(y / z) * WW + Math.floor(x / z)) * 4
+          const oi = (y * big.w + x) * 4
+          for (let k = 0; k < 4; k++) big.d[oi + k] = img.d[si + k]
+        }
+      writeFileSync(join(dir, debug ? 'winter-walk.png' : 'winter.png'), encodePng(big))
+    }
+    // Спрайти острова ×5 на снігу.
+    const names = Object.keys(winter.sprites)
+    const sheet = new Img(names.reduce((s, n) => s + winter.sprites[n].w + 4, 4), 52)
+    sheet.rect(0, 0, sheet.w, sheet.h, '#d2dff0')
+    let ox = 4
+    for (const n of names) {
+      const sp = winter.sprites[n]
+      sheet.blit(sp, ox, sheet.h - sp.h - 2)
+      ox += sp.w + 4
+    }
+    const z = 5
+    const big = new Img(sheet.w * z, sheet.h * z)
+    for (let y = 0; y < big.h; y++)
+      for (let x = 0; x < big.w; x++) {
+        const si = (Math.floor(y / z) * sheet.w + Math.floor(x / z)) * 4
+        const oi = (y * big.w + x) * 4
+        for (let k = 0; k < 4; k++) big.d[oi + k] = sheet.d[si + k]
+      }
+    writeFileSync(join(dir, 'winter-sprites-x5.png'), encodePng(big))
   }
   console.log(`прев'ю → ${dir}`)
 }

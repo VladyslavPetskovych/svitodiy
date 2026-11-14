@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { addResourceToInventory, getRedis } from "../bot.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { homeOwner } from "./household.js";
-import { nodesKey, takeCooldown } from "./keys.js";
+import { nodesKey, takeCooldown, winterNodesKey } from "./keys.js";
 import { getTools, TOOL_NAMES } from "./craft.js";
 
 /**
@@ -15,9 +15,16 @@ import { getTools, TOOL_NAMES } from "./craft.js";
  * Зберігаємо hash «id → JSON { k, x, y, w — на якій землі виріс }» і поле _t — коли востаннє виросло нове.
  * У спільному домі ресурси теж спільні: хто зрубав, тому й колоди.
  *
+ * Острів Хуртовини (сцена «winter» у Mini App) має свої ресурси: замети, крижані брили й хмиз
+ * (місця — winter-slots.json, генерує miniapp/scripts/winter-art.mjs). Їх зберігаємо окремо (winterNodesKey),
+ * але так само на дім: у спільному домі й замети спільні.
+ *
  * tool — чим добувати (null — руками), tier — мінімальний рівень інструмента.
  * loot — { ресурс: [від, до] } або { ресурс: { chance, n } } — рідкісна знахідка.
- * Кращий інструмент (tier вищий за потрібний) дає +1 до першого ресурсу.
+ * max — скільки таких може бути одночасно (щоб острів не заріс тим, що ще нічим добути).
+ * finds — що трапляється під снігом: rolls — скільки разів тягнути з таблиці, table — ресурс → вага
+ * (як улов із вудки чи дроп із готування: брухт, скло, монети, кістки).
+ * Кращий інструмент (tier вищий за потрібний) дає +1 до першого ресурсу (з finds — ще одну знахідку).
  */
 export const NODES = {
   oak: { name: "Дуб", emoji: "🌳", where: "grass", weight: 4, tool: "axe", tier: 1, hits: 3, loot: { log: [1, 2], twig: [1, 2] } },
@@ -48,17 +55,70 @@ export const NODES = {
   driftwood: { name: "Корч", emoji: "🪵", where: "sand", weight: 4, tool: null, hits: 1, loot: { twig: [1, 2], plank: { chance: 0.25, n: 1 } } },
   shell: { name: "Мушля", emoji: "🐚", where: "sand", weight: 3, tool: null, hits: 1, loot: { shell: [1, 1] } },
   seaweed: { name: "Водорості", emoji: "🌿", where: "sand", weight: 3, tool: null, hits: 1, loot: { seaweed: [1, 2] } },
+
+  // Острів Хуртовини.
+  snow_drift: {
+    name: "Замет",
+    emoji: "❄️",
+    where: "snow",
+    weight: 6,
+    tool: "shovel",
+    tier: 1,
+    hits: 2,
+    loot: {},
+    finds: {
+      rolls: [1, 2],
+      table: { metal_scrap: 16, glass_shard: 15, fish_bone: 14, twig: 13, stone: 11, old_coin: 9, ice_block: 7, silver_piece: 1 },
+    },
+  },
+  big_drift: {
+    name: "Великий замет",
+    emoji: "🏔️",
+    where: "snow",
+    weight: 2,
+    tool: "shovel",
+    tier: 2,
+    hits: 3,
+    max: 4,
+    loot: {},
+    finds: {
+      rolls: [2, 3],
+      table: { metal_scrap: 18, glass_shard: 14, old_coin: 14, fish_bone: 10, ice_block: 8, silver_piece: 4 },
+    },
+  },
+  brushwood: { name: "Мерзлий хмиз", emoji: "🪵", where: "snow", weight: 2, tool: null, hits: 1, loot: { twig: [1, 2] } },
+  ice_chunk: {
+    name: "Крижана брила",
+    emoji: "🧊",
+    where: "ice",
+    weight: 1,
+    tool: "pickaxe",
+    tier: 1,
+    hits: 3,
+    loot: { ice_block: [1, 2], glass_shard: { chance: 0.15, n: 1 } },
+  },
 };
 
-/** Скільки ресурсів тримається на острові одночасно (за типом землі). */
-const TARGET = { grass: 22, sand: 9, rock: 3 };
-/** Раз на скільки виростає новий, поки острів не заповниться. */
-const GROW_MS = 4 * 60_000;
 /** Мінімум між двома зборами — цілий замах сокирою, а не автоклікер. */
 const GATHER_COOLDOWN_MS = 500;
 
-const SLOTS = JSON.parse(readFileSync(new URL("./island-slots.json", import.meta.url), "utf8"));
+const readSlots = (file) => JSON.parse(readFileSync(new URL(file, import.meta.url), "utf8"));
+const SLOTS = { ...readSlots("./island-slots.json"), ...readSlots("./winter-slots.json") };
 const ID = /^[a-z0-9]{6,16}$/;
+
+/**
+ * Де ростуть ресурси: рідний острів і Острів Хуртовини.
+ * target — скільки тримається одночасно (за типом землі), growMs — раз на скільки виростає новий.
+ */
+export const REALMS = {
+  home: { key: nodesKey, target: { grass: 22, sand: 9, rock: 3 }, growMs: 4 * 60_000 },
+  winter: { key: winterNodesKey, target: { snow: 18, ice: 5 }, growMs: 3 * 60_000 },
+};
+const realmOf = (id) => {
+  const realm = REALMS[id];
+  if (!realm) throw badRequest("Невідомий острів.");
+  return realm;
+};
 
 /**
  * Що вже займає місце на острові — щоб нове дерево не виросло в будівлі чи на грядці.
@@ -86,7 +146,7 @@ const pickWeighted = (kinds) => {
   return kinds.at(-1);
 };
 const KINDS_BY_WHERE = Object.fromEntries(
-  Object.keys(TARGET).map((w) => [w, Object.keys(NODES).filter((k) => NODES[k].where === w)])
+  Object.keys(SLOTS).map((w) => [w, Object.keys(NODES).filter((k) => NODES[k].where === w)])
 );
 // Скелі малі — туди ж ростуть і звичайні камені з камінчиками.
 KINDS_BY_WHERE.rock.push("rock", "pebble");
@@ -103,20 +163,25 @@ function sprout(nodes, taken, where, n) {
   for (let i = 0; i < n && free.length; i++) {
     const [x, y] = free.splice(Math.floor(Math.random() * free.length), 1)[0];
     if (all().some((o) => Math.abs(o.x - x) < 14 && Math.abs(o.y - y) < 12)) continue;
-    fresh[randomBytes(6).toString("hex")] = { k: pickWeighted(KINDS_BY_WHERE[where]), x, y, w: where };
+    // Види з лімітом (max) більше не ростуть, коли їх уже вдосталь.
+    const kinds = KINDS_BY_WHERE[where].filter((k) => !NODES[k].max || all().filter((o) => o.k === k).length < NODES[k].max);
+    if (!kinds.length) break;
+    fresh[randomBytes(6).toString("hex")] = { k: pickWeighted(kinds), x, y, w: where };
   }
   return fresh;
 }
 
 /**
- * Ресурси острова на цю мить. Нові виростають ліниво — при читанні: раз на GROW_MS по одному
+ * Ресурси острова на цю мить. Нові виростають ліниво — при читанні: раз на growMs по одному
  * на кожен тип землі, де їх менше за норму. Перше відкриття — острів одразу заростає.
  * @param {string} owner чий острів (homeOwner)
  * @param {number[][]} taken зайняті прямокутники
+ * @param {keyof typeof REALMS} realmId рідний острів чи Хуртовина
  */
-export async function growNodes(owner, taken) {
+export async function growNodes(owner, taken, realmId = "home") {
+  const { key: keyOf, target, growMs } = realmOf(realmId);
   const r = getRedis();
-  const key = nodesKey(owner);
+  const key = keyOf(owner);
   const h = await r.hGetAll(key);
   const now = Date.now();
   const nodes = {};
@@ -126,17 +191,17 @@ export async function growNodes(owner, taken) {
     if (v) nodes[id] = v;
   }
   const last = Number(h._t) || 0;
-  const steps = last ? Math.floor((now - last) / GROW_MS) : Infinity;
+  const steps = last ? Math.floor((now - last) / growMs) : Infinity;
   // Два паралельні запити стану не посадять ліс двічі.
-  if (steps > 0 && (await takeCooldown(owner, "nodegrow", 1500))) {
+  if (steps > 0 && (await takeCooldown(owner, realmId === "home" ? "nodegrow" : `nodegrow:${realmId}`, 1500))) {
     const fresh = {};
-    for (const where of Object.keys(TARGET)) {
+    for (const where of Object.keys(target)) {
       const have = Object.values(nodes).filter((n) => (n.w ?? NODES[n.k].where) === where).length;
-      const want = Math.min(TARGET[where] - have, steps);
+      const want = Math.min(target[where] - have, steps);
       if (want > 0) Object.assign(fresh, sprout({ ...nodes, ...fresh }, taken, where, want));
     }
     // Відлік — від останнього «кроку», щоб частковий час не губився.
-    const t = last ? last + steps * GROW_MS : now;
+    const t = last ? last + steps * growMs : now;
     const tx = r.multi().hSet(key, "_t", String(Math.min(t, now)));
     for (const [id, n] of Object.entries(fresh)) tx.hSet(key, id, JSON.stringify(n));
     await tx.exec();
@@ -146,34 +211,54 @@ export async function growNodes(owner, taken) {
 }
 
 /** Ресурси для стану гри — уже з новими, що встигли вирости. */
-export async function getNodes(userId, taken) {
+export async function getNodes(userId, taken, realmId = "home") {
   const { owner } = await homeOwner(userId);
-  return growNodes(owner, taken);
+  return growNodes(owner, taken, realmId);
 }
 
 const randInt = ([a, b]) => a + Math.floor(Math.random() * (b - a + 1));
 
-/** Що випало з ресурсу: інструмент кращий за потрібний — +1 до першого. */
+/** Ресурс із таблиці «ресурс → вага». */
+function pickFind(table) {
+  const entries = Object.entries(table);
+  let r = Math.random() * entries.reduce((s, [, w]) => s + w, 0);
+  for (const [id, w] of entries) if ((r -= w) < 0) return id;
+  return entries.at(-1)[0];
+}
+
+/** Що випало з ресурсу: інструмент кращий за потрібний — +1 до першого (або ще одна знахідка). */
 function rollLoot(def, tier) {
   /** @type {Record<string, number>} */
   const got = {};
-  let first = true;
+  const better = def.tool && tier > def.tier;
+  let first = !def.finds;
   for (const [id, spec] of Object.entries(def.loot)) {
     let n = Array.isArray(spec) ? randInt(spec) : Math.random() < spec.chance ? spec.n : 0;
-    if (first && def.tool && tier > def.tier) n += 1;
+    if (first && better) n += 1;
     first = false;
     if (n > 0) got[id] = n;
+  }
+  if (def.finds) {
+    const rolls = randInt(def.finds.rolls) + (better ? 1 : 0);
+    for (let k = 0; k < rolls; k++) {
+      const id = pickFind(def.finds.table);
+      got[id] = (got[id] ?? 0) + 1;
+    }
   }
   return got;
 }
 
-/** Зрубати / розбити / підняти ресурс. Двоє одночасно — дістанеться тому, хто перший. */
-export async function gatherNode(userId, id) {
+/**
+ * Зрубати / розбити / підняти / розкопати ресурс. Двоє одночасно — дістанеться тому, хто перший.
+ * @param {keyof typeof REALMS} realmId рідний острів чи Хуртовина
+ */
+export async function gatherNode(userId, id, realmId = "home") {
+  const realm = realmOf(realmId);
   if (typeof id !== "string" || !ID.test(id)) throw badRequest("Невідомий ресурс.");
   if (!(await takeCooldown(userId, "gather", GATHER_COOLDOWN_MS))) throw new GameError(429, "cooldown", "Секунду — ще замахуєшся.");
   const { owner } = await homeOwner(userId);
   const r = getRedis();
-  const key = nodesKey(owner);
+  const key = realm.key(owner);
   const node = parse(await r.hGet(key, id));
   if (!node) throw new GameError(404, "not_found", "Тут уже нічого немає.");
   const def = NODES[node.k];
@@ -190,7 +275,7 @@ export async function gatherNode(userId, id) {
   return { node: { id, k: node.k, x: node.x, y: node.y }, got };
 }
 
-/** Для каталогу: що де росте й чим добувати. */
+/** Для каталогу: що де росте й чим добувати. finds — що трапляється під снігом, від найчастішого. */
 export function nodesCatalog() {
   return Object.entries(NODES).map(([id, d]) => ({
     id,
@@ -200,5 +285,6 @@ export function nodesCatalog() {
     tier: d.tier ?? 0,
     hits: d.hits,
     loot: Object.keys(d.loot),
+    ...(d.finds && { finds: Object.entries(d.finds.table).sort((a, b) => b[1] - a[1]).map(([res]) => res) }),
   }));
 }

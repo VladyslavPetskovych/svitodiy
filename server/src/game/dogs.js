@@ -39,7 +39,7 @@ const GIFTS = [
 const GIFT_TOTAL = GIFTS.reduce((s, g) => s + g.w, 0);
 
 export const MODES = ["follow", "sit", "house"];
-const SCENES = { island: { w: 512, h: 448 }, home: { w: 240, h: 192 } };
+const SCENES = { island: { w: 512, h: 448 }, home: { w: 240, h: 192 }, winter: { w: 448, h: 416 } };
 
 /**
  * Чим можна нагодувати: будь-яка риба, риб'яча кістка й деякі овочі з городу.

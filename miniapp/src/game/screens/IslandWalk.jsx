@@ -15,6 +15,7 @@ import { INTERIOR_GEOM, interiorInteract } from '../walk/interior.js'
 import { DEFAULT_FLOOR, FLOOR_COLORS, FLOOR_SHEET, floorRect } from '../walk/floors.js'
 import { DOGS, dogById } from '../walk/companion.js'
 import { INTERACT } from '../walk/layout.js'
+import { WINTER_INTERACT } from '../walk/winter.js'
 import { skyAt, skyOverrideFromUrl } from '../walk/sky.js'
 import { BuildingSheet } from './Home.jsx'
 import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
@@ -25,22 +26,27 @@ const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися' }
 /** Ресурси на острові — «node:<id>». */
 const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
 /** Чим добувати: кнопка дії. */
-const GATHER = { axe: '🪓 Рубати', pickaxe: '⛏️ Добути', hand: '🤲 Зібрати' }
+const GATHER = { axe: '🪓 Рубати', pickaxe: '⛏️ Добути', shovel: '🪏 Копати', hand: '🤲 Зібрати' }
+/** Знахідки, після яких сиплються іскри: гроші й срібло. */
+const RARE = new Set(['old_coin', 'silver_piece'])
+/** Що сказати біля вогнища на Хуртовині. */
+const WARM = ['🔥 Руки відігріті', '🔥 Тепло…', '🔥 Ще хвилинку — і копати далі']
 /** Пси-компаньйони — не будівлі, тож їхні «точки» для панелі дії мають id «dog:<ім'я>». */
 const dogOf = (id) => (id?.startsWith('dog:') ? dogById(id.slice(4)) : null)
 /** Грядки на полі — «plot:<№>». */
 const plotOf = (id) => (id?.startsWith('plot:') ? Number(id.slice(5)) : null)
 
 /** Підказка по тапу на небо: що зараз і чим це корисно. */
-function skyHint(sky) {
+function skyHint(sky, wild) {
   const wet = sky.weather.id === 'rain' || sky.weather.id === 'storm'
   const time = sky.part.id === 'night' ? 'Ніч — маяк і ліхтарі світять яскравіше.' : `${sky.part.name} за твоїм місцевим часом.`
+  if (wild) return `${sky.part.emoji} ${sky.part.name}. ❄️ На Хуртовині завжди сніжить${wet ? ' — а зараз ще й завірюха' : ''}.`
   const weather = wet ? 'Дощ сам поливає город 🌱' : 'Погода спільна для всіх острівців.'
   return `${sky.part.emoji} ${time} ${sky.weather.emoji} ${weather}`
 }
@@ -80,9 +86,12 @@ const CATS_HOME = [
   { value: 'floor', label: '🟫 Підлога' },
 ]
 
-/** Рідний острів зсередини: ходиш мандрівником, підходиш до будівель — або будуєш у пісочниці. */
-export default function IslandWalk() {
-  const { wa, state, catalog, items, act, toast, setToastSink, switchTab, back } = useGame()
+/**
+ * Рідний острів зсередини: ходиш мандрівником, підходиш до будівель — або будуєш у пісочниці.
+ * start='winter' — Острів Хуртовини: там не будують, а копають замети лопатою й б'ють лід.
+ */
+export default function IslandWalk({ start = 'island' }) {
+  const { wa, state, catalog, items, act, toast, setToastSink, switchTab, go, back } = useGame()
   const canvas = useRef(null)
   const engine = useRef(null)
   const [error, setError] = useState(null)
@@ -96,9 +105,11 @@ export default function IslandWalk() {
   const [ghost, setGhost] = useState(null) // { kind, x, y, uid?, ok, reason? }
   const [sel, setSel] = useState(null) // id виділеної прикраси
   const [busy, setBusy] = useState(false)
-  const [scene, setScene] = useState('island') // 'island' | 'home'
+  const [scene, setScene] = useState(start) // 'island' | 'home' | 'winter'
   const [floorTry, setFloorTry] = useState(null) // { p, c } — приміряємо ще не куплений візерунок
   const indoors = scene === 'home'
+  /** Дикий острів (Хуртовина): ні будівництва, ні города — лише ресурси й човен додому. */
+  const wild = scene === 'winter'
   // Город і пси.
   const [farmTab, setFarmTab] = useState(null) // шторка комори: 'seeds' | 'sell' | 'guide' | null
   const [seed, setSeed] = useState(null) // яке насіння садити наступним тапом
@@ -106,6 +117,8 @@ export default function IslandWalk() {
   const [craft, setCraft] = useState(false) // шторка верстата
   const [closet, setCloset] = useState(false) // шторка шафи з одягом
   const gathering = useRef(false) // добування в процесі — другий тап не почне нове
+  // Ресурси, які вже добуто: поки новий стан не дійшов до кнопки, повторний тап не шле запит удруге.
+  const gathered = useRef(new Set())
   const working = useRef(new Set()) // грядки, на яких дія ще в дорозі до сервера
   // «Викопати» / «Розібрати»: перший тап перетворює кнопку на «Точно?», другий — підтверджує.
   const [armed, setArmed] = useState(null)
@@ -128,6 +141,9 @@ export default function IslandWalk() {
   const floor = state.floor ?? DEFAULT_FLOOR_STATE
   const houseLevel = Math.max(1, home.levels.house ?? 1)
   const nodes = state.nodes ?? NO_DECO
+  const winterNodes = state.winter?.nodes ?? NO_DECO
+  /** Ресурси острова, на якому ти зараз. */
+  const sceneNodes = wild ? winterNodes : nodes
   const tools = state.tools ?? {}
   /**
    * Що можна поставити на острові: будівлі (будуються одразу на місці), грядки, верстат і комора,
@@ -297,14 +313,14 @@ export default function IslandWalk() {
     return { kind: def.tool, ok: tier >= def.tier, tier, need: t?.levels[def.tier - 1]?.name ?? 'інструмент' }
   }
   const nodeDef = (id) => {
-    const n = nodes.find((x) => x.id === id)
+    const n = sceneNodes.find((x) => x.id === id)
     return n ? catalog.nodes?.find((d) => d.id === n.k) : null
   }
 
   /** Зрубати / розбити / підняти: кілька замахів у рушії, потім сервер видає здобич. */
   const gather = async (id) => {
     const def = nodeDef(id)
-    if (!def || gathering.current) return
+    if (!def || gathering.current || gathered.current.has(id)) return
     const tool = toolFor(def)
     if (!tool.ok) {
       haptic('warning')
@@ -314,12 +330,22 @@ export default function IslandWalk() {
     gathering.current = true
     const hits = Math.max(1, def.hits - (tool.tier > def.tier ? 1 : 0))
     await engine.current?.gatherFx(id, hits, tool.kind)
-    const res = await act('POST', `/island/nodes/${id}/gather`)
+    const res = await act('POST', `/${wild ? 'winter' : 'island'}/nodes/${id}/gather`)
     gathering.current = false
     if (!res) return
+    gathered.current.add(id)
     haptic('success')
     const got = shortGot(items, res.got)
-    say(got || 'Нічого цікавого', 'hero', got ? 'good' : 'calm')
+    // Гроші й срібло з-під снігу — з іскрами.
+    const rare = Object.keys(res.got ?? {}).some((k) => RARE.has(k))
+    say(got || 'Нічого цікавого', 'hero', got ? 'good' : 'calm', rare ? 'coins' : null)
+  }
+
+  /** Сісти в човен на Хуртовині й попливти додому — на рідний острів. */
+  const sailHome = () => {
+    haptic('medium')
+    switchTab('home')
+    go('walk')
   }
 
   /* ───── Пси ───── */
@@ -382,6 +408,9 @@ export default function IslandWalk() {
     else if (id === 'exit') goScene('island')
     else if (BUILDINGS.has(id)) setSheet(id)
     else if (id === 'chest') claimDaily()
+    else if (id === 'sail_home') sailHome()
+    else if (id === 'winter_sign') say('❄️ Острів Хуртовини. Копай замети лопатою 🪏 — під снігом трапляється всяке.', 'winter_sign', 'calm')
+    else if (id === 'winter_fire') say(pickOne(WARM), 'hero', 'calm')
     else if (id === 'fishing') switchTab('fishing')
     else if (id === 'boat') switchTab('map')
     else if (actOf(id) === 'bed') say('😴 Сил додалось!', 'hero', 'calm')
@@ -622,6 +651,7 @@ export default function IslandWalk() {
           onBuildTap: (p) => handlers.current.buildTap(p),
         })
         engine.current = walk
+        if (start !== 'island') walk.setScene(start)
         if (import.meta.env.DEV) window.__walk = walk // для ручних перевірок у консолі
         setReady(true)
       },
@@ -632,7 +662,13 @@ export default function IslandWalk() {
       walk?.destroy()
       engine.current = null
     }
-  }, [])
+    // start не змінюється, поки екран відкритий (інший острів — інший екран у навігації).
+  }, [start])
+
+  // Острів Хуртовини: замети, лід і хмиз.
+  useEffect(() => {
+    if (ready) engine.current?.setWinter({ nodes: winterNodes })
+  }, [ready, winterNodes])
 
   // Рівні будівель, скриня й декор → що стоїть на острові.
   const chestOpen = state.daily.claimedToday
@@ -740,10 +776,20 @@ export default function IslandWalk() {
         ? { id: near, label: nearNode.name }
         : indoors
           ? interiorInteract(interior).find((i) => i.id === near)
-          : islandSpot(catalog, near)
+          : wild
+            ? (WINTER_INTERACT.find((i) => i.id === near) ?? null)
+            : islandSpot(catalog, near)
   const showSeeds = !build && !indoors && (plotV ? plotV.action === 'plant' || plotV.action === 'till' : actOf(near) === 'farmshop')
   const hasBench = deco.some((d) => d.k === 'workbench')
-  const hint = build ? null : indoors ? (interior.length ? null : 'Хата порожня — натисни 🔨 і постав, що хочеш.') : survivalHint(state, hasBench, tools)
+  const hint = build
+    ? null
+    : indoors
+      ? interior.length
+        ? null
+        : 'Хата порожня — натисни 🔨 і постав, що хочеш.'
+      : wild
+        ? winterHint(tools)
+        : survivalHint(state, hasBench, tools)
   /** «Назад»: з хати — надвір, з острова — туди, звідки прийшли. */
   const leave = () => {
     if (indoors) return goScene('island')
@@ -760,7 +806,7 @@ export default function IslandWalk() {
   return (
     // Повноекранний острів: полотно на весь екран, керування — поверх нього.
     // Висота полотна не залежить від панелей, тож камера не смикається, коли вони з'являються.
-    <div className="relative h-full w-full overflow-hidden bg-[#3b7fd0]">
+    <div className={`relative h-full w-full overflow-hidden ${wild ? 'bg-[#2d5f86]' : 'bg-[#3b7fd0]'}`}>
       {/* Будь-який дотик до острова під час обходу грядок — зупиняє обхід (гравець перехопив керування). */}
       <canvas ref={canvas} className="absolute inset-0 block h-full w-full touch-none" onPointerDown={() => stopChain()} />
       {!ready && (
@@ -768,7 +814,7 @@ export default function IslandWalk() {
           <motion.span className="text-4xl" animate={error ? {} : { y: [0, -6, 0] }} transition={{ duration: 1.2, repeat: Infinity }}>
             {error ? '🌫️' : '⛵'}
           </motion.span>
-          <p className="px-6 text-sm text-cream">{error ?? 'Пристаємо до берега…'}</p>
+          <p className="px-6 text-sm text-cream">{error ?? (wild ? 'Пливемо до Хуртовини…' : 'Пристаємо до берега…')}</p>
         </div>
       )}
 
@@ -799,11 +845,18 @@ export default function IslandWalk() {
               <HudButton
                 label={`👥${company.length}`}
                 title="Хто ще на острові"
-                onClick={() => say(company.map((c) => `${c.name} ${c.scene === 'home' ? 'у хатинці 🏠' : 'надворі 🌿'}`).join(' · '), 'hero', 'calm')}
+                onClick={() => say(company.map((c) => `${c.name} ${c.scene === 'home' ? 'у хатинці 🏠' : c.scene === 'winter' ? 'на Хуртовині ❄️' : 'надворі 🌿'}`).join(' · '), 'hero', 'calm')}
                 wide
               />
             )}
-            {!build && <HudButton label={`${sky.part.emoji}${sky.weather.emoji}`} title={`${sky.part.name} · ${sky.weather.name}`} onClick={() => say(skyHint(sky), 'hero', 'calm')} wide />}
+            {!build && (
+              <HudButton
+                label={`${sky.part.emoji}${wild ? '❄️' : sky.weather.emoji}`}
+                title={`${sky.part.name} · ${wild ? 'сніг' : sky.weather.name}`}
+                onClick={() => say(skyHint(sky, wild), 'hero', 'calm')}
+                wide
+              />
+            )}
             <HudButton label="+" title="Наблизити" onClick={() => engine.current?.zoom(0.8)} />
             <HudButton label="−" title="Віддалити" onClick={() => engine.current?.zoom(1.25)} />
             {!build && <HudButton label="📯" title="Покликати псів" onClick={whistle} />}
@@ -970,7 +1023,11 @@ export default function IslandWalk() {
               </div>
               <div className="pointer-events-auto flex shrink-0 flex-col gap-2">
                 {indoors && <RoundButton label="🚪" title="Надвір" variant="blue" onClick={() => goScene('island')} />}
-                <RoundButton label="🔨" title={indoors ? 'Облаштувати' : 'Будувати'} variant="yellow" disabled={!ready} onClick={enterBuild} />
+                {wild ? (
+                  <RoundButton label="⛵" title="Додому" variant="blue" disabled={!ready} onClick={sailHome} />
+                ) : (
+                  <RoundButton label="🔨" title={indoors ? 'Облаштувати' : 'Будувати'} variant="yellow" disabled={!ready} onClick={enterBuild} />
+                )}
               </div>
             </div>
           </>
@@ -1363,7 +1420,15 @@ function islandSpot(catalog, id) {
 /** Підказка біля ресурсу: що з нього буде або чого бракує. */
 function nodeHint(items, def, tool) {
   if (!tool.ok) return `Потрібна ${tool.need.toLowerCase()} — зроби на верстаті`
-  return `Дасть: ${def.loot.map((id) => itemOf(items, id).name.toLowerCase()).join(', ')}`
+  const name = (id) => itemOf(items, id).name.toLowerCase()
+  if (def.finds) return `Під снігом: ${def.finds.slice(0, 3).map(name).join(', ')}…`
+  return `Дасть: ${def.loot.map(name).join(', ')}`
+}
+
+/** Підказка на Хуртовині: без лопати замети не розкопати. */
+function winterHint(tools) {
+  if (!tools.shovel) return 'Замети копають лопатою 🪏 — зроби її вдома на верстаті 🪚. Хмиз можна зібрати й руками.'
+  return null
 }
 
 /** Підказка, що робити далі: від порожнього острова до сокири й кайла. */
@@ -1383,6 +1448,9 @@ function spotIcon(catalog, id) {
 function spotHint(catalog, levels, chestOpen, id) {
   if (id.startsWith('dog:')) return 'Вірний пес — ходить за тобою слідом'
   if (id === 'exit') return 'Повернутися на острів'
+  if (id === 'sail_home') return 'Попливти на рідний острів'
+  if (id === 'winter_sign') return 'Що тут і як'
+  if (id === 'winter_fire') return 'Тут тепло — можна відігріти руки'
   if (actOf(id) === 'farmshop') return 'Насіння, продаж урожаю й поради'
   if (actOf(id) === 'workbench') return 'Інструменти й дошки з колод'
   if (actOf(id) === 'bed') return 'Перина й вишита ковдра'

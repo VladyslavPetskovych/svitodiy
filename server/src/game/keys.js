@@ -40,5 +40,6 @@ export const interiorKey = (id) => `svitodiy:indeco:${id}`; // хатинка: i
 export const floorKey = (id) => `svitodiy:infloor:${id}`; // підлога хатинки: { p — візерунок, c — колір, own — куплені візерунки через кому }
 export const dogsKey = (id) => `svitodiy:dogs:${id}`; // пси: id пса → JSON { love, fedDay, petDay, mode, sit }
 export const nodesKey = (id) => `svitodiy:nodes:${id}`; // ресурси острова: id → JSON { k, x, y, w } і _t — коли виріс останній
-export const toolsKey = (id) => `svitodiy:tools:${id}`; // інструменти гравця: axe / pickaxe → рівень
+export const winterNodesKey = (id) => `svitodiy:wnodes:${id}`; // замети, лід і хмиз на Острові Хуртовини — як nodesKey
+export const toolsKey = (id) => `svitodiy:tools:${id}`; // інструменти гравця: axe / pickaxe / shovel → рівень
 export const wearKey = (id) => `svitodiy:wear:${id}`; // одяг гравця: own — що є (через кому), hat / top / bottom — що вдягнено

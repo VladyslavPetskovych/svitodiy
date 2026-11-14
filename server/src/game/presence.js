@@ -19,10 +19,14 @@ import { getWear } from "./wardrobe.js";
  * пси, ресурси) її збільшує, а клієнт, що бачив старішу, тихо перезавантажує /state.
  */
 
-/** Розміри сцен у px — ті самі, що MAP (miniapp/src/game/walk/layout.js) і HOME_MAP (walk/home.js). */
+/**
+ * Розміри сцен у px — ті самі, що MAP (miniapp/src/game/walk/layout.js), HOME_MAP (walk/home.js)
+ * і WINTER_MAP (walk/winter.js). Нові сцени — лише в кінець: точки зберігають номер сцени.
+ */
 const SCENES = [
   { id: "island", w: 512, h: 448 },
   { id: "home", w: 240, h: 192 },
+  { id: "winter", w: 448, h: 416 },
 ];
 
 /** Скільки мовчить гравець, поки ми вважаємо його ще на острові. */
@@ -186,7 +190,7 @@ function refreshWear(userId, m, now) {
 }
 
 /**
- * Тіло: { seq, fx, fy, s: [[ago, x, y, scene], ...] } — scene: 'island' | 'home',
+ * Тіло: { seq, fx, fy, s: [[ago, x, y, scene], ...] } — scene: 'island' | 'home' | 'winter',
  * ago — скільки мс тому (за годинником клієнта) була точка. Час ставимо свій, серверний.
  * @param {{ id: number, first_name?: string, username?: string }} tgUser
  */

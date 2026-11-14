@@ -56,6 +56,11 @@ const ITEM_ART = new Set([
   'battery',
   'glass',
   'iron_ingot',
+  'quartz',
+  'obsidian',
+  'silicon_wafer',
+  'insulated_wire',
+  'solar_panel',
   'relic_ring_wanderer',
   'relic_hook_silver',
   'relic_hook_gold',
@@ -151,6 +156,11 @@ export function sourceOf(catalog, id) {
   if (id === 'battery') return 'Зроби на верстаті: мідь, брухт, скло й дріт. Постав у будові → ⚡ Електрика'
   if (id === 'glass') return 'Виплав в електропечі з уламків скла'
   if (id === 'iron_ingot') return 'Виплав в електропечі з металевого брухту'
+  if (id === 'quartz') return 'Виплав в електропечі з каменю й уламка скла'
+  if (id === 'obsidian') return 'Виплав в електропечі: камінь на лаву, загартуй брилою льоду'
+  if (id === 'silicon_wafer') return 'Зроби на електроверстаті ⚙️ з кварцу'
+  if (id === 'insulated_wire') return 'Зроби на електроверстаті ⚙️: голий дріт у каучуку'
+  if (id === 'solar_panel') return 'Зроби на електроверстаті ⚙️. Постав у будові → ⚡ Електрика'
   if (id === 'rubber') return 'Збирай з гевеї на острові — 3 щогодини'
   if (id === 'rubber_seed') return 'Рідко: у рибі, на вудці й у корчах на пляжі. Посади гевею в будівництві 🔨'
   if (id === 'tree_seed') return 'Трапляється в рибі, на вудці й у корчах на пляжі. Посади в будівництві 🔨'

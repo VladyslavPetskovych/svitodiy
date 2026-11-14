@@ -26,6 +26,12 @@ export const RESOURCE_TYPES = [
   { id: "battery", emoji: "🔋", name: "Акумулятор" },
   { id: "glass", emoji: "🪟", name: "Скло" },
   { id: "iron_ingot", emoji: "🔩", name: "Залізний злиток" },
+  // Електропіч плавить кварц і обсидіан; з них на електроверстаті — пластини й сонячні панелі.
+  { id: "quartz", emoji: "💠", name: "Кварц" },
+  { id: "obsidian", emoji: "🖤", name: "Обсидіан" },
+  { id: "silicon_wafer", emoji: "🔲", name: "Кремнієва пластина" },
+  { id: "insulated_wire", emoji: "➿", name: "Ізольований дріт" },
+  { id: "solar_panel", emoji: "☀️", name: "Сонячна панель" },
 ];
 
 /**

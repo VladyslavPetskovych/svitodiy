@@ -5,7 +5,9 @@
  *  - посаджене дерево: tree_plant_0 (горбик з насіниною), tree_plant_1 (паросток),
  *    tree_young_<порода> (деревце) — далі сервер перетворює його на справжнє дерево (nodes.js).
  *  - акумулятор battery_0…3 (скільки банок світиться — стільки заряду) і електропіч furnace_off / furnace_on.
- *  - іконки для рюкзака: copper_ingot, bare_wire, tree_seed, battery, glass, iron_ingot (public/game/items/<id>.png).
+ *  - електроверстат e_bench_off / e_bench_on і сонячна панель solar_panel_deco.
+ *  - іконки для рюкзака: copper_ingot, bare_wire, tree_seed, battery, glass, iron_ingot,
+ *    quartz, obsidian, silicon_wafer, insulated_wire, solar_panel (public/game/items/<id>.png).
  */
 
 const K = '#2b1d16'
@@ -696,7 +698,200 @@ export function powerArt({ Img, hash, canopy, shadow, LEAF }) {
     return img.outline(K, 0.7)
   }
 
+  /* ───────── Електроверстат ───────── */
+
+  /**
+   * Дерев'яний стіл із залізною стільницею: лещата зліва, паяльна станція з екранчиком і котушка
+   * дроту справа. Увімкнений (є енергія в мережі) — екран світиться зеленим і паяльник жевріє.
+   */
+  function eBench(on) {
+    const img = new Img(36, 32)
+    shadow(img, 18, 30, 16, 2.5)
+    // Ніжки й поперечка.
+    for (const x of [4, 29]) {
+      img.rect(x, 17, 3, 13, WOOD.mid)
+      img.vline(x, 17, 29, WOOD.hi)
+      img.vline(x + 2, 17, 29, WOOD.lo)
+    }
+    img.rect(6, 24, 24, 2, WOOD.lo)
+    img.hline(6, 29, 24, WOOD.mid)
+    // Полиця під стільницею з ящиком інструментів.
+    img.rect(9, 20, 10, 4, IRON.lo)
+    img.hline(9, 18, 20, IRON.hi)
+    img.rect(13, 21, 2, 1, COPPER.mid)
+    // Стільниця: дерево під залізною плитою.
+    img.rect(2, 15, 32, 3, WOOD.pale)
+    img.hline(2, 33, 17, WOOD.lo)
+    img.rect(2, 13, 32, 2, IRON.mid)
+    img.hline(2, 33, 13, IRON.hi)
+    for (const x of [4, 12, 24, 31]) img.set(x, 14, '#cfd6da') // заклепки
+    // Лещата зліва.
+    img.rect(4, 9, 6, 4, IRON.lo)
+    img.rect(4, 8, 6, 1, IRON.hi)
+    img.rect(6, 6, 2, 2, IRON.mid)
+    img.hline(3, 10, 11, '#33393e')
+    // Паяльна станція: корпус, екран, ручка-регулятор.
+    img.rect(15, 4, 10, 9, IRON.mid)
+    img.vline(15, 4, 12, IRON.hi)
+    img.vline(24, 4, 12, IRON.lo)
+    img.hline(15, 24, 4, IRON.hi)
+    const scr = on ? ['#d8ffd0', '#7cf07a'] : ['#2c3a48', '#24303c']
+    img.rect(16, 5, 6, 4, scr[1])
+    img.hline(16, 21, 5, scr[0])
+    if (on) img.rows(['G.G.GG', '.GG.G.'], 16, 7, { G: '#2d6b18' }) // «графік» напруги
+    img.rect(22, 10, 2, 2, COPPER.mid)
+    img.set(17, 11, on ? '#7cf07a' : '#ff5a46') // лампочка живлення
+    // Паяльник на підставці: жало жевріє, коли є струм.
+    img.vline(27, 6, 12, IRON.lo)
+    img.vline(28, 3, 9, '#2b2b2b')
+    img.set(28, 2, on ? '#ffb36a' : IRON.mid)
+    img.set(28, 1, on ? '#fff3b0' : IRON.hi)
+    // Котушка мідного дроту справа.
+    img.rect(30, 9, 4, 4, COPPER.mid)
+    img.hline(30, 33, 9, COPPER.glint)
+    img.vline(31, 9, 12, COPPER.lo)
+    img.vline(33, 9, 12, COPPER.dark)
+    // Кабель у землю.
+    img.vline(33, 18, 29, COPPER.lo)
+    return img.outline(K, 0.9)
+  }
+
+  /* ───────── Сонячна панель ───────── */
+
+  const CELL_BLUE = { frame: '#c9d2d8', dark: '#173a6b', mid: '#24569a', hi: '#3c7cc8', glint: '#bfe3ff' }
+
+  /** Похила панель з комірками на залізній стійці; по діагоналі — відблиск сонця. */
+  function solarDeco() {
+    const img = new Img(34, 30)
+    shadow(img, 16, 28, 14, 2.5)
+    // Стійка й опори.
+    img.rect(14, 16, 4, 12, IRON.mid)
+    img.vline(14, 16, 27, IRON.hi)
+    img.vline(17, 16, 27, IRON.lo)
+    img.rect(8, 26, 16, 2, IRON.lo)
+    img.hline(8, 23, 26, IRON.hi)
+    // Панель — паралелограм: верх зсунутий праворуч (нахил до сонця).
+    const top = 2
+    const bot = 18
+    for (let y = top; y <= bot; y++) {
+      const shift = Math.round(((bot - y) / (bot - top)) * 3)
+      const x0 = 2 + shift
+      const x1 = 27 + shift
+      for (let x = x0; x <= x1; x++) {
+        const edge = y === top || y === bot || x === x0 || x === x1
+        const u = x - x0
+        const v = y - top
+        const seam = u % 5 === 0 || v % 4 === 0
+        let c = edge ? CELL_BLUE.frame : seam ? CELL_BLUE.dark : v < 6 ? CELL_BLUE.hi : CELL_BLUE.mid
+        // Відблиск — діагональна смуга.
+        if (!edge && !seam && Math.abs(u - v * 1.6 - 6) < 1.5) c = CELL_BLUE.glint
+        img.set(x, y, c)
+      }
+    }
+    img.hline(6, 29, top, '#eef3f6')
+    // Коробка з'єднань і кабель у землю.
+    img.rect(18, 19, 4, 3, '#2b2b2b')
+    img.vline(21, 22, 27, COPPER.lo)
+    return img.outline(K, 0.9)
+  }
+
+  /* ───────── Нові іконки ───────── */
+
+  /** Кварц: друза з трьох рожево-білих кристалів. */
+  function quartzIcon() {
+    const img = new Img(18, 18)
+    const crystal = (cx, top, h, w) => {
+      for (let y = top; y < top + h; y++) {
+        const half = y < top + 3 ? (y - top) * (w / 3) : w
+        for (let x = Math.round(cx - half); x <= Math.round(cx + half); x++) img.set(x, y, y < top + 2 ? '#ffffff' : x < cx ? '#fbe9f2' : '#e3b8cf')
+        img.set(Math.round(cx), y, '#ffffff')
+      }
+    }
+    crystal(5, 5, 10, 1.5)
+    crystal(13, 6, 9, 1.5)
+    crystal(9, 1, 14, 2)
+    img.rect(3, 14, 12, 2, '#9c8a96')
+    img.hline(3, 14, 14, '#c2b0bc')
+    return img.outline(K, 0.8)
+  }
+
+  /** Обсидіан: чорний глянцевий уламок із фіолетовими відблисками. */
+  function obsidianIcon() {
+    const img = new Img(18, 18)
+    img.rows(
+      [
+        '.....DDDD.......',
+        '....DMMMHD......',
+        '...DMMHHPMD.....',
+        '..DMMMHPMMMD....',
+        '.DMMMMMMMMMMD...',
+        'DMMMLMMMMMHMMD..',
+        'DMMLLMMMMHPMMMD.',
+        'DMMLLLMMMMMMMMMD',
+        '.DMMLLMMMMMMMMD.',
+        '..DMMLLMMMMMMD..',
+        '...DDMMMMMMDD...',
+        '.....DDDDDD.....',
+      ],
+      1,
+      3,
+      { D: '#120c1a', M: '#2a2236', L: '#1c1626', H: '#6c5a92', P: '#c7b2f0' }
+    )
+    return img.outline(K, 0.6)
+  }
+
+  /** Кремнієва пластина: сіро-синій диск із сіткою чипів і зрізом-«пласкою» внизу. */
+  function waferIcon() {
+    const img = new Img(18, 18)
+    for (let y = 1; y <= 15; y++)
+      for (let x = 1; x <= 16; x++) {
+        const dx = x - 8.5
+        const dy = y - 8.5
+        if (dx * dx + dy * dy > 56) continue
+        const grid = x % 3 === 0 || y % 3 === 0
+        img.set(x, y, grid ? '#5f6f86' : dx + dy < -2 ? '#b9c6d8' : '#8796ad')
+      }
+    for (let k = 0; k < 4; k++) img.set(4 + k, 6 - k, '#eef3fa')
+    return img.outline(K, 0.8)
+  }
+
+  /** Ізольований дріт: моток у червоній і чорній ізоляції з мідними кінчиками. */
+  function insulatedWireIcon() {
+    const img = new Img(18, 18)
+    for (let k = 0; k < 3; k++) {
+      const r = 6 - k * 0.6
+      for (let a = 0; a < Math.PI * 2; a += 0.05) {
+        const x = 9 + Math.cos(a) * r + k * 0.6
+        const y = 9 + Math.sin(a) * (r * 0.75)
+        img.set(x, y, k % 2 ? '#2b2b2b' : '#d8432c')
+      }
+    }
+    img.hline(13, 15, 13, '#d8432c')
+    img.hline(16, 17, 13, COPPER.hi)
+    img.hline(2, 4, 5, '#2b2b2b')
+    img.hline(0, 1, 5, COPPER.hi)
+    return img.outline(K, 0.8)
+  }
+
+  /** Сонячна панель для рюкзака: синя сітка комірок у світлій рамці. */
+  function solarIcon() {
+    const img = new Img(18, 18)
+    for (let y = 2; y <= 14; y++)
+      for (let x = 1; x <= 16; x++) {
+        const edge = x === 1 || y === 2 || x === 16 || y === 14
+        const seam = (x - 1) % 5 === 0 || (y - 2) % 4 === 0
+        let c = edge ? CELL_BLUE.frame : seam ? CELL_BLUE.dark : y < 6 ? CELL_BLUE.hi : CELL_BLUE.mid
+        if (!edge && !seam && Math.abs(x - (y - 2) * 1.3 - 4) < 1) c = CELL_BLUE.glint
+        img.set(x, y, c)
+      }
+    img.rect(7, 15, 4, 2, IRON.mid)
+    return img.outline(K, 0.9)
+  }
+
   const sprites = {}
+  sprites.e_bench_off = eBench(false)
+  sprites.e_bench_on = eBench(true)
+  sprites.solar_panel_deco = solarDeco()
   for (let f = 0; f < WINDMILL_FRAMES; f++) sprites[`windmill_${f}`] = windmillFrame(f)
   for (let l = 0; l <= 3; l++) sprites[`battery_${l}`] = battery(l)
   sprites.furnace_off = furnace(false)
@@ -718,6 +913,11 @@ export function powerArt({ Img, hash, canopy, shadow, LEAF }) {
     battery: batteryIcon(),
     glass: glassIcon(),
     iron_ingot: ingot({ G: '#f4f7f9', W: '#ffffff', H: IRON.hi, M: IRON.mid, L: IRON.lo, D: '#33393e' }),
+    quartz: quartzIcon(),
+    obsidian: obsidianIcon(),
+    silicon_wafer: waferIcon(),
+    insulated_wire: insulatedWireIcon(),
+    solar_panel: solarIcon(),
   }
   return { sprites, items }
 }

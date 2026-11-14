@@ -61,6 +61,17 @@ export const DECO_GEOM = {
     fh: 2,
     act: 'furnace',
   },
+  // Сонячна панель: генератор, удень дає струм своїй мережі (game/solar.js).
+  solar: { sprite: 'solar_panel_deco', fw: 3, fh: 2, act: 'solar' },
+  // Електроверстат: екран світиться, коли в його мережі є енергія (d.g 1), інакше темний (0).
+  e_bench: {
+    sprite: 'e_bench_off',
+    icon: 'e_bench_on',
+    stages: ['e_bench_off', 'e_bench_on'],
+    fw: 4,
+    fh: 2,
+    act: 'e_bench',
+  },
   // Посаджене дерево: спрайт за стадією росту (d.g рахує IslandWalk); останню — за породою (d.sp).
   // Коли виросте, сервер ставить на його місце справжнє дерево (server/src/game/trees.js).
   tree_sprout: {

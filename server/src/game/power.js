@@ -1,13 +1,15 @@
 import { DECOR } from "./decor.js";
 import { CABLE_CELL } from "./cables.js";
-import { windWatts } from "./wind.js";
+import { solarEnergy, solarWatts } from "./solar.js";
+import { windEnergy, windWatts } from "./wind.js";
 
 /**
  * Електрика рідного острова (лише Mini App).
  *
  * Прилади — декор із розділу «power»: вітряк (генератор, watts — найбільше, що дає на сильному вітрі;
  * скільки саме зараз — wind.js), акумулятор (store — скільки Вт·год вміщає, заряд — у полі e, energy.js)
- * і електропіч (бере енергію з акумуляторів своєї мережі, furnace.js).
+ * сонячна панель (генератор, що дає струм удень — solar.js), електропіч і електроверстат
+ * (беруть енергію з акумуляторів своєї мережі, furnace.js).
  *
  * Кабелі лежать під землею: клітинка 8×8 px з кабелем. Прилад під'єднаний, якщо його клітинка
  * або сусідня (по стороні, не по діагоналі) має кабель. Мережа — зв'язна група кабельних клітинок.
@@ -23,8 +25,22 @@ const SIDE_STEPS = [
 
 /** Скільки Вт·год вміщає акумулятор. */
 export const batteryCap = (kind) => POWER.get(kind)?.store ?? 0;
-/** Чи генератор (вітряк). */
+/** Чи генератор (вітряк, сонячна панель). */
 export const isGenerator = (kind) => (POWER.get(kind)?.watts ?? 0) > 0;
+
+/** Скільки Вт генератор d дає в мить now: вітряк — як дме (wind.js), панель — як світить (solar.js). */
+export function genWatts(d, now) {
+  const def = POWER.get(d.k);
+  if (!def?.watts) return 0;
+  return def.solar ? solarWatts(def.watts, now) : windWatts(d.id, now);
+}
+
+/** Скільки Вт·год генератор d дав за [from, to). */
+export function genEnergy(d, from, to) {
+  const def = POWER.get(d.k);
+  if (!def?.watts) return 0;
+  return def.solar ? solarEnergy(def.watts, from, to) : windEnergy(d.id, from, to);
+}
 
 /** Клітинка, в якій стоїть прикраса: якір — низ по центру, тож беремо піксель над ним. */
 export function cellOfDeco(d) {
@@ -100,7 +116,7 @@ export function networksOf(cells, deco, now = Date.now()) {
     const n = networks[index.get(find(piece))];
     n.devices.push(d.id);
     if (def.watts) {
-      n.gen += windWatts(d.id, now);
+      n.gen += genWatts(d, now);
       n.max += def.watts;
       n.sources++;
     }

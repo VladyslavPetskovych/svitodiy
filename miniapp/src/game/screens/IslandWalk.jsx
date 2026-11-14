@@ -19,17 +19,19 @@ import { WINTER_INTERACT } from '../walk/winter.js'
 import { skyAt, skyOverrideFromUrl } from '../walk/sky.js'
 import { BuildingSheet } from './Home.jsx'
 import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
-import { CraftSheet, FurnaceSheet, ResetSheet } from './islandCraft.jsx'
+import { CraftSheet, MachineSheet, ResetSheet } from './islandCraft.jsx'
 import { windWatts } from '../wind.js'
+import { GENERATORS, genWatts } from '../generators.js'
+import { solarFactor } from '../solar.js'
 import { ClosetSheet } from './islandWardrobe.jsx'
 
 const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', battery: '🔋', furnace: '🔥', tree: '🌱', rubber: '🟤', net: '🥅' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', solar: '☀️', battery: '🔋', furnace: '🔥', e_bench: '⚙️', tree: '🌱', rubber: '🟤', net: '🥅' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', battery: 'Глянути', furnace: 'Плавити', tree: 'Глянути', rubber: 'Зібрати', net: 'Глянути' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', solar: 'Глянути', battery: 'Глянути', furnace: 'Плавити', e_bench: 'Майструвати', tree: 'Глянути', rubber: 'Зібрати', net: 'Глянути' }
 /** Ресурси на острові — «node:<id>». */
 const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
 /** Чим добувати: кнопка дії. */
@@ -149,7 +151,7 @@ export default function IslandWalk({ start = 'island' }) {
   const [dogSheet, setDogSheet] = useState(null) // id пса, чия шторка відкрита
   const [craft, setCraft] = useState(false) // шторка верстата
   const [closet, setCloset] = useState(false) // шторка шафи з одягом
-  const [furnace, setFurnace] = useState(null) // id електропечі, чия шторка відкрита
+  const [furnace, setFurnace] = useState(null) // { kind: 'furnace' | 'e_bench', id } — чия шторка відкрита
   const gathering = useRef(false) // добування в процесі — другий тап не почне нове
   // Ресурси, які вже добуто: поки новий стан не дійшов до кнопки, повторний тап не шле запит удруге.
   const gathered = useRef(new Set())
@@ -206,7 +208,7 @@ export default function IslandWalk({ start = 'island' }) {
         return { ...d, charge, g: charge <= 0.02 ? 0 : Math.min(3, Math.ceil(charge * 3)) }
       }
       // Піч: жар у віконці, коли в її мережі є енергія.
-      if (d.k === 'furnace') return { ...d, g: networks.some((n) => n.devices.includes(d.id) && n.stored > 0) ? 1 : 0 }
+      if (d.k === 'furnace' || d.k === 'e_bench') return { ...d, g: networks.some((n) => n.devices.includes(d.id) && n.stored > 0) ? 1 : 0 }
       return d
     })
   }, [rawDeco, treeStages, catalog.trees, catalog.decor, networks])
@@ -214,9 +216,9 @@ export default function IslandWalk({ start = 'island' }) {
   const ripe = rawDeco.some((d) => d.k === TREE_KIND && treeStage(catalog.trees, d, now) >= (catalog.trees?.stages ?? 3))
   /** Електрика острова: Вт на найсильнішому вітрі, заряд акумуляторів (server/src/game/power.js). */
   const power = state.power ?? { gen: 0, max: 0, use: 0, sources: 0, stored: 0, capacity: 0 }
-  /** Скільки Вт вітряки в мережах дають просто зараз — вітер міняється що 10 с (game/wind.js, як на сервері). */
-  const liveWatts = (ids) => ids.reduce((s, id) => s + windWatts(id, now), 0)
-  const gensIn = (n) => n.devices.filter((id) => rawDeco.some((d) => d.id === id && d.k === 'windmill'))
+  /** Скільки Вт генератори в мережах дають просто зараз — вітер що 10 с, сонце повільно (як на сервері). */
+  const liveWatts = (gens) => gens.reduce((s, d) => s + genWatts(d.k, d.id, now), 0)
+  const gensIn = (n) => rawDeco.filter((d) => n.devices.includes(d.id) && GENERATORS.has(d.k))
   const liveGen = liveWatts(networks.flatMap(gensIn))
   /**
    * Що можна поставити на острові: будівлі (будуються одразу на місці), грядки, верстат і комора,
@@ -482,7 +484,7 @@ export default function IslandWalk({ start = 'island' }) {
 
   /** Прилади, що стоять без дроту (їх не з'єднує з мережею жоден кабель). */
   const wiredIds = new Set(state.cables?.wired ?? [])
-  const looseWindmills = deco.filter((d) => ['windmill', 'battery', 'furnace'].includes(d.k) && !wiredIds.has(d.id)).length
+  const looseWindmills = deco.filter((d) => ['windmill', 'solar', 'battery', 'furnace', 'e_bench'].includes(d.k) && !wiredIds.has(d.id)).length
   const whNum = (v) => (Math.floor((v ?? 0) * 10) / 10).toString().replace('.', ',')
 
   /** Вітряк: скільки дає просто зараз (вітер міняється що 10 с) і весь острів — напис над ним. */
@@ -493,6 +495,15 @@ export default function IslandWalk({ start = 'island' }) {
     if (!wiredIds.has(uid)) return say(`${gust} ${w} Вт · без дроту — протягни кабель до акумулятора`, id, 'calm')
     say(`${gust} ${w} Вт зараз · острів: ${liveWatts(networks.flatMap(gensIn))} Вт`, id, 'good')
   }
+  /** Сонячна панель: скільки дає зараз (сонце над Києвом × погода, game/solar.js) — напис над нею. */
+  const solarInfo = (id) => {
+    const uid = id.slice('solar:'.length)
+    const w = genWatts('solar', uid, Date.now())
+    const k = solarFactor(Date.now())
+    const sky = k <= 0 ? '🌙 ніч' : k < 0.3 ? '☁️ мало сонця' : k < 0.75 ? '🌤️' : '☀️ сонце!'
+    if (!wiredIds.has(uid)) return say(`${sky} ${w} Вт · без дроту — протягни кабель до акумулятора`, id, 'calm')
+    say(`${sky} ${w} Вт зараз · острів: ${liveWatts(networks.flatMap(gensIn))} Вт`, id, w > 0 ? 'good' : 'calm')
+  }
   /** Акумулятор: скільки в ньому енергії — свіжий стан з сервера (він дозаряджає за час, що минув). */
   const batteryInfo = async (id) => {
     const uid = id.slice('battery:'.length)
@@ -501,7 +512,7 @@ export default function IslandWalk({ start = 'island' }) {
     const cap = catalog.decor?.find((x) => x.id === 'battery')?.store ?? 50
     if (!d) return
     const net = (res?.state ?? state).cables?.networks?.find((n) => n.devices.includes(uid))
-    const hint = !net ? ' · без дроту' : net.max ? '' : ' · у мережі немає вітряка'
+    const hint = !net ? ' · без дроту' : net.max ? '' : ' · у мережі немає вітряка чи панелі'
     say(`🔋 ${whNum(d.e)} / ${cap} Вт·год${hint}`, id, net?.max ? 'good' : 'calm')
   }
   /** Посаджене дерево: скільки ще рости й що з нього буде. */
@@ -549,7 +560,9 @@ export default function IslandWalk({ start = 'island' }) {
     else if (actOf(id) === 'farmshop') setFarmTab('seeds')
     else if (actOf(id) === 'windmill') windmillInfo(id)
     else if (actOf(id) === 'battery') batteryInfo(id)
-    else if (actOf(id) === 'furnace') setFurnace(id.slice('furnace:'.length))
+    else if (actOf(id) === 'solar') solarInfo(id)
+    else if (actOf(id) === 'furnace') setFurnace({ kind: 'furnace', id: id.slice('furnace:'.length) })
+    else if (actOf(id) === 'e_bench') setFurnace({ kind: 'e_bench', id: id.slice('e_bench:'.length) })
     else if (actOf(id) === 'tree') treeInfo(id)
     else if (actOf(id) === 'rubber') rubberAction(id)
     else if (actOf(id) === 'net') netInfo(id)
@@ -1237,7 +1250,7 @@ export default function IslandWalk({ start = 'island' }) {
                     sel={wireSel}
                     net={wireSel ? netAt(wireSel.at) : null}
                     stock={wireStock}
-                    hasWindmill={deco.some((d) => d.k === 'windmill')}
+                    hasWindmill={deco.some((d) => GENERATORS.has(d.k))}
                     busy={busy}
                     armedNet={armed === 'wire-net'}
                     onLay={layRoute}
@@ -1408,7 +1421,7 @@ export default function IslandWalk({ start = 'island' }) {
       <FarmSheet tab={farmTab} setTab={setFarmTab} onClose={() => setFarmTab(null)} />
       <DogSheet dog={dogSheet ? dogById(dogSheet) : null} onClose={() => setDogSheet(null)} onCommand={commandDog} onFeed={feedDog} />
       <CraftSheet open={craft} onClose={() => setCraft(false)} />
-      <FurnaceSheet id={furnace} onClose={() => setFurnace(null)} />
+      <MachineSheet kind={furnace?.kind} id={furnace?.id} onClose={() => setFurnace(null)} />
       <ClosetSheet open={closet} onClose={() => setCloset(false)} onDressed={() => say(pickOne(DRESSED), 'hero', 'good')} />
       <ResetSheet note={resetSeen ? null : home.reset} onClose={ackReset} />
     </div>
@@ -1573,7 +1586,7 @@ function WireStep({ tool, start, route, sel, net, stock, hasWindmill, busy, arme
       </>
     )
   }
-  if (!hasWindmill) return text('Спершу постав вітряк 🌬️', 'Кабель несе струм від вітряка до всього, що під\'єднано.')
+  if (!hasWindmill) return text('Спершу постав вітряк 🌬️ або сонячну панель ☀️', 'Кабель несе струм від генератора до всього, що під\'єднано.')
   return text('🔌 Торкнись вітряка чи кабелю — звідки тягти', 'Мапу рухай пальцем, щипок — наближення.')
 }
 
@@ -1911,6 +1924,8 @@ function islandSpot(catalog, id) {
   if (actOf(id) === 'windmill') return { id, label: 'Вітряк' }
   if (actOf(id) === 'battery') return { id, label: 'Акумулятор' }
   if (actOf(id) === 'furnace') return { id, label: 'Електропіч' }
+  if (actOf(id) === 'solar') return { id, label: 'Сонячна панель' }
+  if (actOf(id) === 'e_bench') return { id, label: 'Електроверстат' }
   if (actOf(id) === 'tree') return { id, label: 'Посаджене дерево' }
   if (actOf(id) === 'rubber') return { id, label: 'Гевея' }
   if (actOf(id) === 'net') return { id, label: 'Сітка' }
@@ -1955,7 +1970,9 @@ function spotHint(catalog, levels, chestOpen, id) {
   if (actOf(id) === 'workbench') return 'Інструменти, дошки й дріт'
   if (actOf(id) === 'windmill') return 'Крутиться на вітрі — що 10 с від 0 до 40 Вт'
   if (actOf(id) === 'battery') return 'Запасає енергію вітряків своєї мережі'
-  if (actOf(id) === 'furnace') return 'Скло, мідь і залізо — за енергію з акумулятора'
+  if (actOf(id) === 'furnace') return 'Скло, метал, кварц і обсидіан — за енергію з акумулятора'
+  if (actOf(id) === 'solar') return 'Удень дає до 60 Вт — як світить сонце'
+  if (actOf(id) === 'e_bench') return 'Пластини, ізольований дріт і сонячні панелі'
   if (actOf(id) === 'tree') return 'Росте саме — згодом стане деревом'
   if (actOf(id) === 'rubber') return 'Каучукове дерево — 3 каучуку щогодини'
   if (actOf(id) === 'net') return 'Сама ловить дари моря; дрібниці на березі поруч — тапай і збирай'

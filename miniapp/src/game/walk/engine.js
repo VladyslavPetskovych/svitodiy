@@ -15,6 +15,7 @@ import { beamTexture, blobTexture, bubbleTexture, createParticles, crispPixels, 
 import { geometry } from './grid.js'
 import { flowDistance, routeWire as findRoute, segmentAt } from './wires.js'
 import { WIND, windWatts } from '../wind.js'
+import { GENERATORS, genWatts } from '../generators.js'
 import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
 import { DEFAULT_FLOOR, FLOOR_CELL, FLOOR_SHEET, floorRect } from './floors.js'
 import { INTERIOR_GEOM, dogBedSpot, interiorFootprint, interiorInteract, interiorLights, interiorSize, snapInterior, wallRect, wallSpan } from './interior.js'
@@ -591,7 +592,7 @@ export function createWalk(canvas, assets, cb) {
   /** Режим «електрика»: кабелі під землею, підсвічені пристрої, решта — притемнена. */
   const editing = () => mode === 'build' || mode === 'power'
   /** Прилади, що під'єднуються кабелем: вітряк дає струм, акумулятор запасає, піч витрачає. */
-  const ELECTRIC = new Set(['windmill', 'battery', 'furnace'])
+  const ELECTRIC = new Set(['windmill', 'solar', 'battery', 'furnace', 'e_bench'])
   const NO_CABLES = { cells: [], networks: [], wired: [] }
   /** Кабелі острова з сервера: клітинки, мережі, під'єднані прикраси (server/src/game/state.js → cables). */
   let cables = NO_CABLES
@@ -1245,8 +1246,8 @@ export function createWalk(canvas, assets, cb) {
       for (const d of devices) {
         if (!n.devices.includes(d.uid)) continue
         netOf.set(d.uid, n)
-        if (d.kind === 'windmill') {
-          gens.push(d.uid)
+        if (GENERATORS.has(d.kind)) {
+          gens.push(d)
           for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) src.push([d.cell[0] + dx, d.cell[1] + dy])
         }
       }
@@ -1263,8 +1264,8 @@ export function createWalk(canvas, assets, cb) {
     return wireCache
   }
 
-  /** Скільки Вт дають вітряки мережі просто зараз (вітер — game/wind.js, той самий, що на сервері). */
-  const liveWatts = (net) => net.gens.reduce((s, id) => s + windWatts(id, Date.now()), 0)
+  /** Скільки Вт дають генератори мережі просто зараз (вітер і сонце — ті самі формули, що на сервері). */
+  const liveWatts = (net) => net.gens.reduce((s, d) => s + genWatts(d.kind, d.uid, Date.now()), 0)
 
   /**
    * Кабелі під землею — на землі, під напівпрозорими прикрасами. Видно лише в режимі електрики.
@@ -1286,13 +1287,11 @@ export function createWalk(canvas, assets, cb) {
     }
     const phase = t * 7
 
-    const netWatts = new Map()
     for (const net of W.nets) {
       const dim = netHL !== null && net.n.id !== netHL
       // Мідна — мережа з вітряком (навіть на штилі); струм, що біжить, — скільки дме просто зараз.
       const live = net.gens.length > 0
       const watts = live ? liveWatts(net) : 0
-      netWatts.set(net.n.id, watts)
       ctx.globalAlpha = dim ? 0.28 : 1
       // Оболонка, мідна жила, відблиск — кабель читається на будь-якому ґрунті.
       stroke(net.path, '#140a05', 5.2)
@@ -1344,8 +1343,8 @@ export function createWalk(canvas, assets, cb) {
         deviceRing(cx, cy, '#ff5a46', blink)
         continue
       }
-      if (d.kind === 'windmill') deviceRing(cx, cy, (netWatts.get(net.id) ?? 0) > 0 ? '#ffe066' : '#c9b8a8', 0.95)
-      else if (d.kind === 'furnace') deviceRing(cx, cy, net.stored > 0 ? '#ff9a3c' : '#c9b8a8', 0.95)
+      if (GENERATORS.has(d.kind)) deviceRing(cx, cy, genWatts(d.kind, d.uid, Date.now()) > 0 ? '#ffe066' : '#c9b8a8', 0.95)
+      else if (d.kind === 'furnace' || d.kind === 'e_bench') deviceRing(cx, cy, net.stored > 0 ? '#ff9a3c' : '#c9b8a8', 0.95)
       else if (d.kind === 'battery') {
         deviceRing(cx, cy, '#5a6b5e', 0.9)
         if (d.charge > 0) {

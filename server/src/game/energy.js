@@ -1,8 +1,7 @@
 import { getRedis } from "../bot.js";
 import { homeOwner } from "./household.js";
 import { decoKey, homeKey } from "./keys.js";
-import { batteryCap, isGenerator, networksOf } from "./power.js";
-import { windEnergy } from "./wind.js";
+import { batteryCap, genEnergy, isGenerator, networksOf } from "./power.js";
 
 /**
  * Енергія в акумуляторах (лише Mini App).
@@ -68,7 +67,7 @@ export async function settleLocked(owner, deco, cells, now) {
     const batteries = parts.filter((d) => batteryCap(d.k) > 0);
     const gens = parts.filter((d) => isGenerator(d.k));
     if (!batteries.length || !gens.length) continue;
-    let made = gens.reduce((s, g) => s + windEnergy(g.id, from, now), 0);
+    let made = gens.reduce((s, g) => s + genEnergy(g, from, now), 0);
     for (const b of batteries) {
       if (made <= 0) break;
       const cap = batteryCap(b.k);

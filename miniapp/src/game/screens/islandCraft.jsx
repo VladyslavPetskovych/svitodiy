@@ -139,14 +139,21 @@ export function CraftSheet({ open, onClose }) {
 
 const wh = (v) => (Math.floor((v ?? 0) * 10) / 10).toString().replace('.', ',')
 
+/** Електричні машини: рецепти з каталогу, куди слати запит і як назвати (server/src/game/furnace.js → MACHINES). */
+const MACHINE_UI = {
+  furnace: { title: '🔥 Електропіч', who: 'Піч', recipes: (c) => c.furnace?.recipes, url: (id) => `/home/furnace/${id}/smelt` },
+  e_bench: { title: '⚙️ Електроверстат', who: 'Верстат', recipes: (c) => c.eBench?.recipes, url: (id) => `/home/e-bench/${id}/craft` },
+}
+
 /**
- * Електропіч: скло, мідь і залізо за енергію з акумуляторів її мережі (server/src/game/furnace.js).
- * id — яка саме піч (у кожної своя мережа). Відкрили — оновлюємо стан: сервер дозаряджає акумулятори.
+ * Електропіч чи електроверстат: рецепти за енергію з акумуляторів мережі машини.
+ * kind — 'furnace' | 'e_bench', id — яка саме (у кожної своя мережа). Відкрили — оновлюємо стан: сервер дозаряджає акумулятори.
  */
-export function FurnaceSheet({ id, onClose }) {
+export function MachineSheet({ kind, id, onClose }) {
   const { state, catalog, items, act, toast } = useGame()
   const [busy, setBusy] = useState(false)
-  const recipes = catalog.furnace?.recipes ?? []
+  const ui = MACHINE_UI[kind] ?? MACHINE_UI.furnace
+  const recipes = ui.recipes(catalog) ?? []
   const net = id ? state.cables?.networks?.find((n) => n.devices.includes(id)) : null
   const stored = net?.stored ?? 0
 
@@ -157,7 +164,7 @@ export function FurnaceSheet({ id, onClose }) {
   const smelt = async (r, count) => {
     if (busy) return
     setBusy(true)
-    const res = await act('POST', `/home/furnace/${id}/smelt`, { recipe: r.id, count })
+    const res = await act('POST', ui.url(id), { recipe: r.id, count })
     setBusy(false)
     if (!res) return
     haptic('success')
@@ -167,19 +174,20 @@ export function FurnaceSheet({ id, onClose }) {
   const timesOf = (r) => Math.min(10, Math.floor(stored / r.energy + 1e-9), ...Object.entries(r.in).map(([k, n]) => Math.floor((state.inventory[k] ?? 0) / n)))
 
   const status = !net
-    ? { tone: 'text-[#a3341f]', text: '🔌 Не під\'єднана. У будові → ⚡ Електрика протягни до неї кабель від акумулятора.' }
+    ? { tone: 'text-[#a3341f]', text: `🔌 ${ui.who} не під'єднано. У будові → ⚡ Електрика протягни кабель від акумулятора.` }
     : !net.capacity
-      ? { tone: 'text-[#a3341f]', text: '🔋 У мережі печі немає акумулятора — енергії нізвідки взяти.' }
+      ? { tone: 'text-[#a3341f]', text: '🔋 У цій мережі немає акумулятора — енергії нізвідки взяти.' }
       : !net.max
-        ? { tone: 'text-[#8a5a00]', text: `🔋 ${wh(stored)} / ${net.capacity} Вт·год · у мережі немає вітряка, нова енергія не прийде.` }
+        ? { tone: 'text-[#8a5a00]', text: `🔋 ${wh(stored)} / ${net.capacity} Вт·год · у мережі немає вітряка чи панелі, нова енергія не прийде.` }
         : { tone: 'text-[#2d6b18]', text: `🔋 ${wh(stored)} / ${net.capacity} Вт·год у мережі` }
 
   return (
-    <Sheet open={!!id} onClose={onClose} title="🔥 Електропіч">
+    <Sheet open={!!id} onClose={onClose} title={ui.title}>
       <div className="flex flex-col gap-3">
         <p className={`rounded-sm bg-parch-dark/50 p-2 text-center text-sm font-bold ${status.tone}`}>{status.text}</p>
         <p className="text-center text-xs text-ink-soft">
-          Піч бере енергію з акумулятора своєї мережі. Вітряк дає від 0 до 40 Вт — як подме; у середньому ~20 Вт·год за годину.
+          {ui.who} бере енергію з акумулятора своєї мережі. Вітряк дає від 0 до 40 Вт — як подме (у середньому ~20 Вт·год за годину);
+          сонячна панель удень — до 60 Вт.
         </p>
         {recipes.map((r) => {
           const n = timesOf(r)

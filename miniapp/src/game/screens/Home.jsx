@@ -375,7 +375,7 @@ export function BuildingSheet({ building: b, onClose }) {
                 </PxButton>
               ) : (
                 <PxButton variant="green" size="lg" className="w-full" disabled={!affordable || busy} onClick={upgrade}>
-                  {`🔨 Покращити до ${lvl + 1}`}
+                  {lvl === 0 ? '🔨 Збудувати' : `🔨 Покращити до рівня ${lvl + 1}`}
                 </PxButton>
               )}
               {b.placeable && lvl === 0 && <p className="text-center text-xs text-ink-soft">Зійди на острів → «Будувати» → «Будова» й обери місце.</p>}

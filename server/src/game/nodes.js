@@ -27,9 +27,10 @@ import { getTools, TOOL_NAMES } from "./craft.js";
  * Кращий інструмент (tier вищий за потрібний) дає +1 до першого ресурсу (з finds — ще одну знахідку).
  */
 export const NODES = {
-  oak: { name: "Дуб", emoji: "🌳", where: "grass", weight: 4, tool: "axe", tier: 1, hits: 3, loot: { log: [1, 2], twig: [1, 2] } },
-  birch: { name: "Береза", emoji: "🌳", where: "grass", weight: 3, tool: "axe", tier: 1, hits: 2, loot: { twig: [2, 3], log: [0, 1] } },
-  pine: { name: "Ялинка", emoji: "🌲", where: "grass", weight: 3, tool: "axe", tier: 1, hits: 3, loot: { log: [2, 2] } },
+  // Звичайні дерева й каміння ростуть рідше (rare — частка кроків росту, коли вони взагалі можуть з'явитись).
+  oak: { name: "Дуб", emoji: "🌳", where: "grass", weight: 4, rare: 0.4, tool: "axe", tier: 1, hits: 3, loot: { log: [1, 2], twig: [1, 2] } },
+  birch: { name: "Береза", emoji: "🌳", where: "grass", weight: 3, rare: 0.4, tool: "axe", tier: 1, hits: 2, loot: { twig: [2, 3], log: [0, 1] } },
+  pine: { name: "Ялинка", emoji: "🌲", where: "grass", weight: 3, rare: 0.4, tool: "axe", tier: 1, hits: 3, loot: { log: [2, 2] } },
   bush: { name: "Кущ", emoji: "🌿", where: "grass", weight: 4, tool: null, hits: 1, loot: { twig: [1, 2] } },
   berry_bush: {
     name: "Кущ із ягодами",
@@ -40,8 +41,8 @@ export const NODES = {
     hits: 1,
     loot: { twig: [1, 1], seed_radish: { chance: 0.35, n: 1 }, seed_carrot: { chance: 0.2, n: 1 } },
   },
-  pebble: { name: "Камінчик", emoji: "🪨", where: "grass", weight: 3, tool: null, hits: 1, loot: { stone: [1, 1] } },
-  rock: { name: "Камінь", emoji: "🪨", where: "grass", weight: 2, tool: "pickaxe", tier: 1, hits: 3, loot: { stone: [2, 3] } },
+  pebble: { name: "Камінчик", emoji: "🪨", where: "grass", weight: 3, rare: 0.4, tool: null, hits: 1, loot: { stone: [1, 1] } },
+  rock: { name: "Камінь", emoji: "🪨", where: "grass", weight: 2, rare: 0.4, tool: "pickaxe", tier: 1, hits: 3, loot: { stone: [2, 3] } },
   boulder: {
     name: "Валун",
     emoji: "🪨",
@@ -186,7 +187,10 @@ function sprout(nodes, taken, where, n, lure = []) {
     // Види з лімітом (max) більше не ростуть, коли їх уже вдосталь.
     const kinds = KINDS_BY_WHERE[where].filter((k) => !NODES[k].max || all().filter((o) => o.k === k).length < NODES[k].max);
     if (!kinds.length) break;
-    fresh[randomBytes(6).toString("hex")] = { k: pickWeighted(kinds), x, y, w: where };
+    // Рідкісні види (rare): якщо випав такий, а кидок не вдався — цей крок нічого не виросло.
+    const k = pickWeighted(kinds);
+    if (NODES[k].rare && Math.random() >= NODES[k].rare) continue;
+    fresh[randomBytes(6).toString("hex")] = { k, x, y, w: where };
   }
   return fresh;
 }

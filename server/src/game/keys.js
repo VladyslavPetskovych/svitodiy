@@ -38,6 +38,7 @@ export function previousDay(day) {
 export const farmKey = (id) => `svitodiy:farm:${id}`; // город: № грядки → JSON { c, g, w }
 export const interiorKey = (id) => `svitodiy:indeco:${id}`; // хатинка: id речі → JSON { k, x, y } або { k, w, a, h }
 export const floorKey = (id) => `svitodiy:infloor:${id}`; // підлога хатинки: { p — візерунок, c — колір, own — куплені візерунки через кому }
+export const cablesKey = (id) => `svitodiy:cables:${id}`; // кабелі під землею: «cx,cy» → «1» (cables.js)
 export const dogsKey = (id) => `svitodiy:dogs:${id}`; // пси: id пса → JSON { love, fedDay, petDay, mode, sit }
 export const nodesKey = (id) => `svitodiy:nodes:${id}`; // ресурси острова: id → JSON { k, x, y, w } і _t — коли виріс останній
 export const winterNodesKey = (id) => `svitodiy:wnodes:${id}`; // замети, лід і хмиз на Острові Хуртовини — як nodesKey

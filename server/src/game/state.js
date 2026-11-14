@@ -21,7 +21,8 @@ import { getTools } from "./craft.js";
 import { getWear } from "./wardrobe.js";
 import { ensureIsland, takenBoxes } from "./island.js";
 import { getNodes } from "./nodes.js";
-import { powerOf } from "./power.js";
+import { getCables } from "./cables.js";
+import { networksOf, powerOf } from "./power.js";
 import { ripenTrees } from "./trees.js";
 import { creditNets } from "./nets.js";
 import { islandSnapshot } from "./presence.js";
@@ -82,13 +83,23 @@ async function getJob(userId) {
 }
 
 /** Усе про гравця одним запитом — після кожної дії клієнт просто замінює стан. */
+/** Кабелі для клієнта: клітинки, мережі (клітинки й пристрої) і ті прикраси, що під'єднані. */
+function cablesView(cells, deco) {
+  const { networks, wired } = networksOf(cells, deco);
+  return {
+    cells,
+    networks: networks.map((n) => ({ id: n.id, cells: n.cells, devices: n.devices, gen: n.gen })),
+    wired: [...wired],
+  };
+}
+
 export async function getState(userId) {
   // Версію спільного острова фіксуємо ДО читання: зміна посеред читання не загубиться (presence.js).
   const island = await islandSnapshot(userId);
   await grantAdminResources(userId);
   await ensureIsland(userId);
   const r = getRedis();
-  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, allDeco, goal, farm, dogs, interior, floor] = await Promise.all([
+  const [h, inventory, job, access, arcs, intensity, reminders, quizCount, home, allDeco, goal, farm, dogs, interior, floor, cells] = await Promise.all([
     r.hGetAll(userKey(userId)),
     getInventory(userId),
     getJob(userId),
@@ -104,6 +115,7 @@ export async function getState(userId) {
     getDogs(userId),
     getInterior(userId),
     getFloor(userId),
+    getCables(userId),
   ]);
   // Дорослі посаджені дерева стають ресурсами — до читання ресурсів, щоб уже були в стані.
   const deco = await ripenTrees(userId, allDeco);
@@ -145,7 +157,9 @@ export async function getState(userId) {
     home,
     deco,
     // Електрика острова: скільки Вт дають вітряки (power.js).
-    power: powerOf(deco),
+    power: powerOf(deco, cells),
+    // Кабелі під землею (малюються лише в режимі електрики): клітинки і мережі, що з них складаються.
+    cables: cablesView(cells, deco),
     farm,
     dogs,
     interior,

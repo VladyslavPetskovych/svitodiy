@@ -1,8 +1,8 @@
 import { getRedis, isSharedHomeHost, sharedHomeId } from "../bot.js";
-import { decoKey, dogsKey, farmKey, floorKey, homeKey, interiorKey, nodesKey } from "./keys.js";
+import { cablesKey, decoKey, dogsKey, farmKey, floorKey, homeKey, interiorKey, nodesKey } from "./keys.js";
 
 /** Усе, що належить острову (а не гравцю): будівлі й комора, декор, город, хатинка, підлога, пси, ресурси. */
-const ISLAND_KEYS = [homeKey, decoKey, farmKey, interiorKey, floorKey, dogsKey, nodesKey];
+const ISLAND_KEYS = [homeKey, decoKey, farmKey, interiorKey, floorKey, dogsKey, nodesKey, cablesKey];
 /** Позначка «спільний острів уже звірено з островом господаря» (значення — id господаря). */
 const pinnedKey = (shared) => `svitodiy:sharedhost:${shared}`;
 

@@ -4,6 +4,7 @@ import { adminReport, saveContact } from "./game/admin.js";
 import { buildCatalog } from "./game/catalog.js";
 import { cast, cookFish, craft, equip, sellAllFish, sellFish } from "./game/chasodiy.js";
 import { claimDaily } from "./game/daily.js";
+import { layCables, removeCables } from "./game/cables.js";
 import { moveDecor, placeDecor, removeDecor } from "./game/decor.js";
 import { commandDog, feedDog, petDog } from "./game/dogs.js";
 import { GameError } from "./game/errors.js";
@@ -127,6 +128,10 @@ export function buildApiRouter(botToken) {
   api.post("/home/deco", handler(island((req) => placeDecor(uid(req), body(req).kind, body(req).x, body(req).y))));
   api.post("/home/deco/:id/move", handler(island((req) => moveDecor(uid(req), req.params.id, body(req).x, body(req).y))));
   api.delete("/home/deco/:id", handler(island((req) => removeDecor(uid(req), req.params.id))));
+
+  // Електрика: кабелі під землею (за один запит — смуга клітинок, як тягнеш пальцем)
+  api.post("/home/cables", handler(island((req) => layCables(uid(req), body(req).cells))));
+  api.delete("/home/cables", handler(island((req) => removeCables(uid(req), body(req).cells))));
 
   // Пісочниця в хатинці: меблі й речі на стінах
   api.post("/home/interior", handler(island((req) => placeInterior(uid(req), body(req)))));

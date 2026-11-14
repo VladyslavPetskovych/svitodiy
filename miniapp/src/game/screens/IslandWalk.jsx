@@ -14,7 +14,7 @@ import { geomOf } from '../walk/decor.js'
 import { INTERIOR_GEOM, interiorInteract } from '../walk/interior.js'
 import { DEFAULT_FLOOR, FLOOR_COLORS, FLOOR_SHEET, floorRect } from '../walk/floors.js'
 import { DOGS, dogById } from '../walk/companion.js'
-import { INTERACT } from '../walk/layout.js'
+import { CELL, INTERACT } from '../walk/layout.js'
 import { WINTER_INTERACT } from '../walk/winter.js'
 import { skyAt, skyOverrideFromUrl } from '../walk/sky.js'
 import { BuildingSheet } from './Home.jsx'
@@ -128,6 +128,11 @@ export default function IslandWalk({ start = 'island' }) {
   const [ghost, setGhost] = useState(null) // { kind, x, y, uid?, ok, reason? }
   const [sel, setSel] = useState(null) // id виділеної прикраси
   const [busy, setBusy] = useState(false)
+  // Електрика: кабелі під землею (категорія «⚡ Електрика» у будові).
+  const [wireTool, setWireTool] = useState('lay') // 'lay' — прокладаю, 'cut' — знімаю
+  const [netSel, setNetSel] = useState(null) // мережа, яку підсвічено зі списку
+  const stroke = useRef(null) // мазок пальцем: { cells: Map, cut }
+  const wireQueue = useRef(Promise.resolve()) // запити на кабель йдуть по черзі
   const [scene, setScene] = useState(start) // 'island' | 'home' | 'winter'
   const [floorTry, setFloorTry] = useState(null) // { p, c } — приміряємо ще не куплений візерунок
   const indoors = scene === 'home'
@@ -445,6 +450,10 @@ export default function IslandWalk({ start = 'island' }) {
     }
   }
 
+  /** Вітряки, що стоять без дроту (їм не дає струму жоден кабель). */
+  const wiredIds = new Set(state.cables?.wired ?? [])
+  const looseWindmills = deco.filter((d) => d.k === 'windmill' && !wiredIds.has(d.id)).length
+
   /** Вітряк: скільки дає він і весь острів — напис над ним. */
   const windmillInfo = (id) => {
     const watts = catalog.decor?.find((d) => d.id === 'windmill')?.watts ?? 40
@@ -682,6 +691,87 @@ export default function IslandWalk({ start = 'island' }) {
     engine.current?.setFloor(floorTry ?? floor)
   }, [ready, floorTry, floor])
 
+  /* ───── Електрика: кабелі під землею ───── */
+
+  /** Клітинка 8×8 під пальцем — додаємо до мазка, без повторів. */
+  const addWire = (x, y) => {
+    const s = stroke.current
+    if (!s || x == null) return
+    const cx = Math.floor(x / CELL)
+    const cy = Math.floor(y / CELL)
+    const k = `${cx},${cy}`
+    if (s.cells.has(k)) return
+    s.cells.set(k, [cx, cy])
+    engine.current?.setWirePreview({ cells: [...s.cells.values()], cut: s.cut })
+  }
+
+  /** Мазок закінчено — шлемо на сервер. Запити йдуть по черзі з паузою: кабель приймається не частіше ніж раз на 150 мс. */
+  const flushWire = () => {
+    const s = stroke.current
+    stroke.current = null
+    if (!s || !s.cells.size) {
+      engine.current?.setWirePreview(null)
+      return
+    }
+    const cells = [...s.cells.values()]
+    const cut = s.cut
+    wireQueue.current = wireQueue.current.then(async () => {
+      await new Promise((r) => setTimeout(r, 160))
+      const res = await act(cut ? 'DELETE' : 'POST', '/home/cables', { cells }, { onError: (m) => say(m, 'hero', 'error') })
+      if (!stroke.current) engine.current?.setWirePreview(null)
+      if (!res) return
+      if (cut && res.refund) say(`🧵 +${res.refund}`, 'hero', 'good')
+      else if (!cut && res.added) say(`🔌 +${res.added} м`, 'hero', 'good')
+    })
+  }
+
+  /** Палець у режимі електрики: тягнеш — кладеш (або знімаєш) кабель смугою. Обрана прикраса — ставиться тапом. */
+  const wireEvent = (ev) => {
+    if (ev.phase === 'cancel') {
+      stroke.current = null
+      engine.current?.setWirePreview(null)
+      return
+    }
+    const placing = !!(pick || ghost)
+    if (ev.phase === 'down') {
+      if (placing) return
+      stroke.current = { cells: new Map(), cut: wireTool === 'cut' }
+      addWire(ev.x, ev.y)
+    } else if (ev.phase === 'move') {
+      addWire(ev.x, ev.y)
+    } else if (ev.phase === 'end') {
+      if (placing) {
+        if (!ev.moved && ev.x != null) buildTap({ x: ev.x, y: ev.y, uid: null })
+        return
+      }
+      flushWire()
+    }
+  }
+
+  /** Категорія в будові: «⚡ Електрика» вмикає режим електрики, інші — звичайну будову. */
+  const changeCat = (c) => {
+    const wasPower = cat === 'power'
+    setCat(c)
+    setFloorTry(null)
+    if (c === 'floor' || c === 'power' || wasPower) {
+      clearGhost()
+      select(null)
+    }
+    if (c === 'power' && !indoors) engine.current?.setMode('power')
+    else if (wasPower) {
+      setNetSel(null)
+      engine.current?.setNetHighlight(null)
+      engine.current?.setMode('build')
+    }
+  }
+
+  /** Підсвітити мережу зі списку (повторний тап — зняти). */
+  const pickNet = (id) => {
+    const next = netSel === id ? null : id
+    setNetSel(next)
+    engine.current?.setNetHighlight(next)
+  }
+
   const enterBuild = () => {
     haptic('medium')
     stopChain()
@@ -710,7 +800,7 @@ export default function IslandWalk({ start = 'island' }) {
   // Обробники рушія читають свіжі значення через ref — рушій створюється один раз.
   const handlers = useRef({})
   useEffect(() => {
-    handlers.current = { interact, collect, buildTap, chainNext }
+    handlers.current = { interact, collect, buildTap, chainNext, wire: wireEvent }
   })
 
   // Усі повідомлення на острові (і помилки сервера) — написами над мандрівником, а не плашками.
@@ -747,6 +837,7 @@ export default function IslandWalk({ start = 'island' }) {
           onInteract: (id) => handlers.current.interact(id),
           onBubble: () => handlers.current.collect(),
           onBuildTap: (p) => handlers.current.buildTap(p),
+          onWire: (ev) => handlers.current.wire?.(ev),
         })
         engine.current = walk
         if (start !== 'island') walk.setScene(start)
@@ -780,8 +871,8 @@ export default function IslandWalk({ start = 'island' }) {
   // Рівні будівель, скриня й декор → що стоїть на острові.
   const chestOpen = state.daily.claimedToday
   useEffect(() => {
-    engine.current?.setWorld({ home: { levels: home.levels, pos: home.pos ?? {} }, chestOpen, deco, interior, nodes })
-  }, [ready, home.levels, home.pos, chestOpen, deco, interior, nodes])
+    engine.current?.setWorld({ home: { levels: home.levels, pos: home.pos ?? {} }, chestOpen, deco, interior, nodes, cables: state.cables })
+  }, [ready, home.levels, home.pos, chestOpen, deco, interior, nodes, state.cables])
 
   // Поле: що де росте (оновлюється й саме — волога грядка дорослішає без запитів).
   // need — значок над грядкою (💧 🧺 🌱): що їй треба, видно здалеку. 🌱 — лише якщо є що садити.
@@ -977,20 +1068,25 @@ export default function IslandWalk({ start = 'island' }) {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 px-2" style={{ paddingBottom: SAFE_BOTTOM }}>
         {build ? (
           <div className="pointer-events-auto overflow-hidden rounded-sm bg-[#0f2a3d]/85 p-2 shadow-[0_-4px_16px_#0006] backdrop-blur-[2px]">
+            {cat === 'power' && !indoors && (
+              <WireBar
+                tool={wireTool}
+                setTool={setWireTool}
+                cables={state.cables}
+                inventory={state.inventory}
+                power={power}
+                loose={looseWindmills}
+                netSel={netSel}
+                onNet={pickNet}
+              />
+            )}
             <BuildPanel
               indoor={indoors}
               defs={sandbox.defs}
               placed={sandbox.placed}
               houseLevel={houseLevel}
               cat={cat}
-              setCat={(c) => {
-                setCat(c)
-                setFloorTry(null)
-                if (c === 'floor') {
-                  clearGhost()
-                  select(null)
-                }
-              }}
+              setCat={changeCat}
               floor={floor}
               floorTry={floorTry}
               onFloor={chooseFloor}
@@ -1203,6 +1299,46 @@ function RoundButton({ label, title, onClick, variant, disabled }) {
 }
 
 /* ───────── Панель пісочниці ───────── */
+
+/** Панель електрики над будовою: прокласти чи зняти кабель, скільки є дроту й мережі острова. */
+function WireBar({ tool, setTool, cables, inventory, power, loose, netSel, onNet }) {
+  const nets = cables?.networks ?? []
+  const meters = cables?.cells?.length ?? 0
+  return (
+    <div className="mb-2 flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <PxButton size="sm" variant={tool === 'lay' ? 'green' : 'paper'} onClick={() => setTool('lay')}>
+          🔌 Прокласти
+        </PxButton>
+        <PxButton size="sm" variant={tool === 'cut' ? 'red' : 'paper'} onClick={() => setTool('cut')}>
+          ✂ Зняти
+        </PxButton>
+        <p className="ml-auto text-right font-pixel text-[9px] leading-tight text-cream/80">
+          🧵 {inventory?.bare_wire ?? 0} · кабель {meters} м
+        </p>
+      </div>
+      <div className="flex items-center gap-2 text-[11px] text-cream/85">
+        <span className="text-[#ffe066]">⚡ {power.gen} Вт</span>
+        {loose > 0 && <span className="text-[#ffb3a6]">· {loose} без дроту</span>}
+        {!nets.length && <span className="text-cream/60">· проведи кабель від вітряка</span>}
+      </div>
+      {nets.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+          {nets.map((n, i) => (
+            <button
+              key={n.id}
+              type="button"
+              onClick={() => onNet(n.id)}
+              className={`shrink-0 rounded-sm px-2 py-0.5 text-[11px] font-bold ${netSel === n.id ? 'bg-[#ffe066] text-[#2b1d16]' : 'bg-white/15 text-cream'}`}
+            >
+              Мережа {i + 1} · {n.cells.length} м{n.gen ? ` · ⚡${n.gen}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function BuildPanel({ indoor, defs, placed, houseLevel, cat, setCat, pick, ghost, sel, busy, onChoose, onConfirm, onCancel, onMove, onRemove, armed, floor, floorTry, onFloor, onBuyFloor, onCancelFloor }) {
   const { catalog, state, items } = useGame()

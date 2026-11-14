@@ -567,6 +567,18 @@ export function createWalk(canvas, assets, cb) {
   /** Ресурси сцени, де ти зараз: рідного острова чи Хуртовини. */
   const sceneNodes = () => (scene.id === 'winter' ? winterNodes : (world?.nodes ?? []))
   let mode = 'walk'
+  /** Режим «електрика»: кабелі під землею, підсвічені пристрої, решта — притемнена. */
+  const editing = () => mode === 'build' || mode === 'power'
+  /** Прикраси, що живляться від кабелю (поки лише вітряк). */
+  const ELECTRIC = new Set(['windmill'])
+  const NO_CABLES = { cells: [], networks: [], wired: [] }
+  /** Кабелі острова з сервера: клітинки, мережі, під'єднані прикраси (server/src/game/state.js → cables). */
+  let cables = NO_CABLES
+  /** Мазок, що ще летить до сервера: { cells, cut } — показуємо одразу, не чекаючи відповіді. */
+  let wirePreview = null
+  /** Мережа, яку підсвітили в списку (id), або null. */
+  let netHL = null
+  const dimMats = new Map() // матеріал спрайта → притемнена копія (для режиму електрики)
   let ghost = null // { kind, x, y, uid?, ok, reason? }
   const ghostVis = { x: 0, y: 0, born: -1, badAt: -1 }
   let selected = null
@@ -1033,7 +1045,7 @@ export function createWalk(canvas, assets, cb) {
       const onWall = p.layer === 'wall'
       const g = spriteGeo(p.s, flat)
       if (!g) continue
-      const mesh = new THREE.Mesh(g, matOf(p.s))
+      const mesh = new THREE.Mesh(g, mode === 'power' && !ELECTRIC.has(p.kind) ? dimmedMat(p.s) : matOf(p.s))
       mesh.position.set(p.x, flat ? 0.02 : 0, p.y)
       mesh.renderOrder = flat ? -10 : 0
       if (onWall) mountOnWall(p, mesh)
@@ -1085,7 +1097,20 @@ export function createWalk(canvas, assets, cb) {
     for (const s of fx.smoke) emitters.push({ e: s, kind: 'smoke', acc: Math.random() })
     for (const s of fx.sprays ?? []) emitters.push({ e: s, kind: 'spray', acc: Math.random() })
     for (const f of fx.fires) emitters.push({ e: f, kind: 'fire', acc: 0 })
-    if (mode === 'build') drawGrid()
+    if (editing()) drawGrid()
+  }
+
+  /** Притемнена копія матеріалу спрайта: у режимі електрики решта світу сіра, а не конкурує з приладами. */
+  function dimmedMat(name) {
+    const base = matOf(name)
+    let m = dimMats.get(base)
+    if (!m) {
+      m = base.clone()
+      // Темніше, ніж 40%: видно, що це не можна чіпати.
+      m.color.setScalar(0.06)
+      dimMats.set(base, m)
+    }
+    return m
   }
 
   /** Сітка будівництва: ледь помітні клітинки суші, зайняті — червонуваті. */
@@ -1093,6 +1118,11 @@ export function createWalk(canvas, assets, cb) {
     const ctx = gridCanvas.getContext('2d')
     ctx.clearRect(0, 0, MAP.w, MAP.h)
     const ground = scene.outdoor ? land : homeLand
+    if (mode === 'power') {
+      drawWires(ctx, ground)
+      gridTex.needsUpdate = true
+      return
+    }
     const busy = new Uint8Array(geo.cols * geo.rows)
     for (const p of list) for (const b of p.blocks ?? []) for (const c of geo.cellsOf(b)) if (c >= 0) busy[c] = 1
     for (let c = 0; c < ground.length; c++) {
@@ -1108,6 +1138,65 @@ export function createWalk(canvas, assets, cb) {
       ctx.fillRect(x, y, 1, CELL)
     }
     gridTex.needsUpdate = true
+  }
+
+  /**
+   * Кабелі під землею — малюються на землі, під прикрасами. Видно лише в режимі електрики.
+   * Мережа, підсвічена зі списку, яскрава, решта тьмяніє. Вітряк: жовтий ореол, якщо під'єднаний,
+   * червона крапка, якщо ні. Мазок (ще не збережений) — пунктиром.
+   */
+  function drawWires(ctx, ground) {
+    for (let c = 0; c < ground.length; c++) {
+      if (!ground[c]) continue
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.07)'
+      ctx.fillRect((c % geo.cols) * CELL, Math.floor(c / geo.cols) * CELL, CELL, CELL)
+    }
+    const netOf = new Map()
+    for (const n of cables.networks) for (const [x, y] of n.cells) netOf.set(x + ',' + y, n.id)
+    const lit = (x, y) => netHL === null || netOf.get(x + ',' + y) === netHL
+    const has = new Set(cables.cells.map(([x, y]) => x + ',' + y))
+    const link = (x, y, dx, dy, on) => {
+      ctx.strokeStyle = on ? 'rgba(255, 196, 140, 0.95)' : 'rgba(255, 196, 140, 0.22)'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(x * CELL + CELL / 2, y * CELL + CELL / 2)
+      ctx.lineTo((x + dx) * CELL + CELL / 2, (y + dy) * CELL + CELL / 2)
+      ctx.stroke()
+    }
+    for (const [x, y] of cables.cells) {
+      const on = lit(x, y)
+      ctx.fillStyle = on ? 'rgba(120, 58, 30, 0.75)' : 'rgba(80, 44, 26, 0.35)'
+      ctx.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2)
+      if (has.has(x + 1 + ',' + y)) link(x, y, 1, 0, on && lit(x + 1, y))
+      if (has.has(x + ',' + (y + 1))) link(x, y, 0, 1, on && lit(x, y + 1))
+    }
+    // Мазок, що ще летить до сервера: пунктир поверх того, що є.
+    if (wirePreview) {
+      ctx.strokeStyle = wirePreview.cut ? 'rgba(255, 110, 90, 0.95)' : 'rgba(255, 224, 140, 0.95)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([2, 2])
+      for (const [x, y] of wirePreview.cells) if (ground[y * geo.cols + x] || wirePreview.cut) ctx.strokeRect(x * CELL + 0.5, y * CELL + 0.5, CELL - 1, CELL - 1)
+      ctx.setLineDash([])
+    }
+    // Електрика: вітряки, під'єднані чи ні.
+    const wired = new Set(cables.wired)
+    const hl = cables.networks.find((n) => n.id === netHL)
+    for (const p of list) {
+      if (!p.uid || !ELECTRIC.has(p.kind)) continue
+      const cx = Math.floor(p.x / CELL)
+      const cy = Math.floor((p.y - 1) / CELL)
+      if (wired.has(p.uid)) {
+        const bright = netHL === null || (hl && hl.devices.includes(p.uid))
+        ctx.strokeStyle = bright ? 'rgba(255, 224, 102, 0.95)' : 'rgba(255, 224, 102, 0.25)'
+        ctx.lineWidth = 2
+        ctx.strokeRect(cx * CELL - 3, cy * CELL - 3, CELL * 2 + 2, CELL * 2 + 2)
+      } else {
+        ctx.fillStyle = 'rgba(255, 90, 70, 0.95)'
+        ctx.beginPath()
+        ctx.arc(cx * CELL + CELL / 2, cy * CELL + CELL / 2, 3, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
   }
 
   /* ───── Перебудова сцени ───── */
@@ -1301,9 +1390,10 @@ export function createWalk(canvas, assets, cb) {
   }
 
   /** Стан острова: { home: { levels, pos }, chestOpen, deco, interior, nodes }. */
-  function setWorld({ home, chestOpen, deco = [], interior = [], nodes = [] }) {
+  function setWorld({ home, chestOpen, deco = [], interior = [], nodes = [], cables: cab }) {
     celebrate(home, chestOpen, deco, nodes)
     celebrateInterior(interior)
+    cables = cab ?? NO_CABLES
     world = { home, chestOpen, deco, interior, nodes }
     rebuild()
     if (!dogPlaced) {
@@ -1738,7 +1828,7 @@ export function createWalk(canvas, assets, cb) {
 
   const twoFinger = () => {
     const [a, b] = [...pointers.values()]
-    return { dist: Math.hypot(b.x - a.x, b.y - a.y) }
+    return { dist: Math.hypot(b.x - a.x, b.y - a.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }
   }
 
   const onDown = (e) => {
@@ -1748,6 +1838,7 @@ export function createWalk(canvas, assets, cb) {
     if (pointers.size === 2) {
       // Другий палець — це жест (зум), а не хода.
       gesture = twoFinger()
+      if (held?.kind === 'wire') cb.onWire?.({ phase: 'cancel' })
       held = null
       if (mode === 'walk') {
         path = []
@@ -1759,6 +1850,12 @@ export function createWalk(canvas, assets, cb) {
     if (pointers.size > 2) return
     const p = pick(e.clientX, e.clientY)
     held = { cx: e.clientX, cy: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, p }
+    if (mode === 'power') {
+      // Палець малює кабель (або ставить прикрасу, якщо вибрана — це вирішує інтерфейс).
+      held.kind = 'wire'
+      cb.onWire?.({ phase: 'down', x: p.ground?.x, y: p.ground?.y })
+      return
+    }
     if (mode === 'build') {
       const gg = ghost && ghostGeom(ghost.kind)
       if (gg?.wall && p.wall?.wall === ghost.wall) {
@@ -1791,6 +1888,16 @@ export function createWalk(canvas, assets, cb) {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (gesture && pointers.size === 2) {
       const now = twoFinger()
+      if (mode === 'power') {
+        // Два пальці в електриці — рух камерою: земля під серединою між пальцями лишається на місці.
+        const a = groundAt(gesture.mx, gesture.my)
+        const b = groundAt(now.mx, now.my)
+        if (a && b) {
+          rig.pan(a.x - b.x, a.y - b.y)
+          rig.update(0)
+          camera.updateMatrixWorld()
+        }
+      }
       if (now.dist > 0 && gesture.dist > 0) rig.zoomBy(gesture.dist / now.dist)
       gesture = now
       return
@@ -1800,6 +1907,11 @@ export function createWalk(canvas, assets, cb) {
     held.cy = e.clientY
     if (!held.moved && Math.hypot(e.clientX - held.sx, e.clientY - held.sy) > TAP_SLOP) held.moved = true
     if (!held.moved) return
+    if (held.kind === 'wire') {
+      const g = groundAt(e.clientX, e.clientY)
+      if (g) cb.onWire?.({ phase: 'move', x: g.x, y: g.y })
+      return
+    }
     if (held.kind === 'pan' && held.anchor) {
       // Земля під пальцем лишається під пальцем.
       const g = groundAt(e.clientX, e.clientY)
@@ -1841,6 +1953,12 @@ export function createWalk(canvas, assets, cb) {
       if (!pointers.size) held = null
       return
     }
+    if (held.kind === 'wire') {
+      const g = groundAt(e.clientX, e.clientY)
+      cb.onWire?.({ phase: 'end', moved: held.moved, x: g?.x, y: g?.y })
+      held = null
+      return
+    }
     if (mode === 'build' && !held.moved && (held.p.ground || held.p.wall)) {
       cb.onBuildTap({ x: held.p.ground?.x, y: held.p.ground?.y, wall: held.p.wall, uid: held.p.item?.p.uid ?? null })
     }
@@ -1869,7 +1987,7 @@ export function createWalk(canvas, assets, cb) {
   function playerStep(dt) {
     body.prevX = body.x
     body.prevY = body.y
-    if (mode === 'build') {
+    if (editing()) {
       body.vx = body.vy = 0
       return
     }
@@ -2037,7 +2155,7 @@ export function createWalk(canvas, assets, cb) {
     hero.x = body.prevX + (body.x - body.prevX) * a
     hero.y = body.prevY + (body.y - body.prevY) * a
 
-    if (mode === 'build') {
+    if (editing()) {
       // Стрілки рухають камеру; мандрівник чекає.
       const mv = input.move()
       if (mv.x || mv.y) rig.pan((rig.right.x * mv.x + rig.down.x * mv.y) * 140 * dt, (rig.right.y * mv.x + rig.down.y * mv.y) * 140 * dt)
@@ -2185,14 +2303,14 @@ export function createWalk(canvas, assets, cb) {
     }
 
     // Будівництво: виділена прикраса й привид нового місця.
-    gridMesh.visible = mode === 'build'
+    gridMesh.visible = editing()
     const blink = 0.55 + Math.sin(t * 6) * 0.25
     const sel = mode === 'build' && selected && !ghost && list.find((p) => p.uid === selected)
     if (sel && sel.layer !== 'wall') selFoot.set(footOf(sel.kind, sel.x, sel.y), 0xffdc5a, 0.25 * blink, 0xffe678, blink)
     else selFoot.group.visible = false
 
     // Дощувач: коло, у якому він поливає грядки (центр грядки на 8 px вище її якоря).
-    const sprink = mode === 'build' && scene.outdoor && (ghost?.kind === 'sprinkler' ? ghost : sel?.kind === 'sprinkler' ? sel : null)
+    const sprink = editing() && scene.outdoor && (ghost?.kind === 'sprinkler' ? ghost : sel?.kind === 'sprinkler' ? sel : null)
     reach.visible = !!sprink
     if (sprink) {
       reach.position.set(sprink.x, 0.16, sprink.y + 8)
@@ -2223,7 +2341,7 @@ export function createWalk(canvas, assets, cb) {
         toolSprite.material.opacity = age < 0.55 ? 1 : 1 - (age - 0.55) / 0.25
       }
     }
-    if (ghost && mode === 'build') {
+    if (ghost && editing()) {
       // Привид ковзає до клітинки (а не стрибає), трохи «висить» над землею й тремтить, коли сюди не можна.
       const k = 1 - Math.exp(-25 * dt)
       const g = ghostGeom(ghost.kind)
@@ -2296,6 +2414,8 @@ export function createWalk(canvas, assets, cb) {
     /** 'walk' — гуляємо, 'build' — пісочниця: палець рухає камеру, тап — вибір місця. */
     setMode(m) {
       if (m === mode || (m === 'build' && !scene.farm && scene.outdoor)) return
+      // Електрика — лише на рідному острові (не в хатинці, не на Хуртовині, не на городі).
+      if (m === 'power' && (!scene.outdoor || !scene.farm)) return
       mode = m
       held = null
       input.clear()
@@ -2303,15 +2423,27 @@ export function createWalk(canvas, assets, cb) {
       goal = null
       markerAt = null
       body.vx = body.vy = 0
-      if (m === 'build') {
+      wirePreview = null
+      netHL = null
+      if (editing()) {
         near = null
         cb.onNear(null)
-        drawGrid()
       } else {
         ghost = null
         selected = null
         setGhostMesh()
       }
+      buildItems()
+    },
+    /** Мазок, що ще летить до сервера: { cells, cut } або null. */
+    setWirePreview(w) {
+      wirePreview = w
+      if (mode === 'power') drawGrid()
+    },
+    /** Підсвітити мережу зі списку (id) або зняти підсвітку (null). */
+    setNetHighlight(id) {
+      netHL = id
+      if (mode === 'power') drawGrid()
     },
     /** Привид предмета (або null). Повертає його разом із тим, чи можна тут ставити. */
     setGhost(g) {
@@ -2559,7 +2691,7 @@ export function createWalk(canvas, assets, cb) {
         if (o.geometry && ![...geoCache.values()].includes(o.geometry)) o.geometry.dispose()
         if (o.material) o.material.dispose()
       })
-      for (const m of [...Object.values(sheetMats), ...Object.values(ghostMats)]) m.dispose() // і ті, якими цього разу не малювали
+      for (const m of [...Object.values(sheetMats), ...Object.values(ghostMats), ...dimMats.values()]) m.dispose() // і ті, якими цього разу не малювали
       for (const tex of [glowTex, blobTex, beamTex, gridTex, heroTex, ...Object.values(foamSheets).map((f) => f.tex)]) tex.dispose()
       for (const g of heroGeos) g.dispose()
       lightScene.traverse((o) => o.material?.dispose())

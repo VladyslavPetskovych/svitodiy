@@ -97,7 +97,7 @@ export function GameProvider({ wa, children }) {
 
   /**
    * Виклик API. Повертає відповідь або null (помилку вже показано тостом).
-   * @param {{ silent?: boolean }} [opts]
+   * @param {{ silent?: boolean, onError?: (message: string) => void }} [opts] onError — свій напис про помилку (над героєм, а не плашкою)
    */
   const act = useCallback(
     async (method, path, body, opts = {}) => {
@@ -106,9 +106,11 @@ export function GameProvider({ wa, children }) {
         if (res.state) applyState(res.state)
         return res
       } catch (e) {
-        if (!opts.silent) {
+        const message = e instanceof ApiError ? e.message : 'Щось пішло не так.'
+        if (opts.onError) opts.onError(message)
+        else if (!opts.silent) {
           haptic('error')
-          toast(e instanceof ApiError ? e.message : 'Щось пішло не так.', 'error')
+          toast(message, 'error')
         }
         return null
       }

@@ -92,12 +92,12 @@ const CHAIN = {
   harvest: { all: '🧺 Зібрати все', doing: '🧺 Збираю' },
   plant: { all: '🌱 Засадити всі', doing: '🌱 Саджу' },
 }
+/** Розділи будівництва: робочі споруди й будівлі, електрика, посадки, що дають ресурс, і декор. */
 const CATS = [
   { value: 'build', label: '🏗 Будова' },
-  { value: 'plants', label: '🌿 Рослини' },
-  { value: 'stone', label: '🪨 Камінь' },
-  { value: 'wood', label: '🪵 Дерево' },
-  { value: 'light', label: '💡 Світло' },
+  { value: 'power', label: '⚡ Електрика' },
+  { value: 'garden', label: '🌱 Посадки' },
+  { value: 'decor', label: '🎨 Декор' },
 ]
 /** Пісочниця в хатинці. */
 const CATS_HOME = [
@@ -123,7 +123,7 @@ export default function IslandWalk({ start = 'island' }) {
   const [sheet, setSheet] = useState(null)
   // Пісочниця.
   const [build, setBuild] = useState(false)
-  const [cat, setCat] = useState('plants')
+  const [cat, setCat] = useState('build')
   const [pick, setPick] = useState(null) // id декору, який ставимо
   const [ghost, setGhost] = useState(null) // { kind, x, y, uid?, ok, reason? }
   const [sel, setSel] = useState(null) // id виділеної прикраси

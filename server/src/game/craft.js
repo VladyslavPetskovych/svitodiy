@@ -77,7 +77,7 @@ async function hasWorkbench(userId) {
 
 async function atBench(userId) {
   if (!(await takeCooldown(userId, "craft", 300))) throw new GameError(429, "cooldown", "Секунду — ще майструєш.");
-  if (!(await hasWorkbench(userId))) throw conflict("no_bench", "Спершу постав верстат 🪚 (у будівництві, розділ «Виживання»).");
+  if (!(await hasWorkbench(userId))) throw conflict("no_bench", "Спершу постав верстат 🪚 (у будівництві, розділ «Будова»).");
 }
 
 /** Змайструвати наступний рівень інструмента. */

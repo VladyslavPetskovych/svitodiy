@@ -14,6 +14,11 @@ import { TREE, plantedTree } from "./trees.js";
  * Геометрія (скільки клітинок займає, чи це підлога) — на клієнті, miniapp/src/game/walk/decor.js.
  * У спільному домі декор теж спільний: платить той, хто ставить, повертається тому, хто прибирає.
  */
+/**
+ * Розділи будівництва (cat): survival — робочі споруди (у Mini App — у «Будові» разом із будівлями),
+ * power — електрика (генератори з watts), garden — посадки, що ростуть і дають ресурс,
+ * decor — усе, що лише прикрашає острів.
+ */
 export const DECOR = [
   // Виживання: з цим можна працювати (верстат — інструменти й дошки, комора — насіння й продаж урожаю).
   { id: "workbench", cat: "survival", name: "Верстат", emoji: "🪚", cost: { twig: 4, stone: 2 } },
@@ -35,7 +40,7 @@ export const DECOR = [
   // Вітряк дає електрику (watts, server/src/game/power.js). Дріт тягнуть на верстаті з мідного злиточка.
   {
     id: "windmill",
-    cat: "survival",
+    cat: "power",
     name: "Вітряк",
     emoji: "🌬️",
     cost: { plank: 6, log: 2, stone: 4, bare_wire: 4 },
@@ -45,7 +50,7 @@ export const DECOR = [
   // Посаджене дерево росте само й за TREE.growMs стає справжнім деревом (server/src/game/trees.js).
   {
     id: TREE.kind,
-    cat: "plants",
+    cat: "garden",
     name: "Посадка",
     emoji: "🌰",
     cost: { tree_seed: 1 },
@@ -55,34 +60,34 @@ export const DECOR = [
   // Гевея не рубається: доросла дає каучук, його збирають з чашки на стовбурі (server/src/game/rubber.js).
   {
     id: RUBBER.kind,
-    cat: "plants",
+    cat: "garden",
     name: "Гевея",
     emoji: "🌳",
     cost: { rubber_seed: 1 },
     grows: "rubber",
     hint: `Каучукове дерево: росте ${RUBBER.growMs / 60_000} хв, потім дає ${RUBBER.perHour} каучуку щогодини — збирай з чашки.`,
   },
-  { id: "wildflowers", cat: "plants", name: "Польові квіти", emoji: "🌼", cost: {} },
-  { id: "flower_bed", cat: "plants", name: "Клумба", emoji: "🌷", cost: { twig: 1 } },
-  { id: "sunflowers", cat: "plants", name: "Соняшники", emoji: "🌻", cost: { seaweed: 1 } },
-  { id: "bush", cat: "plants", name: "Кущ", emoji: "🌿", cost: { twig: 2 } },
-  { id: "sapling", cat: "plants", name: "Деревце", emoji: "🌱", cost: { twig: 3 } },
-  { id: "pine", cat: "plants", name: "Ялинка", emoji: "🌲", cost: { log: 2 } },
-  { id: "pumpkins", cat: "plants", name: "Гарбузи", emoji: "🎃", cost: { seaweed: 2 } },
-  { id: "stepping_stone", cat: "stone", name: "Плита", emoji: "🪨", cost: {} },
-  { id: "cobble_tile", cat: "stone", name: "Бруківка", emoji: "🧱", cost: { stone: 1 } },
-  { id: "rock", cat: "stone", name: "Валун", emoji: "🪨", cost: { stone: 1 } },
-  { id: "stone_lantern", cat: "stone", name: "Кам'яний ліхтар", emoji: "🏮", cost: { stone: 3, glass_shard: 1 } },
-  { id: "well", cat: "stone", name: "Криниця", emoji: "⛲", cost: { stone: 6, plank: 2 } },
-  { id: "plank_floor", cat: "wood", name: "Настил", emoji: "🟫", cost: { plank: 1 } },
-  { id: "fence", cat: "wood", name: "Тин", emoji: "🪵", cost: { twig: 2 } },
-  { id: "bench", cat: "wood", name: "Лавка", emoji: "🪑", cost: { plank: 3 } },
-  { id: "barrel", cat: "wood", name: "Бочка", emoji: "🛢", cost: { plank: 2 } },
-  { id: "crates", cat: "wood", name: "Ящики", emoji: "📦", cost: { plank: 2 } },
-  { id: "hay", cat: "wood", name: "Копиця", emoji: "🌾", cost: { twig: 3 } },
-  { id: "signpost", cat: "wood", name: "Вказівник", emoji: "🪧", cost: { plank: 1 } },
-  { id: "lamp_post", cat: "light", name: "Ліхтар", emoji: "💡", cost: { metal_scrap: 1, glass_shard: 1 } },
-  { id: "campfire", cat: "light", name: "Вогнище", emoji: "🔥", cost: { log: 2, stone: 2 } },
+  { id: "wildflowers", cat: "decor", name: "Польові квіти", emoji: "🌼", cost: {} },
+  { id: "flower_bed", cat: "decor", name: "Клумба", emoji: "🌷", cost: { twig: 1 } },
+  { id: "sunflowers", cat: "decor", name: "Соняшники", emoji: "🌻", cost: { seaweed: 1 } },
+  { id: "bush", cat: "decor", name: "Кущ", emoji: "🌿", cost: { twig: 2 } },
+  { id: "sapling", cat: "decor", name: "Деревце", emoji: "🌱", cost: { twig: 3 } },
+  { id: "pine", cat: "decor", name: "Ялинка", emoji: "🌲", cost: { log: 2 } },
+  { id: "pumpkins", cat: "decor", name: "Гарбузи", emoji: "🎃", cost: { seaweed: 2 } },
+  { id: "stepping_stone", cat: "decor", name: "Плита", emoji: "🪨", cost: {} },
+  { id: "cobble_tile", cat: "decor", name: "Бруківка", emoji: "🧱", cost: { stone: 1 } },
+  { id: "rock", cat: "decor", name: "Валун", emoji: "🪨", cost: { stone: 1 } },
+  { id: "stone_lantern", cat: "decor", name: "Кам'яний ліхтар", emoji: "🏮", cost: { stone: 3, glass_shard: 1 } },
+  { id: "well", cat: "decor", name: "Криниця", emoji: "⛲", cost: { stone: 6, plank: 2 } },
+  { id: "plank_floor", cat: "decor", name: "Настил", emoji: "🟫", cost: { plank: 1 } },
+  { id: "fence", cat: "decor", name: "Тин", emoji: "🪵", cost: { twig: 2 } },
+  { id: "bench", cat: "decor", name: "Лавка", emoji: "🪑", cost: { plank: 3 } },
+  { id: "barrel", cat: "decor", name: "Бочка", emoji: "🛢", cost: { plank: 2 } },
+  { id: "crates", cat: "decor", name: "Ящики", emoji: "📦", cost: { plank: 2 } },
+  { id: "hay", cat: "decor", name: "Копиця", emoji: "🌾", cost: { twig: 3 } },
+  { id: "signpost", cat: "decor", name: "Вказівник", emoji: "🪧", cost: { plank: 1 } },
+  { id: "lamp_post", cat: "decor", name: "Ліхтар", emoji: "💡", cost: { metal_scrap: 1, glass_shard: 1 } },
+  { id: "campfire", cat: "decor", name: "Вогнище", emoji: "🔥", cost: { log: 2, stone: 2 } },
 ];
 
 export const DECOR_MAX = 150;

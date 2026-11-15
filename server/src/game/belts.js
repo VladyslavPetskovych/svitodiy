@@ -1,7 +1,7 @@
 import { addResourceToInventory, consumeResources, getFishMeta, getRedis } from "../bot.js";
 import { CABLE_CELL, onLand } from "./cables.js";
 import { BELT, BELT_CRATE } from "./belt-def.js";
-import { FISH_CUTTER, cutUntil, isFish } from "./cutter-def.js";
+import { FISH_CUTTER, PROCESSORS, cutUntil, isProcessor } from "./cutter-def.js";
 import { deckCells, footCellsOf, getDecor } from "./decor.js";
 import { drain, settleLocked, withEnergyLock, writeCharge } from "./energy.js";
 import { GameError, badRequest, conflict } from "./errors.js";
@@ -19,11 +19,11 @@ import { MINE, mineReady } from "./mine.js";
  * Кожна клітинка коштує BELT.cost; прибрав — повертається.
  *
  * Джерела мають жолоб (port, px від якоря): рибальська хата віддає рибу (найціннішу першою — takeFish),
- * шахта — камінь, рибообробня (cutter-def.js) — те, що вийняла з риби. Якщо на клітинці жолоба лежить стрічка,
+ * шахта — камінь, обробники (cutter-def.js) — те, що вийняли: рибообробня — з риби, каменедробарка — з каменю. Якщо на клітинці жолоба лежить стрічка,
  * від неї йдемо за стрілками, доки наступна клітинка — під приймачем (SINKS): скринею (BELT_CRATE) чи
  * рибообробнею. Злиття двох стрічок в одну — просто дві стрілки в одну клітинку.
- * Ланцюжок хата → рибообробня → скриня: рибообробня бере лише рибу (камінь до неї не поїде — стрічка стоїть),
- * а віддає не рибу, тож по колу нічого не їздить.
+ * Ланцюжки хата → рибообробня → скриня і шахта → каменедробарка → скриня: обробник бере лише своє (камінь
+ * до рибообробні не поїде — стрічка стоїть), а віддає інше, тож по колу нічого не їздить.
  *
  * Рахуємо ліниво, як улов хат: у записі джерела поле cv = { bt, fl }:
  *   bt — коли востаннє з жолоба зійшла річ; наступна сходить через BELT.gapMs;
@@ -40,6 +40,30 @@ export const DIRS = [
   [-1, 0],
   [0, -1],
 ];
+
+/** Обробник як джерело: ще не готове — не віддає. */
+function processorSource(p) {
+  return {
+    port: p.port,
+    queue(item, t) {
+      return (item.o ?? []).filter(([at]) => at <= t).map(([, id]) => id);
+    },
+    take(item, id, t) {
+      const o = [...(item.o ?? [])];
+      const i = o.findIndex(([at, x]) => x === id && at <= t);
+      if (i >= 0) o.splice(i, 1);
+      return { ...item, o };
+    },
+    give(item, id) {
+      return { ...item, o: [[0, id], ...(item.o ?? [])] };
+    },
+    /** Коли з'явиться наступне готове (стрічка не стоїть, поки ніж ріже). */
+    nextAt(item, t) {
+      const later = (item.o ?? []).map(([at]) => at).filter((at) => at > t);
+      return later.length ? Math.min(...later) : null;
+    },
+  };
+}
 
 /** Хто віддає речі на стрічку: жолоб і як брати. */
 const SOURCES = {
@@ -80,33 +104,15 @@ const SOURCES = {
       return { ...item, c: (Number(item.c) || Date.now()) - MINE.everyMs };
     },
   },
-  // Рибообробня: віддає нарізане (o) у тому порядку, як воно готове; ще не готове — не віддає.
-  [FISH_CUTTER.kind]: {
-    port: FISH_CUTTER.port,
-    queue(item, t) {
-      return (item.o ?? []).filter(([at]) => at <= t).map(([, id]) => id);
-    },
-    take(item, id, t) {
-      const o = [...(item.o ?? [])];
-      const i = o.findIndex(([at, x]) => x === id && at <= t);
-      if (i >= 0) o.splice(i, 1);
-      return { ...item, o };
-    },
-    give(item, id) {
-      return { ...item, o: [[0, id], ...(item.o ?? [])] };
-    },
-    /** Коли з'явиться наступне готове (стрічка не стоїть, поки ніж ріже). */
-    nextAt(item, t) {
-      const later = (item.o ?? []).map(([at]) => at).filter((at) => at > t);
-      return later.length ? Math.min(...later) : null;
-    },
-  },
+  // Обробники (рибообробня, каменедробарка — cutter-def.js): віддають готове (o) у тому порядку, як воно готове.
+  ...Object.fromEntries(Object.values(PROCESSORS).map((p) => [p.kind, processorSource(p)])),
 };
 
 export const isBeltSource = (k) => !!SOURCES[k];
 
 /**
- * Куди стрічка привозить: скриня бере все, рибообробня — лише рибу й не більше inCap (зі столом разом).
+ * Куди стрічка привозить: скриня бере все, обробник — лише своє (рибообробня — рибу, каменедробарка — камінь)
+ * і не більше inCap (зі столом разом).
  * load — скільки вже лежить, put — покласти одну річ, що доїхала в мить at.
  */
 const SINKS = {
@@ -116,12 +122,17 @@ const SINKS = {
     load: (item) => crateCount(item),
     put: (item, id) => ({ ...item, f: { ...(item.f ?? {}), [id]: (Number(item.f?.[id]) || 0) + 1 } }),
   },
-  [FISH_CUTTER.kind]: {
-    cap: FISH_CUTTER.inCap,
-    accepts: isFish,
-    load: (item) => item.in?.length ?? 0,
-    put: (item, id, at) => ({ ...item, in: [...(item.in ?? []), [at, id]] }),
-  },
+  ...Object.fromEntries(
+    Object.values(PROCESSORS).map((p) => [
+      p.kind,
+      {
+        cap: p.inCap,
+        accepts: p.accepts,
+        load: (item) => item.in?.length ?? 0,
+        put: (item, id, at) => ({ ...item, in: [...(item.in ?? []), [at, id]] }),
+      },
+    ])
+  ),
 };
 
 export const isBeltSink = (k) => !!SINKS[k];
@@ -211,8 +222,8 @@ export async function beltsLocked(owner, deco, now) {
   const key = decoKey(owner);
   const ids = [...new Set(lines.flatMap((l) => [l.src, l.sink]).filter(Boolean))];
   // Джерела, що вже не лежать на стрічці, теж: їхні речі з дороги треба повернути.
-  // Рибообробня ріже й без стрічок — те, що вже лежить на столі.
-  for (const d of deco) if ((d.cv?.fl?.length || d.k === FISH_CUTTER.kind) && !ids.includes(d.id)) ids.push(d.id);
+  // Обробник ріже й без стрічок — те, що вже лежить на столі.
+  for (const d of deco) if ((d.cv?.fl?.length || isProcessor(d.k)) && !ids.includes(d.id)) ids.push(d.id);
   if (!ids.length) return deco;
   const rec = new Map();
   const orig = new Map();
@@ -284,7 +295,7 @@ export async function beltsLocked(owner, deco, now) {
     rec.set(id, { ...item, cv });
   };
 
-  const isCutter = (id) => rec.get(id)?.k === FISH_CUTTER.kind;
+  const isCutter = (id) => isProcessor(rec.get(id)?.k);
   for (const id of ids) if (!isCutter(id)) run(id);
   const charge = await cutLocked(owner, deco, ids.filter(isCutter), rec, lineOf, now);
   for (const id of ids) if (isCutter(id)) run(id);
@@ -301,8 +312,8 @@ export async function beltsLocked(owner, deco, now) {
 }
 
 /**
- * Крок 2: рибообробні ріжуть (вже під замком). Кожна — лише коли під'єднана кабелем до мережі з енергією
- * (FISH_CUTTER.energy Вт·год за рибу з акумуляторів) і з її жолоба йде стрічка до скрині: інакше ніж стоїть.
+ * Крок 2: обробники ріжуть (вже під замком). Кожен — лише коли під'єднаний кабелем до мережі з енергією
+ * (energy Вт·год за річ з акумуляторів, cutter-def.js) і з її жолоба йде стрічка до скрині: інакше ніж стоїть.
  * Пише новий заряд акумуляторів; повертає його (id → Вт·год) — для стану.
  */
 async function cutLocked(owner, deco, cutters, rec, lineOf, now) {
@@ -316,8 +327,8 @@ async function cutLocked(owner, deco, cutters, rec, lineOf, now) {
   for (const id of cutters) {
     const line = lineOf.get(id);
     const dest = line?.sink ? rec.get(line.sink) : null;
-    // Нарізане падає лише на стрічку, що доходить до скрині (не в іншу рибообробню — та бере тільки рибу).
-    const out = !!dest && !!SINKS[dest.k] && dest.k !== FISH_CUTTER.kind;
+    // Готове падає лише на стрічку, що доходить до скрині (не в інший обробник — той бере тільки своє).
+    const out = !!dest && !!SINKS[dest.k] && !isProcessor(dest.k);
     const net = networks.find((n) => n.devices.includes(id));
     const bats = net ? net.devices.filter((b) => charge.has(b)) : [];
     const have = out ? bats.reduce((s, b) => s + charge.get(b), 0) : 0;
@@ -483,13 +494,12 @@ export function beltsCatalog() {
     crate: BELT_CRATE.kind,
     sources: Object.fromEntries(Object.entries(SOURCES).map(([k, s]) => [k, s.port])),
     sinks: Object.keys(SINKS),
-    cutter: {
-      kind: FISH_CUTTER.kind,
-      cutSec: FISH_CUTTER.cutMs / 1000,
-      energy: FISH_CUTTER.energy,
-      inCap: FISH_CUTTER.inCap,
-      outCap: FISH_CUTTER.outCap,
-      port: FISH_CUTTER.port,
-    },
+    cutter: processorCatalog(FISH_CUTTER),
+    // Усі обробники за видом (рибообробня, каменедробарка): клієнт рахує стіл кожного за його cutSec / energy.
+    processors: Object.fromEntries(Object.values(PROCESSORS).map((p) => [p.kind, processorCatalog(p)])),
   };
+}
+
+function processorCatalog(p) {
+  return { kind: p.kind, cutSec: p.cutMs / 1000, energy: p.energy, inCap: p.inCap, outCap: p.outCap, port: p.port };
 }

@@ -53,6 +53,19 @@ export const DECO_GEOM = {
     sink: true,
     port: { dx: 20, dy: -4 },
   },
+  // Каменедробарка (server/src/game/cutter-def.js → STONE_CRUSHER): як рибообробня, але бере камінь із шахти.
+  // Спрайт — scripts/crusher-art.mjs. d.g 0 — без струму, 1 — під струмом, 2 — дробить (кадри stone_crusher_on_0/1).
+  stone_crusher: {
+    sprite: 'stone_crusher',
+    icon: 'stone_crusher_on_0',
+    stages: ['stone_crusher', 'stone_crusher_on', 'stone_crusher_on_0'],
+    anim: (d) => (d.g === 2 ? { frames: ['stone_crusher_on_0', 'stone_crusher_on_1'], fps: 4 } : null),
+    fw: 4,
+    fh: 2,
+    act: 'crusher',
+    sink: true,
+    port: { dx: 20, dy: -4 },
+  },
   // Дощувач поливає грядки довкола (радіус — catalog.farm.sprinklerR), бризкає водою.
   sprinkler: { sprite: 'sprinkler', fw: 1, fh: 1, spray: true },
   // Вітряк: кадри крил гортаються (anim) — тим швидше, чим сильніший вітер (wind: true, game/wind.js),

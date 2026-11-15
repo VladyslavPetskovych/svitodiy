@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
 import { pruneCables } from "./cables.js";
 import { BELT_CRATE } from "./belt-def.js";
-import { FISH_CUTTER, cutterRefund } from "./cutter-def.js";
+import { FISH_CUTTER, STONE_CRUSHER, STONE_DROPS, cutterRefund, isProcessor } from "./cutter-def.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { FISH_HUT, hutRefund } from "./fishhut-def.js";
 import { homeOwner } from "./household.js";
@@ -38,7 +38,7 @@ export const DECOR = [
     emoji: "⛏️",
     cost: { plank: 6, log: 4, stone: 10 },
     port: MINE.port,
-    hint: `Сама добуває камінь — по одному що ${MINE.everyMs / 1000} с, вміщає ${MINE.cap}. Тапни, щоб забрати, або підведи від жолоба праворуч конвеєр.`,
+    hint: `Сама добуває камінь — по одному що ${MINE.everyMs / 1000} с, вміщає ${MINE.cap}. Тапни, щоб забрати, або підведи від жолоба праворуч конвеєр — до скрині чи в каменедробарку, що дробить камінь на скло, брухт, монети й кварц.`,
   },
   // Приймальна скриня: сюди конвеєр (belts.js) звозить рибу з хат і камінь із шахт. Тап — забрати все.
   {
@@ -68,6 +68,23 @@ export const DECOR = [
     port: FISH_CUTTER.port,
     cutSec: FISH_CUTTER.cutMs / 1000,
     hint: `Протягни кабель від акумулятора (${FISH_CUTTER.energy} Вт·год за рибу — їсть багато), підведи стрічку з рибою від хати, а від жолоба праворуч — стрічку до скрині. Кожну рибу розбирає за ${FISH_CUTTER.cutMs / 1000} с; усе, що було всередині (кістки, очі, водорості, монети, насіння…), їде далі стрічкою.`,
+  },
+  // Каменедробарка: стрічка привозить камінь із шахти, щелепи дроблять, а що було в породі, жолоб праворуч
+  // віддає далі на стрічку (до скрині). Бере лише камінь (cutter-def.js → STONE_CRUSHER, STONE_DROPS).
+  {
+    id: STONE_CRUSHER.kind,
+    cat: "belt",
+    name: "Каменедробарка",
+    emoji: "⚒️",
+    cost: { log: 4, stone: 10, iron_ingot: 3, insulated_wire: 2, motor: 1 },
+    foot: STONE_CRUSHER.foot,
+    cutter: true,
+    electric: true,
+    energy: STONE_CRUSHER.energy,
+    port: STONE_CRUSHER.port,
+    cutSec: STONE_CRUSHER.cutMs / 1000,
+    drops: STONE_DROPS.map((e) => e.id),
+    hint: `Протягни кабель від акумулятора (${STONE_CRUSHER.energy} Вт·год за камінь), підведи стрічку від жолоба шахти, а від жолоба праворуч — стрічку до скрині. Кожен камінь дробить за ${STONE_CRUSHER.cutMs / 1000} с; що було в породі (уламки скла, брухт, старі монети, мушлі, зрідка срібло, кварц і навіть обсидіан), їде далі стрічкою.`,
   },
   // Поміст: дощатий майданчик на воді. Ступається й на ньому ставлять усе, як на березі.
   // Кладеться у воду чи на пляж біля води, поруч із сушею або іншим помостом (checkPlatform).
@@ -347,8 +364,8 @@ export async function getDecor(userId) {
           // Конвеєр (belts.js): у джерела — розклад стрічки (cv), у скрині — що в ній (f).
           ...(v.cv && { cv: v.cv }),
           ...(v.k === BELT_CRATE.kind && { f: v.f ?? {} }),
-          // Рибообробня: риба на столі (in), нарізане (o) і коли звільнився ніж (cb) — cutter-def.js.
-          ...(v.k === FISH_CUTTER.kind && { in: v.in ?? [], o: v.o ?? [], ...(v.cb && { cb: v.cb }) }),
+          // Обробник (рибообробня, каменедробарка): що на столі (in), готове (o) і коли звільнився ніж (cb) — cutter-def.js.
+          ...(isProcessor(v.k) && { in: v.in ?? [], o: v.o ?? [], ...(v.cb && { cb: v.cb }) }),
         });
     } catch {
       /* зіпсований запис — пропускаємо */
@@ -456,8 +473,8 @@ export async function removeDecor(userId, id) {
   if (old.k === FISH_HUT.kind) for (const [res, n] of Object.entries(hutRefund(old))) refund[res] = (refund[res] ?? 0) + n;
   // Конвеєр: що лежало в скрині й що їхало стрічкою від цього джерела — теж твоє.
   if (old.k === BELT_CRATE.kind) for (const [res, n] of Object.entries(old.f ?? {})) if (n > 0) refund[res] = (refund[res] ?? 0) + n;
-  // Рибообробня: риба зі столу й усе нарізане — теж твоє.
-  if (old.k === FISH_CUTTER.kind) for (const [res, n] of Object.entries(cutterRefund(old))) refund[res] = (refund[res] ?? 0) + n;
+  // Обробник: що лежало на столі й усе готове — теж твоє.
+  if (isProcessor(old.k)) for (const [res, n] of Object.entries(cutterRefund(old))) refund[res] = (refund[res] ?? 0) + n;
   for (const [, res] of old.cv?.fl ?? []) refund[res] = (refund[res] ?? 0) + 1;
   for (const [res, n] of Object.entries(refund)) await addResourceToInventory(userId, res, n);
   // Розібрав помост — кабель на ньому теж знімаємо (дріт повертає pruneCables).

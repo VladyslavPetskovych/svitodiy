@@ -33,9 +33,25 @@ export const DECO_GEOM = {
   seed_stand: { sprite: 'seed_stand', fw: 3, fh: 1, act: 'farmshop' },
   // Шахта (server/src/game/mine.js): сама добуває камінь, тап — забрати. Спрайт — scripts/mine-art.py (з еталонного аркуша).
   // port — жолоб праворуч біля купи руди: звідси конвеєр (walk/belts.js) везе камінь до скрині.
-  mine: { sprite: 'mine', fw: 8, fh: 3, act: 'mine', light: { dy: -38, r: 12 }, port: { dx: 36, dy: -4 } },
+  // Кадр 96×96, а на мапі — удвічі менший (SPRITE_SCALE у walk/engine.js): 48×48.
+  mine: { sprite: 'mine', fw: 4, fh: 2, act: 'mine', light: { dy: -19, r: 8 }, port: { dx: 18, dy: -2 } },
   // Скриня конвеєра (server/src/game/belts.js): кінець стрічки, сюди доїжджає риба й камінь. Спрайт — scripts/belt-art.py.
-  belt_crate: { sprite: 'belt_crate', fw: 3, fh: 2, act: 'crate' },
+  // sink — приймач: стрічка, що впирається в його «ніжки», везе сюди (як BELT sinks на сервері).
+  belt_crate: { sprite: 'belt_crate', fw: 3, fh: 2, act: 'crate', sink: true },
+  // Рибообробня (server/src/game/cutter-def.js): менша хата з текстури рибальської (scripts/fishhut-art.mjs).
+  // Приймач (стрічка з рибою заїжджає в будь-яку її клітинку) і джерело: нарізане йде з жолоба праворуч (port).
+  // Поки на столі риба (d.g 1) — тесак рубає: кадри fish_cutter_on_0/1.
+  fish_cutter: {
+    sprite: 'fish_cutter',
+    icon: 'fish_cutter_on_0',
+    stages: ['fish_cutter', 'fish_cutter_on_0'],
+    anim: (d) => (d.g ? { frames: ['fish_cutter_on_0', 'fish_cutter_on_1'], fps: 2.5 } : null),
+    fw: 4,
+    fh: 2,
+    act: 'cutter',
+    sink: true,
+    port: { dx: 20, dy: -4 },
+  },
   // Дощувач поливає грядки довкола (радіус — catalog.farm.sprinklerR), бризкає водою.
   sprinkler: { sprite: 'sprinkler', fw: 1, fh: 1, spray: true },
   // Вітряк: кадри крил гортаються (anim) — тим швидше, чим сильніший вітер (wind: true, game/wind.js),

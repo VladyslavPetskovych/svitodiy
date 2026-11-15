@@ -198,3 +198,193 @@ export function motorIcon(Img) {
   img.rect(8, 2, 2, 2, '#2b2b2b')
   return img.outline(K, 0.9)
 }
+
+/**
+ * Рибообробня (server/src/game/cutter-def.js): менша хата з тієї ж текстури, що й рибальська, — основу
+ * art/fish-hut/base.png зменшуємо «модою» (у кожному квадратику — найчастіший колір, тож палітра не каламутніє).
+ * Докладаємо кодом:
+ *  - ліворуч дерев'яне корито — сюди стрічка привозить рибу;
+ *  - спереду колода-плаха з тесаком: fish_cutter — порожня, тесак встромлений; fish_cutter_on_0/1 — риба на пласі,
+ *    тесак угорі / внизу (кадри гортаються, поки на столі є риба — DECO_GEOM.fish_cutter.anim);
+ *  - праворуч унизу жолоб із кісточкою й оком — сюди під'єднують стрічку далі (port: dx 20, dy −4).
+ * Якір — низ по центру, «ніжки» 4×2 клітинки (32×16 px).
+ */
+export const CUTTER_W = 52
+export const CUTTER_H = 50
+
+/** Зменшити картинку в k разів «модою»: найчастіший непрозорий колір квадратика, прозоре — якщо його більшість. */
+function shrink(Img, src, k) {
+  const w = Math.round(src.w / k)
+  const h = Math.round(src.h / k)
+  const out = new Img(w, h)
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const count = new Map()
+      let solid = 0
+      let all = 0
+      for (let sy = Math.floor(y * k); sy < Math.min(src.h, Math.floor((y + 1) * k)); sy++)
+        for (let sx = Math.floor(x * k); sx < Math.min(src.w, Math.floor((x + 1) * k)); sx++) {
+          all++
+          const i = (sy * src.w + sx) * 4
+          if (src.d[i + 3] < 128) continue
+          solid++
+          // Близькі відтінки — в один кошик, щоб «мода» не розсипалась на шум.
+          const key = ((src.d[i] >> 3) << 10) | ((src.d[i + 1] >> 3) << 5) | (src.d[i + 2] >> 3)
+          const c = count.get(key) ?? { n: 0, r: src.d[i], g: src.d[i + 1], b: src.d[i + 2] }
+          c.n++
+          count.set(key, c)
+        }
+      if (solid * 2 < all) continue
+      let best = null
+      for (const c of count.values()) if (!best || c.n > best.n) best = c
+      out.set(x, y, '#' + [best.r, best.g, best.b].map((v) => v.toString(16).padStart(2, '0')).join(''))
+    }
+  return out
+}
+
+/** @param {{ Img: any, base: any }} h base — art/fish-hut/base.png як Img */
+export function fishCutterArt({ Img, base }) {
+  const small = shrink(Img, base, 1.75)
+  const BONE = { hi: '#f4efe2', lo: '#c9bfa8' }
+  const BLOOD = '#b8432f'
+
+  /** Корито для риби ліворуч: низький ящик, у ньому хвіст. */
+  function trough(img, x, y, full) {
+    img.rect(x, y, 9, 5, WOOD.mid)
+    img.hline(x, x + 8, y, WOOD.light)
+    img.hline(x + 1, x + 7, y + 1, '#2a1a10')
+    img.hline(x, x + 8, y + 4, WOOD.dark)
+    img.vline(x, y, y + 4, WOOD.pale)
+    img.vline(x + 4, y + 2, y + 3, WOOD.lo)
+    if (full) {
+      img.hline(x + 2, x + 5, y + 1, FISH.mid)
+      img.set(x + 6, y + 1, FISH.hi)
+      img.set(x + 1, y, FISH.fin)
+    }
+    img.vline(x + 1, y + 5, y + 6, WOOD.dark)
+    img.vline(x + 7, y + 5, y + 6, WOOD.dark)
+  }
+
+  /** Плаха — зріз колоди з кільцями. */
+  function block(img, x, y) {
+    img.ellipse(x + 6, y + 6.5, 6.5, 2.6, WOOD.lo)
+    img.rect(x, y + 3, 13, 4, WOOD.mid)
+    img.hline(x, x + 12, y + 6, WOOD.dark)
+    for (let i = x + 2; i < x + 12; i += 3) img.vline(i, y + 4, y + 5, WOOD.lo)
+    img.ellipse(x + 6.5, y + 2.5, 6.5, 2.6, WOOD.light)
+    img.ellipse(x + 6.5, y + 2.5, 4, 1.5, WOOD.pale)
+    img.ellipse(x + 6.5, y + 2.5, 1.6, 0.8, WOOD.hi)
+  }
+
+  /** Дощатий поміст під усім: на ньому корито, плаха й жолоб — одна споруда, а не розкидані речі. */
+  function deck(img, x0, x1, y) {
+    img.rect(x0, y, x1 - x0 + 1, 4, WOOD.mid)
+    img.hline(x0, x1, y, WOOD.light)
+    img.hline(x0, x1, y + 3, WOOD.dark)
+    for (let x = x0 + 3; x < x1; x += 4) img.vline(x, y + 1, y + 2, WOOD.lo)
+    for (const x of [x0 + 1, (x0 + x1) >> 1, x1 - 1]) img.vline(x, y + 4, y + 5, WOOD.dark)
+  }
+
+  /** Тесак: up — занесений над плахою, інакше — встромлений лезом у плаху. */
+  function cleaver(img, x, y, up) {
+    if (up) {
+      // Темна облямівка — щоб лезо читалося на тлі стіни хатинки.
+      img.rect(x + 4, y - 15, 8, 7, K)
+      img.rect(x + 8, y - 9, 4, 5, K)
+      img.vline(x + 9, y - 9, y - 5, WOOD.dark)
+      img.vline(x + 10, y - 9, y - 5, WOOD.mid)
+      img.rect(x + 5, y - 14, 6, 5, IRON.mid)
+      img.hline(x + 5, x + 10, y - 14, IRON.hi)
+      img.vline(x + 5, y - 14, y - 10, '#e6edf0')
+      img.set(x + 9, y - 13, IRON.lo)
+      return
+    }
+    img.rect(x + 4, y - 3, 6, 4, IRON.mid)
+    img.hline(x + 4, x + 9, y - 3, IRON.hi)
+    img.hline(x + 4, x + 9, y + 1, '#e6edf0')
+    img.set(x + 8, y - 2, IRON.lo)
+    img.hline(x + 10, x + 14, y - 2, WOOD.dark)
+    img.hline(x + 10, x + 14, y - 1, WOOD.mid)
+  }
+
+  /** Риба на пласі: цільна чи розрубана навпіл з бризками. */
+  function fishOn(img, x, y, cut) {
+    if (!cut) {
+      img.hline(x + 1, x + 7, y, FISH.mid)
+      img.hline(x + 2, x + 6, y - 1, FISH.hi)
+      img.hline(x + 2, x + 6, y + 1, FISH.lo)
+      img.set(x + 7, y - 1, '#1b1410')
+      img.set(x, y - 1, FISH.fin)
+      img.set(x, y + 1, FISH.fin)
+      return
+    }
+    img.hline(x, x + 3, y, FISH.mid)
+    img.hline(x + 1, x + 2, y - 1, FISH.hi)
+    img.set(x - 1, y - 1, FISH.fin)
+    img.set(x - 1, y + 1, FISH.fin)
+    img.hline(x + 5, x + 8, y, FISH.mid)
+    img.hline(x + 6, x + 7, y - 1, FISH.hi)
+    img.set(x + 8, y - 1, '#1b1410')
+    img.set(x + 4, y, BLOOD)
+    for (const [dx, dy] of [[2, -3], [6, -3], [4, -4]]) img.set(x + dx, y + dy, BONE.hi)
+  }
+
+  /** Жолоб праворуч (як у хати, але з нього визирають кісточка й око). */
+  function chute(img, x, y) {
+    img.rect(x, y, 10, 7, WOOD.mid)
+    img.hline(x, x + 9, y, WOOD.light)
+    img.hline(x, x + 9, y + 6, WOOD.dark)
+    img.vline(x, y, y + 6, WOOD.pale)
+    for (let i = x + 3; i < x + 9; i += 3) img.vline(i, y + 1, y + 5, WOOD.lo)
+    img.rect(x + 6, y + 2, 4, 3, '#1b120c')
+    img.vline(x + 5, y + 1, y + 5, COPPER.mid)
+    img.hline(x + 5, x + 9, y + 1, COPPER.hi)
+    img.hline(x + 5, x + 9, y + 5, COPPER.lo)
+    // Кісточка й риб'яче око — «нутрощі» йдуть звідси.
+    img.hline(x + 7, x + 9, y + 3, BONE.hi)
+    img.set(x + 7, y + 2, BONE.lo)
+    img.set(x + 7, y + 4, BONE.lo)
+    img.set(x + 9, y + 2, '#d8e8f0')
+    img.vline(x + 2, y + 7, y + 8, WOOD.dark)
+    img.vline(x + 8, y + 7, y + 8, WOOD.dark)
+  }
+
+  /** Відерце з нутрощами біля плахи. */
+  function pail(img, x, y) {
+    img.rect(x, y, 5, 5, IRON.mid)
+    img.vline(x, y, y + 4, IRON.hi)
+    img.vline(x + 4, y, y + 4, IRON.lo)
+    img.hline(x, x + 4, y, IRON.dark)
+    img.set(x + 1, y - 1, BONE.hi)
+    img.set(x + 3, y - 1, BLOOD)
+    img.set(x + 2, y - 1, FISH.lo)
+  }
+
+  /** state: idle — порожньо; up / down — риба на пласі, тесак угорі / внизу. */
+  function cutter(state) {
+    const img = new Img(CUTTER_W, CUTTER_H)
+    const cx = CUTTER_W / 2
+    img.ellipse(cx, CUTTER_H - 3, 22, 3.5, '#0b2010', 0.25)
+    // Хатинка трохи ліворуч від центру: праворуч лишається місце плахі й жолобу.
+    img.blit(small, cx - Math.round(small.w / 2) - 3, CUTTER_H - small.h - 2)
+    deck(img, 2, CUTTER_W - 4, CUTTER_H - 8)
+    trough(img, 1, CUTTER_H - 12, state !== 'idle')
+    block(img, cx - 3, CUTTER_H - 13)
+    if (state === 'idle') cleaver(img, cx - 3, CUTTER_H - 11, false)
+    else {
+      fishOn(img, cx - 1, CUTTER_H - 11, state === 'down')
+      cleaver(img, cx - 3, CUTTER_H - 11, state === 'up')
+    }
+    pail(img, cx - 9, CUTTER_H - 8)
+    // Жолоб: отвір на клітинці port (dx 20 від якоря, нижній ряд).
+    chute(img, cx + 15, CUTTER_H - 9)
+    img.outline(K, 0.9)
+    return img
+  }
+
+  return {
+    fish_cutter: cutter('idle'),
+    fish_cutter_on_0: cutter('up'),
+    fish_cutter_on_1: cutter('down'),
+  }
+}

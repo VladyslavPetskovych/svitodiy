@@ -65,6 +65,33 @@ export function lineAt(line, T, { gapMs, speed }) {
   return { moving, arrived, left }
 }
 
+/**
+ * Рибообробня (server/src/game/cutter-def.js → cutUntil) на мить T: що на столі й коли ніж закінчив кожну рибу.
+ * Риба — та, що вже лежала (d.in), і та, що за розкладом доїде стрічками (lines з sink === d.id).
+ * Що саме було всередині, знає лише сервер (кидок кубика) — тож done лише каже, коли варто спитати новий стан.
+ * @returns {{ onTable: number, done: number[] }}
+ */
+export function cutterAt(d, lines, T, cfg, cutMs) {
+  const arrive = (d.in ?? []).map(([t]) => t)
+  for (const line of lines) {
+    if (line.sink !== d.id) continue
+    const travel = travelMs(line, cfg.speed)
+    for (const [t] of line.fl) arrive.push(t + travel)
+    const n = Math.min(line.queue.length, line.space)
+    for (let k = 1; k <= n; k++) arrive.push(line.bt + k * cfg.gapMs + travel)
+  }
+  const came = arrive.filter((t) => t <= T).sort((a, b) => a - b)
+  const done = []
+  let free = d.cb ?? 0
+  for (const t of came) {
+    const end = Math.max(t, free) + cutMs
+    if (end > T) break
+    done.push(end)
+    free = end
+  }
+  return { onTable: came.length - done.length, done }
+}
+
 /** Точка (px мапи) на лінії, проїхавши s клітинок від центру жолоба; dir — напрямок у цій точці. */
 export function pointAt(line, dirAt, s) {
   const i = Math.max(0, Math.min(line.path.length - 1, Math.floor(s)))

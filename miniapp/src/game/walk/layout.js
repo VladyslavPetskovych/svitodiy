@@ -139,7 +139,9 @@ export function placements(home, chestOpen, deco = [], nodes = []) {
       // Поміст — це суша: по ньому ходять (walk) і він рахується як земля для будівництва (platform).
       ...(g.platform && { walk: decoFootprint(d.k, d.x, d.y), platform: true }),
     }
-    out.push({ s: decoSprite(d), ...at, ...(g.anim && { anim: g.anim }) })
+    // anim може залежати від стану (рибообробня рубає, лише коли на столі риба).
+    const anim = typeof g.anim === 'function' ? g.anim(d) : g.anim
+    out.push({ s: decoSprite(d), ...at, ...(anim && { anim }) })
   }
 
   // Дерева, каміння, кущі й дари моря.

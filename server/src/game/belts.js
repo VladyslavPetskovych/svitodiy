@@ -1,6 +1,7 @@
 import { addResourceToInventory, consumeResources, getFishMeta, getRedis } from "../bot.js";
 import { CABLE_CELL, onLand } from "./cables.js";
 import { BELT, BELT_CRATE } from "./belt-def.js";
+import { FISH_CUTTER, cutUntil, isFish } from "./cutter-def.js";
 import { deckCells, footCellsOf, getDecor } from "./decor.js";
 import { withEnergyLock } from "./energy.js";
 import { GameError, badRequest, conflict } from "./errors.js";
@@ -17,13 +18,16 @@ import { MINE, mineReady } from "./mine.js";
  * Кожна клітинка коштує BELT.cost; прибрав — повертається.
  *
  * Джерела мають жолоб (port, px від якоря): рибальська хата віддає рибу (найціннішу першою — takeFish),
- * шахта — камінь. Якщо на клітинці жолоба лежить стрічка, від неї йдемо за стрілками, доки наступна
- * клітинка — під приймальною скринею (BELT_CRATE). Злиття двох стрічок в одну — просто дві стрілки в одну клітинку.
+ * шахта — камінь, рибообробня (cutter-def.js) — те, що вийняла з риби. Якщо на клітинці жолоба лежить стрічка,
+ * від неї йдемо за стрілками, доки наступна клітинка — під приймачем (SINKS): скринею (BELT_CRATE) чи
+ * рибообробнею. Злиття двох стрічок в одну — просто дві стрілки в одну клітинку.
+ * Ланцюжок хата → рибообробня → скриня: рибообробня бере лише рибу (камінь до неї не поїде — стрічка стоїть),
+ * а віддає не рибу, тож по колу нічого не їздить.
  *
  * Рахуємо ліниво, як улов хат: у записі джерела поле cv = { bt, fl }:
  *   bt — коли востаннє з жолоба зійшла річ; наступна сходить через BELT.gapMs;
  *   fl — речі в дорозі [[коли зійшла, id]]: доїжджають за path.length / BELT.speed с.
- * Що доїхало — у скриню (f), поки там є місце (BELT_CRATE.cap, разом із тим, що вже в дорозі).
+ * Що доїхало — у приймач, поки там є місце (cap, разом із тим, що вже в дорозі): у скриню (f) чи на стіл рибообробні (in).
  * Стрічку перерізали — речі з дороги повертаються в джерело, нічого не губиться.
  * Клієнт (miniapp/src/game/walk/belts.js) рахує той самий розклад — і бачить, як риба їде стрічкою.
  */
@@ -75,9 +79,51 @@ const SOURCES = {
       return { ...item, c: (Number(item.c) || Date.now()) - MINE.everyMs };
     },
   },
+  // Рибообробня: віддає нарізане (o) у тому порядку, як воно готове; ще не готове — не віддає.
+  [FISH_CUTTER.kind]: {
+    port: FISH_CUTTER.port,
+    queue(item, t) {
+      return (item.o ?? []).filter(([at]) => at <= t).map(([, id]) => id);
+    },
+    take(item, id, t) {
+      const o = [...(item.o ?? [])];
+      const i = o.findIndex(([at, x]) => x === id && at <= t);
+      if (i >= 0) o.splice(i, 1);
+      return { ...item, o };
+    },
+    give(item, id) {
+      return { ...item, o: [[0, id], ...(item.o ?? [])] };
+    },
+    /** Коли з'явиться наступне готове (стрічка не стоїть, поки ніж ріже). */
+    nextAt(item, t) {
+      const later = (item.o ?? []).map(([at]) => at).filter((at) => at > t);
+      return later.length ? Math.min(...later) : null;
+    },
+  },
 };
 
 export const isBeltSource = (k) => !!SOURCES[k];
+
+/**
+ * Куди стрічка привозить: скриня бере все, рибообробня — лише рибу й не більше inCap (зі столом разом).
+ * load — скільки вже лежить, put — покласти одну річ, що доїхала в мить at.
+ */
+const SINKS = {
+  [BELT_CRATE.kind]: {
+    cap: BELT_CRATE.cap,
+    accepts: () => true,
+    load: (item) => crateCount(item),
+    put: (item, id) => ({ ...item, f: { ...(item.f ?? {}), [id]: (Number(item.f?.[id]) || 0) + 1 } }),
+  },
+  [FISH_CUTTER.kind]: {
+    cap: FISH_CUTTER.inCap,
+    accepts: isFish,
+    load: (item) => item.in?.length ?? 0,
+    put: (item, id, at) => ({ ...item, in: [...(item.in ?? []), [at, id]] }),
+  },
+};
+
+export const isBeltSink = (k) => !!SINKS[k];
 
 /** Клітинка жолоба джерела (якір — низ по центру). */
 export function portCell(d) {
@@ -100,15 +146,16 @@ async function readBelts(owner) {
 }
 
 /**
- * Лінії: від жолоба кожного джерела за стрілками до скрині (sink) чи до обриву (sink null).
+ * Лінії: від жолоба кожного джерела за стрілками до приймача (sink — скриня чи рибообробня) чи до обриву (sink null).
+ * Стрічка, що з жолоба рибообробні заїжджає назад у неї ж, — теж обрив.
  * @param {[number, number, number][]} cells
  * @param {{ id: string, k: string, x: number, y: number }[]} deco
  */
 export function beltLines(cells, deco) {
   const dir = new Map(cells.map(([x, y, d]) => [ck(x, y), d]));
-  /** Клітинки під скринями → id скрині. */
+  /** Клітинки під приймачами → id приймача. */
   const sinks = new Map();
-  for (const d of deco) if (d.k === BELT_CRATE.kind) for (const [x, y] of footCellsOf(d)) sinks.set(ck(x, y), d.id);
+  for (const d of deco) if (SINKS[d.k]) for (const [x, y] of footCellsOf(d)) sinks.set(ck(x, y), d.id);
   const lines = [];
   for (const d of deco) {
     const start = portCell(d);
@@ -124,7 +171,7 @@ export function beltLines(cells, deco) {
       x += dx;
       y += dy;
       if (sinks.has(ck(x, y))) {
-        sink = sinks.get(ck(x, y));
+        sink = sinks.get(ck(x, y)) === d.id ? null : sinks.get(ck(x, y));
         break;
       }
     }
@@ -144,9 +191,17 @@ function parse(raw) {
   }
 }
 
+/** Поля записів конвеєра, що йдуть у стан: розклад джерела, вміст скрині, шахта, стіл рибообробні. */
+const BELT_FIELDS = ["cv", "f", "c", "in", "o", "cb"];
+
 /**
- * Прокрутити всі стрічки до now (вже під замком острова). Пише змінені записи джерел і скринь;
- * повертає декор зі свіжими cv / f — для стану.
+ * Прокрутити всі стрічки до now (вже під замком острова). Пише змінені записи джерел і приймачів;
+ * повертає декор зі свіжими cv / f / in / o — для стану.
+ *
+ * Три кроки, щоб ланцюжок хата → рибообробня → скриня рахувався в правильному порядку:
+ * 1) звичайні джерела (хати, шахти) везуть і довозять — риба лягає на стіл рибообробні;
+ * 2) рибообробні ріжуть, що доїхало (cutUntil);
+ * 3) рибообробні віддають нарізане на свої стрічки.
  */
 export async function beltsLocked(owner, deco, now) {
   const cells = await readBelts(owner);
@@ -155,29 +210,33 @@ export async function beltsLocked(owner, deco, now) {
   const key = decoKey(owner);
   const ids = [...new Set(lines.flatMap((l) => [l.src, l.sink]).filter(Boolean))];
   // Джерела, що вже не лежать на стрічці, теж: їхні речі з дороги треба повернути.
-  for (const d of deco) if (d.cv?.fl?.length && !ids.includes(d.id)) ids.push(d.id);
+  // Рибообробня ріже й без стрічок — те, що вже лежить на столі.
+  for (const d of deco) if ((d.cv?.fl?.length || d.k === FISH_CUTTER.kind) && !ids.includes(d.id)) ids.push(d.id);
   if (!ids.length) return deco;
   const rec = new Map();
+  const orig = new Map();
   for (const id of ids) {
     const v = parse(await r.hGet(key, id));
-    if (v) rec.set(id, v);
+    if (!v) continue;
+    rec.set(id, v);
+    orig.set(id, JSON.stringify(v));
   }
-  const changed = new Set();
   const lineOf = new Map(lines.map((l) => [l.src, l]));
 
-  // Що вже в дорозі до кожної скрині — щоб не везти більше, ніж влізе.
+  // Що вже в дорозі до кожного приймача — щоб не везти більше, ніж влізе.
   const coming = new Map();
   for (const l of lines) if (l.sink) coming.set(l.sink, (coming.get(l.sink) ?? 0) + (rec.get(l.src)?.cv?.fl?.length ?? 0));
 
-  for (const id of ids) {
+  /** Прокрутити стрічку одного джерела: довезти, що доїхало, і пустити нове з жолоба. */
+  const run = (id) => {
     let item = rec.get(id);
     const src = item && SOURCES[item.k];
-    if (!src) continue;
+    if (!src) return;
     const line = lineOf.get(id);
     const cv = { bt: Number(item.cv?.bt) || now, fl: [...(item.cv?.fl ?? [])] };
-    const before = JSON.stringify(item.cv ?? null) + JSON.stringify(item.f ?? null) + (item.c ?? "");
-    let crate = line?.sink ? rec.get(line.sink) : null;
-    if (!line?.sink || !crate) {
+    let dest = line?.sink ? rec.get(line.sink) : null;
+    const sink = dest && SINKS[dest.k];
+    if (!sink) {
       // Обрив: що їхало — назад у джерело; стрічка стоїть.
       for (const [, got] of cv.fl) item = src.give(item, got);
       cv.fl = [];
@@ -188,7 +247,7 @@ export async function beltsLocked(owner, deco, now) {
         const keep = [];
         for (const f of cv.fl) {
           if (f[0] + travel <= now) {
-            crate = { ...crate, f: { ...(crate.f ?? {}), [f[1]]: (crate.f?.[f[1]] ?? 0) + 1 } };
+            dest = sink.put(dest, f[1], f[0] + travel);
             coming.set(line.sink, (coming.get(line.sink) ?? 1) - 1);
           } else keep.push(f);
         }
@@ -200,7 +259,13 @@ export async function beltsLocked(owner, deco, now) {
       let idle = false;
       while (t <= now) {
         const next = src.queue(item, t)[0];
-        if (!next || crateCount(crate) + (coming.get(line.sink) ?? 0) >= BELT_CRATE.cap) {
+        // Рибообробня ще ріже — стрічка чекає, поки буде готове, а не простоює до кінця розрахунку.
+        const at = !next && src.nextAt ? src.nextAt(item, t) : null;
+        if (at != null && at <= now) {
+          t = at;
+          continue;
+        }
+        if (!next || !sink.accepts(next) || sink.load(dest) + (coming.get(line.sink) ?? 0) >= sink.cap) {
           idle = true;
           break;
         }
@@ -213,26 +278,29 @@ export async function beltsLocked(owner, deco, now) {
       // Нічого везти — відлік з «зараз»: свіжа риба не зійде миттєво пачкою за весь простій.
       if (idle) cv.bt = Math.max(cv.bt, now - BELT.gapMs);
       land();
-      rec.set(line.sink, crate);
-      changed.add(line.sink);
+      rec.set(line.sink, dest);
     }
-    item = { ...item, cv };
-    rec.set(id, item);
-    if (JSON.stringify(cv) + JSON.stringify(item.f ?? null) + (item.c ?? "") !== before) changed.add(id);
-  }
+    rec.set(id, { ...item, cv });
+  };
 
+  const isCutter = (id) => rec.get(id)?.k === FISH_CUTTER.kind;
+  for (const id of ids) if (!isCutter(id)) run(id);
+  for (const id of ids) if (isCutter(id)) rec.set(id, cutUntil(rec.get(id), now));
+  for (const id of ids) if (isCutter(id)) run(id);
+
+  const changed = new Set(ids.filter((id) => rec.has(id) && JSON.stringify(rec.get(id)) !== orig.get(id)));
   // Прикрасу могли саме розібрати (removeDecor) — не воскрешаємо її запис.
   for (const id of changed) if (await r.hExists(key, id)) await r.hSet(key, id, JSON.stringify(rec.get(id)));
   return deco.map((d) => {
-    const v = changed.has(d.id) && rec.get(d.id);
-    if (!v) return d;
-    return { ...d, ...(v.cv && { cv: v.cv }), ...(v.f && { f: v.f }), ...(v.c && { c: v.c }) };
+    if (!changed.has(d.id)) return d;
+    const v = rec.get(d.id);
+    return { ...d, ...Object.fromEntries(BELT_FIELDS.filter((f) => v[f] != null).map((f) => [f, v[f]])) };
   });
 }
 
 /** Прокрутити стрічки при читанні стану. Якщо зараз рахує інший запит — як є. */
 export async function settleBelts(userId, deco, now = Date.now()) {
-  if (!deco.some((d) => SOURCES[d.k] || d.k === BELT_CRATE.kind)) return deco;
+  if (!deco.some((d) => SOURCES[d.k] || SINKS[d.k])) return deco;
   const { owner } = await homeOwner(userId);
   return (await withEnergyLock(owner, () => beltsLocked(owner, deco, now))) ?? deco;
 }
@@ -247,14 +315,12 @@ export function beltsView(cells, deco, now) {
   const comingTo = (sink) => raw.filter((o) => o.sink === sink).reduce((s, o) => s + (byId.get(o.src)?.cv?.fl?.length ?? 0), 0);
   const lines = raw.map((l) => {
     const d = byId.get(l.src);
-    const crate = l.sink ? byId.get(l.sink) : null;
-    return {
-      ...l,
-      bt: Number(d?.cv?.bt) || now,
-      fl: d?.cv?.fl ?? [],
-      queue: SOURCES[l.kind].queue(d ?? {}, now).slice(0, 40),
-      space: crate ? Math.max(0, BELT_CRATE.cap - crateCount(crate) - comingTo(l.sink)) : 0,
-    };
+    const dest = l.sink ? byId.get(l.sink) : null;
+    const sink = dest && SINKS[dest.k];
+    const queue = SOURCES[l.kind].queue(d ?? {}, now).slice(0, 40);
+    // Приймач не бере те, що на черзі (камінь у рибообробню), — стрічка стоїть, як і на сервері.
+    const space = !sink || (queue.length && !sink.accepts(queue[0])) ? 0 : Math.max(0, sink.cap - sink.load(dest) - comingTo(l.sink));
+    return { ...l, sinkKind: dest?.k ?? null, bt: Number(d?.cv?.bt) || now, fl: d?.cv?.fl ?? [], queue, space };
   });
   return { cells, lines, gapMs: BELT.gapMs, speed: BELT.speed, crateCap: BELT_CRATE.cap, at: now };
 }
@@ -368,6 +434,30 @@ export async function collectCrate(userId, id) {
   }, id);
 }
 
+/** Забрати з рибообробні все нарізане (коли з її жолоба не йде стрічка — чи просто швидше). */
+export async function collectCutter(userId, id) {
+  if (typeof id !== "string" || !/^[a-z0-9]{6,16}$/.test(id)) throw badRequest("Невідома рибообробня.");
+  return withBelts(userId, async (owner) => {
+    const r = getRedis();
+    const key = decoKey(owner);
+    const item = parse(await r.hGet(key, id));
+    if (!item || item.k !== FISH_CUTTER.kind) throw new GameError(404, "not_found", "Тут немає рибообробні.");
+    const now = Date.now();
+    /** @type {Record<string, number>} */
+    const got = {};
+    const left = [];
+    for (const o of item.o ?? []) {
+      if (o[0] <= now && typeof o[1] === "string") got[o[1]] = (got[o[1]] ?? 0) + 1;
+      else left.push(o);
+    }
+    if (!Object.keys(got).length)
+      throw conflict("empty", item.in?.length ? "🔪 Ще ріжемо — за мить буде." : "🔪 Порожньо — підведи стрічку з рибою від хати.");
+    await r.hSet(key, id, JSON.stringify({ ...item, o: left }));
+    for (const [res, n] of Object.entries(got)) await addResourceToInventory(userId, res, n);
+    return { got };
+  }, id);
+}
+
 /** Для каталогу. */
 export function beltsCatalog() {
   return {
@@ -378,5 +468,13 @@ export function beltsCatalog() {
     crateCap: BELT_CRATE.cap,
     crate: BELT_CRATE.kind,
     sources: Object.fromEntries(Object.entries(SOURCES).map(([k, s]) => [k, s.port])),
+    sinks: Object.keys(SINKS),
+    cutter: {
+      kind: FISH_CUTTER.kind,
+      cutSec: FISH_CUTTER.cutMs / 1000,
+      inCap: FISH_CUTTER.inCap,
+      outCap: FISH_CUTTER.outCap,
+      port: FISH_CUTTER.port,
+    },
   };
 }

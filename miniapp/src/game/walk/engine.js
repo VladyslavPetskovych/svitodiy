@@ -53,11 +53,17 @@ const SHEETS = [
   { tex: 'home-sprites', size: homeAtlas.size, frames: homeAtlas.frames },
   { tex: 'home-decor', size: decorAtlas.size, frames: decorAtlas.frames },
 ]
-/** Кадр за назвою разом з аркушем, у якому він лежить. */
+/**
+ * Спрайти, що на мапі менші за свій кадр в атласі: текстура та сама (уся деталь лишається),
+ * лише площина менша — шахта 96×96 стоїть як 48×48.
+ */
+const SPRITE_SCALE = { mine: 0.5 }
+
+/** Кадр за назвою разом з аркушем, у якому він лежить; k — масштаб на мапі (SPRITE_SCALE). */
 function frameOf(name) {
   for (const sheet of SHEETS) {
     const f = sheet.frames[name]
-    if (f) return { f, sheet }
+    if (f) return { f, sheet, k: SPRITE_SCALE[name] ?? 1 }
   }
   return null
 }
@@ -234,8 +240,18 @@ const TAP_SLOP = 10 // CSS px: далі — це вже перетягуванн
  *   onGullSteal?: (nodeId: string) => Promise<boolean> }} cb — чайка понесла ресурс із пляжу; false — не вийшло
  */
 export function createWalk(canvas, assets, cb) {
-  /** Розміри кадру за назвою — з будь-якого аркуша. */
-  const frames = new Proxy({}, { get: (_, name) => frameOf(name)?.f })
+  /** Розміри кадру за назвою — з будь-якого аркуша, вже в масштабі мапи (SPRITE_SCALE). */
+  const frames = new Proxy(
+    {},
+    {
+      get: (_, name) => {
+        const found = frameOf(name)
+        if (!found || found.k === 1) return found?.f
+        const { f, k } = found
+        return { ...f, w: f.w * k, h: f.h * k }
+      },
+    }
+  )
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' })
   renderer.outputColorSpace = THREE.SRGBColorSpace
   const scene3 = new THREE.Scene()
@@ -255,10 +271,10 @@ export function createWalk(canvas, assets, cb) {
     if (g) return g
     const found = frameOf(name)
     if (!found) return null
-    const { f, sheet } = found
+    const { f, sheet, k } = found
     const { w: AW, h: AH } = sheet.size
-    g = new THREE.PlaneGeometry(f.w, f.h)
-    g.translate(0, f.h / 2, 0)
+    g = new THREE.PlaneGeometry(f.w * k, f.h * k)
+    g.translate(0, (f.h * k) / 2, 0)
     const u0 = f.x / AW
     const u1 = (f.x + f.w) / AW
     const v1 = 1 - f.y / AH
@@ -1387,7 +1403,8 @@ export function createWalk(canvas, assets, cb) {
     if (beltCache?.belts === belts && beltCache.list === list) return beltCache
     const dir = new Map(belts.cells.map(([x, y, d]) => [cellKey(x, y), d]))
     const crate = new Map()
-    for (const p of list) if (p.uid && p.kind === 'belt_crate') for (const [x, y] of footCellsOf(p)) crate.set(cellKey(x, y), p.uid)
+    // Приймачі: скрині й рибообробні (DECO_GEOM[].sink) — стрічка, що впирається в їхні «ніжки», закінчується тут.
+    for (const p of list) if (p.uid && DECO_GEOM[p.kind]?.sink) for (const [x, y] of footCellsOf(p)) crate.set(cellKey(x, y), p.uid)
     /** Клітинка жолоба → бік, з якого стоїть саме джерело (там стрічка теж «відкрита»). */
     const portSide = new Map()
     const ports = []
@@ -2129,10 +2146,10 @@ export function createWalk(canvas, assets, cb) {
     }
     if (best) {
       const it = best.object.userData.item
-      const { f, sheet } = frameOf(it.p.s)
+      const { f, sheet, k } = frameOf(it.p.s)
       const { w: AW, h: AH } = sheet.size
       out.item = it
-      out.art = { x: it.p.x - f.w / 2 + (best.uv.x * AW - f.x), y: it.p.y - f.h + ((1 - best.uv.y) * AH - f.y) }
+      out.art = { x: it.p.x + (best.uv.x * AW - f.x - f.w / 2) * k, y: it.p.y + ((1 - best.uv.y) * AH - f.y - f.h) * k }
       if (it.p.plot != null) out.plot = it.p.plot
     } else if (out.ground) {
       if (scene.farm) {
@@ -2556,13 +2573,14 @@ export function createWalk(canvas, assets, cb) {
     }
     if (mode === 'belt') {
       // Тап: клітинка під пальцем; у хату чи шахту — клітинка її жолоба; у скриню — сама скриня (туди веде стрічка).
+      // Рибообробня — і те, і те: з неї починають (жолоб), у неї ж і закінчують стрічку з рибою.
       if (!held.moved) {
         const it = held.p.item?.p
         const g = held.p.ground
         const port = it?.uid ? portCellOf(it) : null
-        const crate = it?.uid && it.kind === 'belt_crate' ? it.uid : null
+        const crate = it?.uid && DECO_GEOM[it.kind]?.sink ? it.uid : null
         const cell = port ?? (g ? [Math.floor(g.x / CELL), Math.floor(g.y / CELL)] : null)
-        cb.onWire?.({ x: g?.x, y: g?.y, cell, source: port ? it.uid : null, crate })
+        cb.onWire?.({ x: g?.x, y: g?.y, cell, source: port ? it.uid : null, crate, crateKind: crate ? it.kind : null })
       }
       held = null
       return

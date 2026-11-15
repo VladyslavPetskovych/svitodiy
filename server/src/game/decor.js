@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
 import { pruneCables } from "./cables.js";
 import { BELT_CRATE } from "./belt-def.js";
+import { FISH_CUTTER, cutterRefund } from "./cutter-def.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { FISH_HUT, hutRefund } from "./fishhut-def.js";
 import { homeOwner } from "./household.js";
@@ -50,6 +51,20 @@ export const DECOR = [
     crate: true,
     cap: BELT_CRATE.cap,
     hint: `Кінець конвеєра: стрічка звозить сюди рибу з хати й камінь із шахти. Вміщає ${BELT_CRATE.cap}, тапни — забрати все.`,
+  },
+  // Рибообробня: стрічка привозить рибу з хати, тут її розбирають, а все, що було всередині, жолоб праворуч
+  // віддає далі на стрічку (до скрині). Бере лише рибу (cutter-def.js, belts.js).
+  {
+    id: FISH_CUTTER.kind,
+    cat: "belt",
+    name: "Рибообробня",
+    emoji: "🔪",
+    cost: { plank: 6, log: 2, iron_ingot: 1 },
+    foot: FISH_CUTTER.foot,
+    cutter: true,
+    port: FISH_CUTTER.port,
+    cutSec: FISH_CUTTER.cutMs / 1000,
+    hint: `Підведи сюди стрічку з рибою від хати: кожну рибу розбирає за ${FISH_CUTTER.cutMs / 1000} с, а все, що було всередині (кістки, очі, водорості, монети, насіння…), жолоб праворуч віддає далі на стрічку — до скрині.`,
   },
   // Поміст: дощатий майданчик на воді. Ступається й на ньому ставлять усе, як на березі.
   // Кладеться у воду чи на пляж біля води, поруч із сушею або іншим помостом (checkPlatform).
@@ -329,6 +344,8 @@ export async function getDecor(userId) {
           // Конвеєр (belts.js): у джерела — розклад стрічки (cv), у скрині — що в ній (f).
           ...(v.cv && { cv: v.cv }),
           ...(v.k === BELT_CRATE.kind && { f: v.f ?? {} }),
+          // Рибообробня: риба на столі (in), нарізане (o) і коли звільнився ніж (cb) — cutter-def.js.
+          ...(v.k === FISH_CUTTER.kind && { in: v.in ?? [], o: v.o ?? [], ...(v.cb && { cb: v.cb }) }),
         });
     } catch {
       /* зіпсований запис — пропускаємо */
@@ -382,7 +399,7 @@ export async function placeDecor(userId, kind, x, y) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
   const id = randomBytes(6).toString("hex");
-  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }), ...(def.id === MINE.kind && { c: Date.now() }), ...(def.hut && { lv: 1, f: {}, fc: Date.now() }), ...(def.crate && { f: {} }) };
+  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }), ...(def.id === MINE.kind && { c: Date.now() }), ...(def.hut && { lv: 1, f: {}, fc: Date.now() }), ...(def.crate && { f: {} }), ...(def.cutter && { in: [], o: [] }) };
   await r.hSet(k, id, JSON.stringify(item));
   return { item: { id, ...item } };
 }
@@ -436,6 +453,8 @@ export async function removeDecor(userId, id) {
   if (old.k === FISH_HUT.kind) for (const [res, n] of Object.entries(hutRefund(old))) refund[res] = (refund[res] ?? 0) + n;
   // Конвеєр: що лежало в скрині й що їхало стрічкою від цього джерела — теж твоє.
   if (old.k === BELT_CRATE.kind) for (const [res, n] of Object.entries(old.f ?? {})) if (n > 0) refund[res] = (refund[res] ?? 0) + n;
+  // Рибообробня: риба зі столу й усе нарізане — теж твоє.
+  if (old.k === FISH_CUTTER.kind) for (const [res, n] of Object.entries(cutterRefund(old))) refund[res] = (refund[res] ?? 0) + n;
   for (const [, res] of old.cv?.fl ?? []) refund[res] = (refund[res] ?? 0) + 1;
   for (const [res, n] of Object.entries(refund)) await addResourceToInventory(userId, res, n);
   // Розібрав помост — кабель на ньому теж знімаємо (дріт повертає pruneCables).

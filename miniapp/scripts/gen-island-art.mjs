@@ -19,7 +19,7 @@ import { floorSheet } from './floor-art.mjs'
 import { heroFrames, wearSheet } from './hero-wear.mjs'
 import { winterArt } from './winter-art.mjs'
 import { powerArt } from './power-art.mjs'
-import { fishHutArt, motorIcon } from './fishhut-art.mjs'
+import { fishCutterArt, fishHutArt, motorIcon } from './fishhut-art.mjs'
 import { WINTER_INTERACT, WINTER_MAP, WINTER_SPAWN, winterPlacements } from '../src/game/walk/winter.js'
 import { BEDS, BOARDWALK, CELL, INTERACT, LAND, MAP, PATH, PIER, PLAZA, RESERVED, TRAILS, placements, walkGrid as mergeWalk } from '../src/game/walk/layout.js'
 
@@ -3012,6 +3012,7 @@ function buildSprites(farm, room, winter, power) {
     ...power.sprites,
     // Рибальська хата за рівнями, з мотором і ліхтарем (scripts/fishhut-art.mjs, основа — з еталонного аркуша).
     ...fishHutArt({ Img, base: readPng(join(ROOT, 'art/fish-hut/base.png')) }),
+    ...fishCutterArt({ Img, base: readPng(join(ROOT, 'art/fish-hut/base.png')) }),
     // Шахта 96×96 (scripts/mine-art.py: кузня, руда й вагонетка з еталонного аркуша + штрек і рейки).
     mine: readPng(join(ROOT, 'art/mine/mine.png')),
     // Скриня конвеєра 24×22 (scripts/belt-art.py: відкрита скриня з еталонного аркуша, з рибою й камінцями).

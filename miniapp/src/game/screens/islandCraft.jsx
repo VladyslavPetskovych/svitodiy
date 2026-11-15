@@ -6,7 +6,7 @@ import { haptic } from '../tg.js'
 import { Chip, ItemIcon, PxButton, Segmented, Sheet } from '../ui.jsx'
 
 /**
- * Виживання на рідному острові: майстерня (верстат, електроверстат, піч) і разова звістка
+ * Виживання на рідному острові: верстат, електромашини, майстерня (усе разом) і разова звістка
  * про те, що острів почали з нуля. Сам екран — IslandWalk.jsx.
  */
 
@@ -25,6 +25,197 @@ function Cost({ cost }) {
         )
       })}
     </div>
+  )
+}
+
+/** Верстат: сокира, кайло й лопата (по два рівні), дошки з колод і дріт із мідного злиточка. */
+export function CraftSheet({ open, onClose }) {
+  const { state, catalog, items, act, toast } = useGame()
+  const [busy, setBusy] = useState(false)
+  const tools = catalog.craft?.tools ?? []
+  const recipes = catalog.craft?.recipes ?? []
+
+  const craftTool = async (t) => {
+    if (busy) return
+    setBusy(true)
+    const res = await act('POST', '/craft/tool', { tool: t.id })
+    setBusy(false)
+    if (!res) return
+    haptic('success')
+    toast(`${t.emoji} Готово: ${res.name}!`)
+  }
+  const craftRecipe = async (r, count) => {
+    if (busy) return
+    setBusy(true)
+    const res = await act('POST', '/craft/recipe', { recipe: r.id, count })
+    setBusy(false)
+    if (!res) return
+    haptic('success')
+    toast(`${r.emoji} ${formatAmounts(items, res.got)}`)
+  }
+  /** Скільки разів вистачить матеріалів на рецепт. */
+  const timesOf = (r) => Math.min(...Object.entries(r.in).map(([id, n]) => Math.floor((state.inventory[id] ?? 0) / n)))
+
+  return (
+    <Sheet open={open} onClose={onClose} title="🪚 Верстат">
+      <div className="flex flex-col gap-3">
+        <p className="text-center text-sm text-ink-soft">
+          Сокира рубає дерева, кайло б'є каміння, лопата копає замети на Острові Хуртовини. Залізні — швидші, дають більше й беруть валуни та
+          великі замети.
+        </p>
+
+        {tools.map((t, i) => {
+          const lvl = state.tools?.[t.id] ?? 0
+          const cur = t.levels[lvl - 1]
+          const next = t.levels[lvl]
+          const ok = next && canAfford(next.cost, state.balance, state.inventory)
+          return (
+            <motion.div
+              key={t.id}
+              className="flex items-center gap-2 rounded-sm bg-parch-dark/50 p-2"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+            >
+              {toolArt(t.id, lvl) ? (
+                <img src={toolArt(t.id, lvl)} alt="" className={`pixelated h-10 w-10 shrink-0 ${lvl ? '' : 'opacity-40 grayscale'}`} />
+              ) : (
+                <span className={`text-3xl ${lvl ? '' : 'opacity-40 grayscale'}`}>{t.emoji}</span>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-extrabold">{cur ? cur.name : (t.none ?? 'Немає')}</p>
+                {next ? (
+                  <>
+                    <p className="mb-1 text-xs text-ink-soft">Далі: {next.name}</p>
+                    <Cost cost={next.cost} />
+                  </>
+                ) : (
+                  <p className="font-pixel text-[9px] text-[#2d6b18]">НАЙКРАЩА</p>
+                )}
+              </div>
+              {next && (
+                <PxButton size="sm" variant="green" disabled={!ok || busy} onClick={() => craftTool(t)}>
+                  {lvl ? 'Покращити' : 'Зробити'}
+                </PxButton>
+              )}
+            </motion.div>
+          )
+        })}
+
+        {recipes.map((r) => {
+          const n = timesOf(r)
+          return (
+            <div key={r.id} className="flex items-center gap-2 rounded-sm bg-parch-dark/50 p-2">
+              <ItemIcon item={itemOf(items, Object.keys(r.out)[0])} size={32} className="shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-extrabold">{r.name}</p>
+                <p className="flex flex-wrap items-center gap-1 text-xs text-ink-soft">
+                  {Object.entries(r.in).map(([id, k]) => (
+                    <span key={id} className="inline-flex items-center">
+                      <ItemIcon item={itemOf(items, id)} size={14} />×{k}
+                    </span>
+                  ))}
+                  →
+                  {Object.entries(r.out).map(([id, k]) => (
+                    <span key={id} className="inline-flex items-center">
+                      <ItemIcon item={itemOf(items, id)} size={14} />×{k}
+                    </span>
+                  ))}
+                </p>
+              </div>
+              <PxButton size="sm" variant="green" disabled={n < 1 || busy} onClick={() => craftRecipe(r, 1)}>
+                ×1
+              </PxButton>
+              <PxButton size="sm" variant="yellow" disabled={n < 2 || busy} onClick={() => craftRecipe(r, Math.min(n, 20))}>
+                ×{Math.max(2, Math.min(n, 20))}
+              </PxButton>
+            </div>
+          )
+        })}
+      </div>
+    </Sheet>
+  )
+}
+
+/** Електричні машини: рецепти з каталогу, куди слати запит і як назвати (server/src/game/furnace.js → MACHINES). */
+const MACHINE_UI = {
+  furnace: { title: '🔥 Електропіч', who: 'Піч', recipes: (c) => c.furnace?.recipes, url: (id) => `/home/furnace/${id}/smelt` },
+  e_bench: { title: '⚙️ Електроверстат', who: 'Верстат', recipes: (c) => c.eBench?.recipes, url: (id) => `/home/e-bench/${id}/craft` },
+}
+
+/**
+ * Електропіч чи електроверстат: рецепти за енергію з акумуляторів мережі машини.
+ * kind — 'furnace' | 'e_bench', id — яка саме (у кожної своя мережа). Відкрили — оновлюємо стан: сервер дозаряджає акумулятори.
+ */
+export function MachineSheet({ kind, id, onClose }) {
+  const { state, catalog, items, act, toast } = useGame()
+  const [busy, setBusy] = useState(false)
+  const ui = MACHINE_UI[kind] ?? MACHINE_UI.furnace
+  const recipes = ui.recipes(catalog) ?? []
+  const net = id ? state.cables?.networks?.find((n) => n.devices.includes(id)) : null
+  const stored = net?.stored ?? 0
+
+  useEffect(() => {
+    if (id) act('GET', '/state', undefined, { silent: true })
+  }, [id, act])
+
+  const smelt = async (r, count) => {
+    if (busy) return
+    setBusy(true)
+    const res = await act('POST', ui.url(id), { recipe: r.id, count })
+    setBusy(false)
+    if (!res) return
+    haptic('success')
+    toast(`${r.emoji} ${formatAmounts(items, res.got)} · ⚡−${res.used} Вт·год`)
+  }
+  /** Скільки разів вистачить і матеріалів, і енергії (не більше 10 за раз). */
+  const timesOf = (r) => Math.min(10, Math.floor(stored / r.energy + 1e-9), ...Object.entries(r.in).map(([k, n]) => Math.floor((state.inventory[k] ?? 0) / n)))
+
+  const status = !net
+    ? { tone: 'text-[#a3341f]', text: `🔌 ${ui.who} не під'єднано. У будові → ⚡ Електрика протягни кабель від акумулятора.` }
+    : !net.capacity
+      ? { tone: 'text-[#a3341f]', text: '🔋 У цій мережі немає акумулятора — енергії нізвідки взяти.' }
+      : !net.max
+        ? { tone: 'text-[#8a5a00]', text: `🔋 ${wh(stored)} / ${net.capacity} Вт·год · у мережі немає вітряка чи панелі, нова енергія не прийде.` }
+        : { tone: 'text-[#2d6b18]', text: `🔋 ${wh(stored)} / ${net.capacity} Вт·год у мережі` }
+
+  return (
+    <Sheet open={!!id} onClose={onClose} title={ui.title}>
+      <div className="flex flex-col gap-3">
+        <p className={`rounded-sm bg-parch-dark/50 p-2 text-center text-sm font-bold ${status.tone}`}>{status.text}</p>
+        <p className="text-center text-xs text-ink-soft">
+          {ui.who} бере енергію з акумулятора своєї мережі. Вітряк дає від 0 до 40 Вт — як подме (у середньому ~20 Вт·год за годину);
+          сонячна панель удень — до 60 Вт.
+        </p>
+        {recipes.map((r) => {
+          const n = timesOf(r)
+          const energyOk = stored + 1e-9 >= r.energy
+          return (
+            <div key={r.id} className="flex items-center gap-2 rounded-sm bg-parch-dark/50 p-2">
+              <ItemIcon item={itemOf(items, Object.keys(r.out)[0])} size={32} className="shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-extrabold">{r.name}</p>
+                <p className="flex flex-wrap items-center gap-1 text-xs text-ink-soft">
+                  {Object.entries(r.in).map(([k, c]) => (
+                    <Chip key={k} ok={(state.inventory[k] ?? 0) >= c}>
+                      <ItemIcon item={itemOf(items, k)} size={14} />
+                      {Math.min(state.inventory[k] ?? 0, c)}/{c}
+                    </Chip>
+                  ))}
+                  <Chip ok={energyOk}>⚡{r.energy} Вт·год</Chip>
+                </p>
+              </div>
+              <PxButton size="sm" variant="green" disabled={n < 1 || busy} onClick={() => smelt(r, 1)}>
+                ×1
+              </PxButton>
+              <PxButton size="sm" variant="yellow" disabled={n < 2 || busy} onClick={() => smelt(r, n)}>
+                ×{Math.max(2, n)}
+              </PxButton>
+            </div>
+          )
+        })}
+      </div>
+    </Sheet>
   )
 }
 

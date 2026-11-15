@@ -19,8 +19,9 @@ import { WINTER_INTERACT } from '../walk/winter.js'
 import { skyAt, skyOverrideFromUrl } from '../walk/sky.js'
 import { BuildingSheet } from './Home.jsx'
 import { DogSheet, FarmSheet, Hearts, SeedBar } from './islandFarm.jsx'
-import { ResetSheet, WorkshopSheet } from './islandCraft.jsx'
+import { CraftSheet, MachineSheet, ResetSheet, WorkshopSheet } from './islandCraft.jsx'
 import { windWatts } from '../wind.js'
+import { lineAt } from '../walk/belts.js'
 import { GENERATORS, genWatts } from '../generators.js'
 import { solarFactor } from '../solar.js'
 import { ClosetSheet } from './islandWardrobe.jsx'
@@ -29,9 +30,9 @@ const BUILDINGS = new Set(['house', 'garden', 'workshop', 'lighthouse', 'pier'])
 const NO_DECO = []
 const DEFAULT_FLOOR_STATE = { ...DEFAULT_FLOOR, owned: [DEFAULT_FLOOR.p] }
 const DOG_IDS = DOGS.map((d) => d.id)
-const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', solar: '☀️', battery: '🔋', furnace: '🔥', e_bench: '⚙️', tree: '🌱', rubber: '🟤', mine: '⛏️', net: '🥅', fishhut: '🛖' }
+const ICONS = { chest: '🎁', fishing: '🎣', boat: '⛵', exit: '🚪', bed: '🛏️', stove: '🔥', shelf: '📚', farmshop: '🌱', workbench: '🪚', closet: '👕', sail_home: '⛵', winter_sign: '🪧', winter_fire: '🔥', windmill: '🌬️', solar: '☀️', battery: '🔋', furnace: '🔥', e_bench: '⚙️', tree: '🌱', rubber: '🟤', mine: '⛏️', net: '🥅', fishhut: '🛖', crate: '📦' }
 /** Що написати на кнопці дії. */
-const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', solar: 'Глянути', battery: 'Глянути', furnace: 'Плавити', e_bench: 'Майструвати', tree: 'Глянути', rubber: 'Зібрати', mine: 'Забрати', net: 'Глянути', fishhut: 'Забрати' }
+const ACTION = { fishing: 'Рибалити', boat: 'Плисти', house: 'Увійти', exit: 'Вийти', bed: 'Подрімати', stove: 'Готувати', shelf: 'Читати', workbench: 'Майструвати', farmshop: 'Відкрити', closet: 'Перевдягтися', sail_home: 'Додому', winter_sign: 'Читати', winter_fire: 'Погрітися', windmill: 'Глянути', solar: 'Глянути', battery: 'Глянути', furnace: 'Плавити', e_bench: 'Майструвати', tree: 'Глянути', rubber: 'Зібрати', mine: 'Забрати', net: 'Глянути', fishhut: 'Забрати', crate: 'Забрати' }
 /** Ресурси на острові — «node:<id>». */
 const nodeOf = (id) => (id?.startsWith('node:') ? id.slice(5) : null)
 /** Чим добувати: кнопка дії. */
@@ -112,6 +113,7 @@ const CHAIN = {
 const CATS = [
   { value: 'build', label: '🏗 Будова' },
   { value: 'power', label: '⚡ Електрика' },
+  { value: 'belt', label: '🛤 Конвеєр' },
   { value: 'garden', label: '🌱 Посадки' },
   { value: 'decor', label: '🎨 Декор' },
 ]
@@ -162,7 +164,9 @@ export default function IslandWalk({ start = 'island' }) {
   const [farmTab, setFarmTab] = useState(null) // шторка комори: 'seeds' | 'sell' | 'guide' | null
   const [seed, setSeed] = useState(null) // яке насіння садити наступним тапом
   const [dogSheet, setDogSheet] = useState(null) // id пса, чия шторка відкрита
-  const [workshop, setWorkshop] = useState(null) // { station: 'workbench' | 'e_bench' | 'furnace', id? } — шторка майстерні
+  const [workshop, setWorkshop] = useState(null) // { station: 'workbench' | 'e_bench' | 'furnace', id? } — шторка майстерні (лише будівля)
+  const [craft, setCraft] = useState(false) // шторка верстата
+  const [furnace, setFurnace] = useState(null) // { kind: 'furnace' | 'e_bench', id } — чия шторка відкрита
   const [closet, setCloset] = useState(false) // шторка шафи з одягом
   const gathering = useRef(false) // добування в процесі — другий тап не почне нове
   // Ресурси, які вже добуто: поки новий стан не дійшов до кнопки, повторний тап не шле запит удруге.
@@ -586,6 +590,46 @@ export default function IslandWalk({ start = 'island' }) {
     say(`${shortGot(items, res.got)}${v.ready >= v.cap ? ' · шахта була повна!' : ''}`, id, 'good', 'coins')
   }
 
+  /* ───── Конвеєр: стрічки везуть рибу з хат і камінь із шахт у скрині (server/src/game/belts.js) ───── */
+  const beltsState = state.belts ?? null
+  const beltLineOf = (srcId) => beltsState?.lines.find((l) => l.src === srcId) ?? null
+  /** Скільки речей стрічка вже забрала з джерела за розкладом (сервер зарахує при наступному читанні). */
+  const beltGone = (srcId) => {
+    const l = beltLineOf(srcId)
+    if (!l?.sink) return 0
+    return l.queue.length - lineAt(l, now, beltsState).left
+  }
+  /** Скриня конвеєра: що в ній (з тим, що вже доїхало за розкладом) і що ще в дорозі. */
+  const crateView = (id) => {
+    const d = actOf(id) === 'crate' ? deco.find((x) => x.id === id.slice('crate:'.length)) : null
+    if (!d) return null
+    const lines = (beltsState?.lines ?? []).filter((l) => l.sink === d.id)
+    let n = Object.values(d.f ?? {}).reduce((s, k) => s + k, 0)
+    let coming = 0
+    for (const l of lines) {
+      const v = lineAt(l, now, beltsState)
+      n += v.arrived
+      coming += v.moving.length
+    }
+    return { d, n, cap: beltsState?.crateCap ?? 60, coming, lines: lines.length }
+  }
+  const collectingCrate = useRef(false)
+  /** Забрати все зі скрині — написом над нею. */
+  const crateAction = async (id) => {
+    const v = crateView(id)
+    if (!v || collectingCrate.current) return
+    if (v.n < 1) {
+      const why = v.coming ? `🛤 Їде ${v.coming} — ось-ось буде` : v.lines ? '📦 Порожньо — джерелу ще нічого везти' : '📦 Порожньо — підведи стрічку від хати чи шахти (🔨 → 🛤 Конвеєр)'
+      return say(why, id, 'calm')
+    }
+    collectingCrate.current = true
+    const res = await act('POST', `/home/belt-crate/${v.d.id}/collect`)
+    collectingCrate.current = false
+    if (!res) return
+    haptic('success')
+    say(shortGot(items, res.got), id, 'good', 'coins')
+  }
+
   /** Рибальська хата: стан для панелі — рівень, скільки риби, чи ловить, що коштує покращення. */
   const hutView = (id) => {
     const d = actOf(id) === 'fishhut' ? deco.find((x) => x.id === id.slice('fishhut:'.length)) : null
@@ -595,9 +639,11 @@ export default function IslandWalk({ start = 'island' }) {
     const cap = levels[lv - 1]?.cap ?? 10
     const net = networks.find((n) => n.devices.includes(d.id))
     const next = levels[lv] ?? null
-    const fish = hutFish(d)
+    // Що конвеєр уже повіз (за розкладом, ще до нового стану з сервера) — уже не в хаті.
+    const fish = Math.max(0, hutFish(d) - beltGone(d.id))
     const status = !net ? '🔌 без дроту' : !net.capacity ? '🔋 немає акумулятора' : net.stored > 0 ? `⚡ ловить · раз на ${levels[lv - 1]?.everyMin ?? 6} хв` : '⚡ нема енергії'
-    return { d, lv, cap, fish, next, status, working: !!net && net.stored > 0 }
+    const belt = beltLineOf(d.id)
+    return { d, lv, cap, fish, next, status: belt?.sink ? `${status} · 🛤 везе в скриню` : status, working: !!net && net.stored > 0 }
   }
   const hutBusy = useRef(false)
   /** Відкрита картка покращення хати (id хати) — над панеллю дії, не на весь екран. */
@@ -642,17 +688,18 @@ export default function IslandWalk({ start = 'island' }) {
     if (dog) petDog(dog)
     else if (plot != null) farmAction(plot)
     else if (nodeOf(id)) gather(nodeOf(id))
-    else if (actOf(id) === 'workbench') setWorkshop({ station: 'workbench' })
+    else if (actOf(id) === 'workbench') setCraft(true)
     else if (actOf(id) === 'farmshop') setFarmTab('seeds')
     else if (actOf(id) === 'windmill') windmillInfo(id)
     else if (actOf(id) === 'battery') batteryInfo(id)
     else if (actOf(id) === 'solar') solarInfo(id)
-    else if (actOf(id) === 'furnace') setWorkshop({ station: 'furnace', id: id.slice('furnace:'.length) })
-    else if (actOf(id) === 'e_bench') setWorkshop({ station: 'e_bench', id: id.slice('e_bench:'.length) })
+    else if (actOf(id) === 'furnace') setFurnace({ kind: 'furnace', id: id.slice('furnace:'.length) })
+    else if (actOf(id) === 'e_bench') setFurnace({ kind: 'e_bench', id: id.slice('e_bench:'.length) })
     else if (id === 'workshop' && home.levels.workshop > 0) setWorkshop({ station: 'workbench' })
     else if (actOf(id) === 'tree') treeInfo(id)
     else if (actOf(id) === 'rubber') rubberAction(id)
     else if (actOf(id) === 'mine') mineAction(id)
+    else if (actOf(id) === 'crate') crateAction(id)
     else if (actOf(id) === 'net') netInfo(id)
     else if (actOf(id) === 'fishhut') hutCollect(id)
     else if (id === 'house') goScene('home')
@@ -861,6 +908,7 @@ export default function IslandWalk({ start = 'island' }) {
   }, [ready, wireStart, wireEnd, wireRoute, wireSel])
   // Кабелі змінились (свої чи сусіда по острову) — маршрут і виділення перераховуємо з новими.
   useEffect(() => {
+    if (cat === 'belt') return
     if (wireStart && wireEnd) setWireRoute(engine.current?.routeWire(wireStart, wireEnd) ?? null)
     if (wireSel) {
       const seg = engine.current?.wireSegment(wireSel.at) ?? []
@@ -868,6 +916,17 @@ export default function IslandWalk({ start = 'island' }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- перераховуємо лише за зміною кабелів
   }, [state.cables])
+
+  // Стрічки змінились — маршрут і виділення конвеєра перераховуємо.
+  useEffect(() => {
+    if (cat !== 'belt') return
+    if (wireStart && wireEnd) setWireRoute(engine.current?.routeBelt(wireStart, wireEnd.crate ? { crate: wireEnd.crate } : wireEnd) ?? null)
+    if (wireSel) {
+      const seg = engine.current?.beltSegment(wireSel.at) ?? []
+      setWireSel(seg.length ? { ...wireSel, cells: seg } : null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- перераховуємо лише за зміною стрічок
+  }, [state.belts])
 
   /** Мережа, до якої належить клітинка (або null). */
   const netAt = ([x, y]) => (state.cables?.networks ?? []).find((n) => n.cells.some(([cx, cy]) => cx === x && cy === y)) ?? null
@@ -896,6 +955,7 @@ export default function IslandWalk({ start = 'island' }) {
       if (ev.x != null) buildTap({ x: ev.x, y: ev.y, uid: null })
       return
     }
+    if (cat === 'belt') return beltTap(ev)
     const { cell } = ev
     if (!cell) return
     if (wireTool === 'cut') {
@@ -982,6 +1042,109 @@ export default function IslandWalk({ start = 'island' }) {
     setWireSel(null)
   }
 
+  /*
+   * Конвеєр — так само двома тапами: звідки (жолоб хати чи шахти, будь-яка клітинка чи кінець стрічки) і куди
+   * (клітинка або скриня). Маршрут обходить будівлі; стрілки — від початку до кінця. По вже покладеній стрічці —
+   * даром (лише розвертається). Зняття — тап по стрічці виділяє прямий відрізок.
+   */
+  const planks = state.inventory?.plank ?? 0
+  const beltCost = catalog.belts?.cost?.plank ?? 1
+  /** Запит на стрічку шматками (сервер приймає до 200 клітинок за раз). */
+  const beltRequest = async (method, cells) => {
+    const sum = { added: 0, removed: 0, res: null }
+    for (let i = 0; i < cells.length; i += WIRE_BATCH) {
+      if (i) await new Promise((r) => setTimeout(r, 170))
+      const part = cells.slice(i, i + WIRE_BATCH).map((c) => (method === 'DELETE' ? [c[0], c[1]] : c))
+      const res = await act(method, '/home/belts', { cells: part }, { onError: (m) => say(m, 'hero', 'error') })
+      if (!res) return sum.res ? sum : null
+      sum.added += res.added ?? 0
+      sum.removed += res.removed ?? 0
+      sum.res = res
+    }
+    return sum
+  }
+
+  /** Тап по острову в режимі конвеєра. */
+  const beltTap = (ev) => {
+    const { cell } = ev
+    if (wireTool === 'cut') {
+      const seg = cell ? (engine.current?.beltSegment(cell) ?? []) : []
+      if (!seg.length) {
+        setWireSel(null)
+        say('Тут стрічки немає', at(ev), 'calm')
+        return
+      }
+      haptic('select')
+      setWireSel({ cells: seg, at: cell })
+      return
+    }
+    if (!wireStart) {
+      if (ev.crate) {
+        haptic('warning')
+        say('Скриня — це кінець стрічки. Почни від жолоба хати чи шахти', at(ev), 'calm')
+        return
+      }
+      if (!cell || !engine.current?.beltGround(cell)) {
+        haptic('warning')
+        say('Стрічка лягає на сушу чи поміст, в обхід будівель', at(ev), 'error')
+        return
+      }
+      haptic('select')
+      setWireStart(cell)
+      return
+    }
+    if (!ev.crate && cell && cell[0] === wireStart[0] && cell[1] === wireStart[1]) {
+      clearWire()
+      return
+    }
+    const to = ev.crate ? { crate: ev.crate } : cell
+    const route = to ? engine.current?.routeBelt(wireStart, to) : null
+    if (!route) {
+      haptic('warning')
+      say('Туди стрічка не дотягнеться — лише сушею чи помостом, в обхід будівель', at(ev), 'error')
+      return
+    }
+    haptic('select')
+    setWireEnd(ev.crate ? { crate: ev.crate } : cell)
+    setWireRoute(route)
+  }
+
+  /** Прокласти запропоновану стрічку (платиш лише за нові клітинки). */
+  const layBelt = async () => {
+    if (!wireRoute || !wireEnd || busy) return
+    const need = wireRoute.fresh.length * beltCost
+    const end = wireRoute.cells.at(-1)
+    if (need > planks) {
+      haptic('warning')
+      say(`Треба 🪵 ${need}, є ${planks} — дошки роблять на верстаті з колод`, cellAt(end), 'error')
+      return
+    }
+    setBusy(true)
+    const sum = await beltRequest('POST', wireRoute.cells)
+    setBusy(false)
+    if (!sum) return
+    haptic('success')
+    const toCrate = !!wireEnd.crate
+    say(toCrate ? '🛤 Стрічка дійшла до скрині — повезла!' : sum.added ? `🛤 +${sum.added} м стрічки` : '🛤 Стрічку розвернуто', cellAt(end), 'good', toCrate ? 'coins' : null)
+    if (toCrate) return clearWire()
+    // Наступна ділянка — від кінця щойно покладеної.
+    setWireStart([end[0], end[1]])
+    setWireEnd(null)
+    setWireRoute(null)
+  }
+
+  /** Зняти виділену ділянку стрічки — дошки повертаються. */
+  const cutBelt = async () => {
+    if (!wireSel || busy) return
+    setBusy(true)
+    const sum = await beltRequest('DELETE', wireSel.cells)
+    setBusy(false)
+    if (!sum) return
+    haptic('success')
+    say(`🪵 +${sum.removed * beltCost}`, cellAt(wireSel.at), 'good')
+    setWireSel(null)
+  }
+
   const chooseWireTool = (tool) => {
     haptic('select')
     clearGhost()
@@ -992,15 +1155,17 @@ export default function IslandWalk({ start = 'island' }) {
 
   /** Категорія в будові: «⚡ Електрика» вмикає режим електрики, інші — звичайну будову. */
   const changeCat = (c) => {
-    const wasPower = cat === 'power'
+    const lineCat = (v) => v === 'power' || v === 'belt'
+    const wasPower = lineCat(cat)
     setCat(c)
     setFloorTry(null)
-    if (c === 'floor' || c === 'power' || wasPower) {
+    if (c === 'floor' || lineCat(c) || wasPower) {
       clearGhost()
       select(null)
       clearWire()
+      setWireTool('lay')
     }
-    if (c === 'power' && !indoors) engine.current?.setMode('power')
+    if (lineCat(c) && !indoors) engine.current?.setMode(c)
     else if (wasPower) {
       setNetSel(null)
       engine.current?.setNetHighlight(null)
@@ -1051,7 +1216,7 @@ export default function IslandWalk({ start = 'island' }) {
 
   // Усі повідомлення на острові (і помилки сервера) — написами над мандрівником, а не плашками.
   // Поки відкрита шторка чи будуєш — написи спливають там, де тапнув (острів тоді за шторкою чи не в фокусі).
-  const overlayOpen = !!(sheet || farmTab || dogSheet || workshop || closet || build || (home.reset && !resetSeen))
+  const overlayOpen = !!(sheet || farmTab || dogSheet || workshop || craft || furnace || closet || build || (home.reset && !resetSeen))
   const overlay = useRef(overlayOpen)
   useEffect(() => {
     overlay.current = overlayOpen
@@ -1115,11 +1280,22 @@ export default function IslandWalk({ start = 'island' }) {
     act('GET', '/state', undefined, { silent: true })
   }, [ready, ripe, now, act])
 
+  // Що їде стрічками: рибі — колір і форма риби, решті — грудочка свого кольору (walk/belts.js).
+  const beltItems = useMemo(() => {
+    const ids = new Set((state.belts?.lines ?? []).flatMap((l) => [...l.queue, ...l.fl.map((f) => f[1])]))
+    return Object.fromEntries(
+      [...ids].map((id) => {
+        const it = itemOf(items, id)
+        return [id, { kind: it.kind, image: it.image }]
+      })
+    )
+  }, [state.belts, items])
+
   // Рівні будівель, скриня й декор → що стоїть на острові.
   const chestOpen = state.daily.claimedToday
   useEffect(() => {
-    engine.current?.setWorld({ home: { levels: home.levels, pos: home.pos ?? {} }, chestOpen, deco, interior, nodes, cables: state.cables })
-  }, [ready, home.levels, home.pos, chestOpen, deco, interior, nodes, state.cables])
+    engine.current?.setWorld({ home: { levels: home.levels, pos: home.pos ?? {} }, chestOpen, deco, interior, nodes, cables: state.cables, belts: state.belts, beltItems })
+  }, [ready, home.levels, home.pos, chestOpen, deco, interior, nodes, state.cables, state.belts, beltItems])
 
   // Поле: що де росте (оновлюється й саме — волога грядка дорослішає без запитів).
   // need — значок над грядкою (💧 🧺 🌱): що їй треба, видно здалеку. 🌱 — лише якщо є що садити.
@@ -1228,6 +1404,7 @@ export default function IslandWalk({ start = 'island' }) {
             ? (WINTER_INTERACT.find((i) => i.id === near) ?? null)
             : islandSpot(catalog, near)
   const hut = !build && !indoors && !wild ? hutView(near) : null
+  const crate = !build && !indoors && !wild ? crateView(near) : null
   const showSeeds = !build && !indoors && (plotV ? plotV.action === 'plant' || plotV.action === 'till' : actOf(near) === 'farmshop')
   const hasBench = deco.some((d) => d.k === 'workbench')
   const hint = build
@@ -1319,6 +1496,9 @@ export default function IslandWalk({ start = 'island' }) {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 px-2" style={{ paddingBottom: SAFE_BOTTOM }}>
         {build ? (
           <div className="pointer-events-auto overflow-hidden rounded-sm bg-[#0f2a3d]/85 p-2 shadow-[0_-4px_16px_#0006] backdrop-blur-[2px]">
+            {cat === 'belt' && !indoors && (
+              <BeltBar tool={wireTool} setTool={chooseWireTool} placing={!!(ghost || pick)} belts={state.belts} planks={planks} cost={beltCost} />
+            )}
             {cat === 'power' && !indoors && (
               <WireBar
                 tool={wireTool}
@@ -1348,6 +1528,22 @@ export default function IslandWalk({ start = 'island' }) {
                     armedNet={armed === 'wire-net'}
                     onLay={layRoute}
                     onCut={cutWire}
+                    onCancel={clearWire}
+                  />
+                ) : cat === 'belt' && !indoors ? (
+                  <BeltStep
+                    tool={wireTool}
+                    start={wireStart}
+                    end={wireEnd}
+                    route={wireRoute}
+                    sel={wireSel}
+                    planks={planks}
+                    cost={beltCost}
+                    hasSource={deco.some((d) => d.k === HUT_KIND || d.k === 'mine')}
+                    hasCrate={deco.some((d) => d.k === 'belt_crate')}
+                    busy={busy}
+                    onLay={layBelt}
+                    onCut={cutBelt}
                     onCancel={clearWire}
                   />
                 ) : null
@@ -1486,7 +1682,9 @@ export default function IslandWalk({ start = 'island' }) {
                                 ? nodeHint(items, nearNode, nodeTool)
                                 : hut
                                   ? `Рівень ${hut.lv} · 🐟 ${hut.fish}/${hut.cap} · ${hut.status}`
-                                  : spotHint(catalog, home.levels, chestOpen, spot.id)}
+                                  : crate
+                                    ? `📦 ${crate.n}/${crate.cap}${crate.coming ? ` · 🛤 ще ${crate.coming} в дорозі` : crate.lines ? ' · стрічка під\'єднана' : ' · підведи стрічку'}`
+                                    : spotHint(catalog, home.levels, chestOpen, spot.id)}
                           </p>
                         )}
                       </div>
@@ -1581,6 +1779,8 @@ export default function IslandWalk({ start = 'island' }) {
       <BuildingSheet building={building} onClose={() => setSheet(null)} />
       <FarmSheet tab={farmTab} setTab={setFarmTab} onClose={() => setFarmTab(null)} />
       <DogSheet dog={dogSheet ? dogById(dogSheet) : null} onClose={() => setDogSheet(null)} onCommand={commandDog} onFeed={feedDog} />
+      <CraftSheet open={craft} onClose={() => setCraft(false)} />
+      <MachineSheet kind={furnace?.kind} id={furnace?.id} onClose={() => setFurnace(null)} />
       <WorkshopSheet open={!!workshop} station={workshop?.station} deviceId={workshop?.id} onClose={() => setWorkshop(null)} />
       <ClosetSheet open={closet} onClose={() => setCloset(false)} onDressed={() => say(pickOne(DRESSED), 'hero', 'good')} />
       <ResetSheet note={resetSeen ? null : home.reset} onClose={ackReset} />
@@ -1686,6 +1886,93 @@ function WireBar({ tool, setTool, placing, liveGen, cables, stock, power, loose,
       )}
     </div>
   )
+}
+
+/** Панель конвеєра над будовою: інструменти, дошки в рюкзаку, скільки стрічки й ліній до скринь. */
+function BeltBar({ tool, setTool, placing, belts, planks, cost }) {
+  const meters = belts?.cells?.length ?? 0
+  const lines = belts?.lines ?? []
+  const working = lines.filter((l) => l.sink).length
+  const broken = lines.length - working
+  return (
+    <div className="mb-2 flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <PxButton size="sm" variant={tool === 'lay' && !placing ? 'green' : 'paper'} onClick={() => setTool('lay')}>
+          🛤 Класти
+        </PxButton>
+        <PxButton size="sm" variant={tool === 'cut' && !placing ? 'red' : 'paper'} onClick={() => setTool('cut')}>
+          ✂ Знімати
+        </PxButton>
+        <span className="ml-auto shrink-0 font-pixel text-[10px] text-cream" title="Дошки в рюкзаку">
+          🪵{planks}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-cream/85">
+        <span>
+          стрічка {meters} м · 🪵{cost} за метр
+        </span>
+        {working > 0 && <span className="text-[#9cf59a]">· {working} везе в скриню</span>}
+        {broken > 0 && <span className="text-[#ffb3a6]">· {broken} без скрині</span>}
+      </div>
+    </div>
+  )
+}
+
+/** Що робити далі зі стрічкою — рядок підказки й кнопок (на місці звичайного рядка будови). */
+function BeltStep({ tool, start, end, route, sel, planks, cost, hasSource, hasCrate, busy, onLay, onCut, onCancel }) {
+  const cancel = (
+    <PxButton size="sm" variant="paper" onClick={onCancel} aria-label="Скасувати">
+      ✕
+    </PxButton>
+  )
+  const text = (main, sub, tone = 'text-cream/70') => (
+    <div className="min-w-0 flex-1">
+      <p className="text-[12px] leading-tight font-extrabold">{main}</p>
+      {sub && <p className={`text-[11px] leading-tight ${tone}`}>{sub}</p>}
+    </div>
+  )
+  if (tool === 'cut') {
+    if (!sel) return text('✂ Торкнись стрічки, яку зняти', 'Виділиться прямий відрізок — до повороту. Дошки повернуться.')
+    return (
+      <>
+        {text(`Ділянка · ${sel.cells.length} м`, `Повернеться 🪵 ${sel.cells.length * cost}`)}
+        <PxButton size="sm" variant="red" disabled={busy} onClick={onCut}>
+          ✓ Зняти
+        </PxButton>
+        {cancel}
+      </>
+    )
+  }
+  if (route) {
+    const need = route.fresh.length * cost
+    const short = need > planks
+    const sub = short
+      ? `Треба 🪵 ${need}, є ${planks} — дошки на верстаті`
+      : route.fresh.length
+        ? `Нових ${route.fresh.length} м · 🪵 ${need}${route.turned ? ` · розверне ${route.turned}` : ''}`
+        : route.turned
+          ? `Розверне ${route.turned} м — даром`
+          : 'Уже лежить так'
+    return (
+      <>
+        {text(end?.crate ? `До скрині · ${route.cells.length} м` : `Стрічка · ${route.cells.length} м`, sub, short ? 'text-[#ffb3a6]' : 'text-[#b6f29a]')}
+        <PxButton size="sm" variant="green" disabled={busy || short} onClick={onLay}>
+          ✓ Прокласти
+        </PxButton>
+        {cancel}
+      </>
+    )
+  }
+  if (start) {
+    return (
+      <>
+        {text('Тепер торкнись, куди везти', hasCrate ? 'Торкнись скрині 📦 — стрічка заїде просто в неї. Стрілки — від початку до кінця.' : 'Скрині ще немає — постав її тут же, у 🛤 Конвеєр.')}
+        {cancel}
+      </>
+    )
+  }
+  if (!hasSource) return text('Спершу постав рибальську хату 🛖 чи шахту ⛏️', 'Їхній жолоб — початок стрічки: звідти поїде риба чи камінь.')
+  return text('🛤 Торкнись хати чи шахти — звідки везти', 'Стрічка почнеться від їхнього жолоба (жовтий квадрат). Мапу рухай пальцем.')
 }
 
 /** Що робити далі з кабелем — рядок підказки й кнопок (на місці звичайного рядка будови). */
@@ -2091,6 +2378,7 @@ function islandSpot(catalog, id) {
   if (actOf(id) === 'mine') return { id, label: 'Шахта' }
   if (actOf(id) === 'net') return { id, label: 'Сітка' }
   if (actOf(id) === 'fishhut') return { id, label: 'Рибальська хата' }
+  if (actOf(id) === 'crate') return { id, label: 'Скриня конвеєра' }
   return INTERACT.find((i) => i.id === id) ?? null
 }
 
@@ -2137,7 +2425,7 @@ function spotHint(catalog, levels, chestOpen, id) {
   if (actOf(id) === 'e_bench') return 'Пластини, ізольований дріт і сонячні панелі'
   if (actOf(id) === 'tree') return 'Росте саме — згодом стане деревом'
   if (actOf(id) === 'rubber') return 'Каучукове дерево — 3 каучуку щогодини'
-  if (actOf(id) === 'mine') return 'Сама добуває камінь — тапни, щоб забрати'
+  if (actOf(id) === 'mine') return 'Сама добуває камінь — тапни, щоб забрати, або підведи конвеєр від жолоба'
   if (actOf(id) === 'net') return 'Сама ловить дари моря; дрібниці на березі поруч — тапай і збирай'
   if (actOf(id) === 'fishhut') return 'Сама ловить рибу, поки є струм'
   if (actOf(id) === 'bed') return 'Перина й вишита ковдра'

@@ -14,6 +14,7 @@ const DOG_SHEETS = { dog: rudkoMeta, sirko: sirkoMeta }
 import { beamTexture, blobTexture, bubbleTexture, createParticles, crispPixels, crispTexture, dropHeight, glowTexture, popScale, textTexture, waterMaterial } from './fx.js'
 import { geometry } from './grid.js'
 import { flowDistance, routeWire as findRoute, segmentAt } from './wires.js'
+import { DIRS as BELT_DIRS, drawBeltCell, drawBeltItem, itemTint, lineAt, pointAt, travelMs, withDirs } from './belts.js'
 import { WIND, windWatts } from '../wind.js'
 import { GENERATORS, genWatts } from '../generators.js'
 import { FLOOR, HOME_MAP, HOME_START, WALL_H, homePlacements } from './home.js'
@@ -596,8 +597,10 @@ export function createWalk(canvas, assets, cb) {
   /** Ресурси сцени, де ти зараз: рідного острова чи Хуртовини. */
   const sceneNodes = () => (scene.id === 'winter' ? winterNodes : (world?.nodes ?? []))
   let mode = 'walk'
-  /** Режим «електрика»: кабелі під землею, підсвічені пристрої, решта — притемнена. */
-  const editing = () => mode === 'build' || mode === 'power'
+  /** Режим «електрика»: кабелі під землею, підсвічені пристрої, решта — притемнена. «belt» — прокладання конвеєра. */
+  const editing = () => mode === 'build' || mode === 'power' || mode === 'belt'
+  /** Режими, де палець тягне камеру, а тап вибирає клітинку (кабель чи стрічку). */
+  const lining = () => mode === 'power' || mode === 'belt'
   /** Прилади, що під'єднуються кабелем: вітряк дає струм, акумулятор запасає, піч витрачає. */
   const ELECTRIC = new Set(['windmill', 'solar', 'battery', 'furnace', 'e_bench', 'fish_hut'])
   const NO_CABLES = { cells: [], networks: [], wired: [] }
@@ -858,6 +861,25 @@ export function createWalk(canvas, assets, cb) {
   }
   gridMesh.visible = false
   scene3.add(gridMesh)
+
+  /* ───── Конвеєр: стрічки й речі на них — пласкою канвою на землі, 1 px канви = 1 px арту (walk/belts.js) ───── */
+  const NO_BELTS = { cells: [], lines: [], gapMs: 2000, speed: 2.5, at: 0 }
+  /** Стрічки острова з сервера (server/src/game/belts.js → beltsView). */
+  let belts = NO_BELTS
+  /** Серверний час мінус Date.now(): розклад стрічок — за серверним годинником. */
+  let beltClock = 0
+  /** id речі → { kind, image } — щоб риба на стрічці була рибою свого кольору. */
+  let beltItems = {}
+  const beltCanvas = document.createElement('canvas')
+  let beltTex = null
+  const beltMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }))
+  // Над землею, настилом і помостами (-10), під сіткою будівництва (-9) і всім, що стоїть.
+  beltMesh.renderOrder = -9.5
+  beltMesh.visible = false
+  scene3.add(beltMesh)
+  let beltDrawnAt = -1
+  /** Речі, що їхали минулого кадру (src:t) — котра зникла, та доїхала: скриня підстрибує. */
+  let beltMoving = new Set()
 
   function makeFootprint() {
     const fill = new THREE.Mesh(unitPlane, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }))
@@ -1206,6 +1228,11 @@ export function createWalk(canvas, assets, cb) {
     ctx.setTransform(res, 0, 0, res, -gx * res, -gy * res) // далі — у пікселях арту
     wireAt = t
     const ground = scene.outdoor ? land : homeLand
+    if (mode === 'belt') {
+      drawBeltGrid(ctx)
+      gridTex.needsUpdate = true
+      return
+    }
     if (mode === 'power') {
       drawWires(ctx, scene.outdoor ? wireGround() : ground)
       gridTex.needsUpdate = true
@@ -1338,6 +1365,190 @@ export function createWalk(canvas, assets, cb) {
     const ports = list.filter((p) => p.uid && DECO_GEOM[p.kind]?.port).map((p) => ({ x: p.x + DECO_GEOM[p.kind].port.dx, y: p.y + DECO_GEOM[p.kind].port.dy }))
     wireCache = { cables, list, has, devices, nets, netOf, ports }
     return wireCache
+  }
+
+  /** Клітинки під «ніжками» прикраси. */
+  const footCellsOf = (p) => {
+    const [x, y, w, h] = decoFootprint(p.kind, p.x, p.y)
+    const out = []
+    for (let cy = Math.floor(y / CELL); cy <= Math.floor((y + h - 1) / CELL); cy++)
+      for (let cx = Math.floor(x / CELL); cx <= Math.floor((x + w - 1) / CELL); cx++) out.push([cx, cy])
+    return out
+  }
+  /** Клітинка жолоба джерела (рибальська хата, шахта) — та сама, що рахує сервер (belts.js → portCell). */
+  const portCellOf = (p) => {
+    const port = DECO_GEOM[p.kind]?.port
+    return port ? [Math.floor((p.x + port.dx) / CELL), Math.floor((p.y + port.dy) / CELL)] : null
+  }
+
+  /** Стрічки: напрямок кожної клітинки, з якими сторонами вона з'єднана, межі канви. Рахуємо, лише коли змінились стрічки чи острів. */
+  let beltCache = null
+  function beltData() {
+    if (beltCache?.belts === belts && beltCache.list === list) return beltCache
+    const dir = new Map(belts.cells.map(([x, y, d]) => [cellKey(x, y), d]))
+    const crate = new Map()
+    for (const p of list) if (p.uid && p.kind === 'belt_crate') for (const [x, y] of footCellsOf(p)) crate.set(cellKey(x, y), p.uid)
+    /** Клітинка жолоба → бік, з якого стоїть саме джерело (там стрічка теж «відкрита»). */
+    const portSide = new Map()
+    const ports = []
+    for (const p of list) {
+      const c = p.uid && portCellOf(p)
+      if (!c) continue
+      portSide.set(cellKey(...c), DECO_GEOM[p.kind].port.dx > 0 ? 2 : 0)
+      ports.push({ cell: c, uid: p.uid })
+    }
+    const open = new Map()
+    for (const [x, y, d] of belts.cells) {
+      const o = new Set()
+      const [dx, dy] = BELT_DIRS[d]
+      const next = cellKey(x + dx, y + dy)
+      if (dir.has(next) || crate.has(next)) o.add(d)
+      for (let side = 0; side < 4; side++) {
+        const [sx, sy] = BELT_DIRS[side]
+        if (dir.get(cellKey(x + sx, y + sy)) === (side + 2) % 4) o.add(side)
+      }
+      const ps = portSide.get(cellKey(x, y))
+      if (ps !== undefined) o.add(ps)
+      open.set(cellKey(x, y), o)
+    }
+    // Межі канви: усі стрічки й клітинка довкола (риба заїжджає в скриню).
+    let frame = null
+    if (belts.cells.length) {
+      let x0 = Infinity
+      let y0 = Infinity
+      let x1 = -Infinity
+      let y1 = -Infinity
+      for (const [x, y] of belts.cells) {
+        x0 = Math.min(x0, x - 1)
+        y0 = Math.min(y0, y - 1)
+        x1 = Math.max(x1, x + 2)
+        y1 = Math.max(y1, y + 2)
+      }
+      frame = { x: x0 * CELL, y: y0 * CELL, w: (x1 - x0) * CELL, h: (y1 - y0) * CELL }
+    }
+    const prev = beltCache?.frame
+    beltCache = { belts, list, dir, open, crate, ports, frame }
+    if (frame && (!prev || prev.x !== frame.x || prev.y !== frame.y || prev.w !== frame.w || prev.h !== frame.h)) {
+      beltCanvas.width = frame.w
+      beltCanvas.height = frame.h
+      beltTex?.dispose()
+      beltTex = new THREE.CanvasTexture(beltCanvas)
+      beltTex.magFilter = THREE.NearestFilter
+      beltTex.minFilter = THREE.NearestFilter
+      beltTex.generateMipmaps = false
+      beltTex.colorSpace = THREE.SRGBColorSpace
+      beltMesh.material.map = beltTex
+      beltMesh.material.needsUpdate = true
+      beltMesh.geometry.dispose()
+      beltMesh.geometry = new THREE.PlaneGeometry(frame.w, frame.h).rotateX(-Math.PI / 2)
+      beltMesh.position.set(frame.x + frame.w / 2, 0.05, frame.y + frame.h / 2)
+    }
+    return beltCache
+  }
+
+  /** Серверний час зараз — за ним їде розклад стрічок. */
+  const beltNow = () => Date.now() + beltClock
+
+  /** Перемалювати стрічки й речі на них (кілька десятків разів на секунду, лише коли є що). */
+  function drawBelts() {
+    const B = beltData()
+    beltMesh.visible = !!B.frame && scene.id === 'island'
+    if (!beltMesh.visible) return
+    const g = beltCanvas.getContext('2d')
+    g.setTransform(1, 0, 0, 1, -B.frame.x, -B.frame.y)
+    g.clearRect(B.frame.x, B.frame.y, B.frame.w, B.frame.h)
+    const T = beltNow()
+    // Планки біжать зі швидкістю стрічки: speed клітинок за секунду, візерунок — через 4 px.
+    const phase = (((T / 1000) * belts.speed * CELL) / 4) % 1
+    for (const [x, y, d] of belts.cells) drawBeltCell(g, x, y, d, B.open.get(cellKey(x, y)), phase)
+    const dirAt = (x, y) => B.dir.get(cellKey(x, y))
+    const moving = new Set()
+    for (const line of belts.lines) {
+      const { moving: on } = lineAt(line, T, belts)
+      for (const m of on) {
+        const p = pointAt(line, dirAt, m.s)
+        const it = beltItems[m.id]
+        drawBeltItem(g, p.x, p.y, p.d, it?.kind === 'fish', itemTint(it?.image, it?.kind === 'fish' ? [150, 175, 195] : [140, 140, 140]))
+        moving.add(`${line.src}:${m.t}`)
+      }
+      // Доїхала до скрині — скриня підстрибує, з неї пилок.
+      if (!line.sink) continue
+      const travel = travelMs(line, belts.speed)
+      for (const key of beltMoving) {
+        if (!key.startsWith(line.src + ':') || moving.has(key)) continue
+        if (T - Number(key.slice(line.src.length + 1)) < travel) continue
+        juice.set(line.sink, { t0: t, power: 0.3, drop: 0 })
+        const crate = list.find((q) => q.uid === line.sink)
+        if (crate) particles.dust(crate.x, crate.y - 10, 3, 0.4, [1, 0.9, 0.6])
+      }
+    }
+    beltMoving = moving
+    beltTex.needsUpdate = true
+  }
+
+  /** Клітинки під тим, що стоїть (не підлога): стрічку крізь будинок не прокласти. */
+  function beltBusy() {
+    const g = SCENES.island.geo
+    const busy = new Set()
+    for (const p of list) for (const b of p.blocks ?? []) for (const c of g.cellsOf(b)) if (c >= 0) busy.add(c)
+    return busy
+  }
+
+  /** Сітка в режимі конвеєра: де можна класти, жолоби, маршрут зі стрілками й ділянка на зняття. */
+  function drawBeltGrid(ctx) {
+    const B = beltData()
+    const ground = wireGround()
+    const g = SCENES.island.geo
+    const busy = beltBusy()
+    for (let c = 0; c < ground.length; c++) {
+      if (!ground[c] || busy.has(c)) continue
+      const x = g.cx(c) * CELL
+      const y = g.cy(c) * CELL
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.11)'
+      ctx.fillRect(x, y, CELL, 0.5)
+      ctx.fillRect(x, y, 0.5, CELL)
+    }
+    // Жолоби джерел: пунктирний квадрат блимає — «стрічку починай тут».
+    ctx.setLineDash([2, 2])
+    ctx.lineWidth = 1
+    for (const p of B.ports) {
+      const on = B.dir.has(cellKey(...p.cell))
+      ctx.strokeStyle = on ? '#8dff9c' : '#ffd27a'
+      ctx.globalAlpha = on ? 0.7 : 0.6 + Math.sin(t * 3) * 0.3
+      ctx.strokeRect(p.cell[0] * CELL + 0.5, p.cell[1] * CELL + 0.5, CELL - 1, CELL - 1)
+    }
+    ctx.setLineDash([])
+    ctx.globalAlpha = 1
+    // Скрині: де стрічка закінчується.
+    for (const [k] of B.crate) {
+      const [x, y] = k.split(',').map(Number)
+      ctx.fillStyle = 'rgba(255, 210, 122, 0.16)'
+      ctx.fillRect(x * CELL, y * CELL, CELL, CELL)
+    }
+    const { start, route, sel } = wireView
+    if (sel?.length) {
+      ctx.fillStyle = 'rgba(255, 90, 70, 0.45)'
+      for (const [x, y] of sel) ctx.fillRect(x * CELL, y * CELL, CELL, CELL)
+    }
+    if (route?.cells.length) {
+      const fresh = new Set(route.fresh.map(([x, y]) => cellKey(x, y)))
+      const blink = 0.55 + Math.sin(t * 6) * 0.25
+      for (const [x, y, d] of route.cells) {
+        ctx.globalAlpha = blink
+        drawBeltCell(ctx, x, y, d, new Set([d, (d + 2) % 4]), (t * 2) % 1)
+        ctx.globalAlpha = 1
+        ctx.strokeStyle = fresh.has(cellKey(x, y)) ? '#8dff9c' : '#ffe066'
+        ctx.lineWidth = 0.6
+        ctx.strokeRect(x * CELL + 0.3, y * CELL + 0.3, CELL - 0.6, CELL - 0.6)
+      }
+    }
+    if (start) {
+      ctx.strokeStyle = '#8dff9c'
+      ctx.lineWidth = 1.4
+      ctx.beginPath()
+      ctx.arc(mid(start[0]), mid(start[1]), 4.6 + Math.sin(t * 6) * 0.8, 0, Math.PI * 2)
+      ctx.stroke()
+    }
   }
 
   /** Скільки Вт дають генератори мережі просто зараз (вітер і сонце — ті самі формули, що на сервері). */
@@ -1736,10 +1947,15 @@ export function createWalk(canvas, assets, cb) {
   }
 
   /** Стан острова: { home: { levels, pos }, chestOpen, deco, interior, nodes }. */
-  function setWorld({ home, chestOpen, deco = [], interior = [], nodes = [], cables: cab }) {
+  function setWorld({ home, chestOpen, deco = [], interior = [], nodes = [], cables: cab, belts: bl, beltItems: bi }) {
     celebrate(home, chestOpen, deco, nodes)
     celebrateInterior(interior)
     cables = cab ?? NO_CABLES
+    if ((bl ?? NO_BELTS) !== belts) {
+      belts = bl ?? NO_BELTS
+      beltClock = (bl?.at ?? Date.now()) - Date.now()
+    }
+    if (bi) beltItems = bi
     world = { home, chestOpen, deco, interior, nodes }
     rebuild()
     if (!dogPlaced) {
@@ -2240,8 +2456,8 @@ export function createWalk(canvas, assets, cb) {
     if (pointers.size > 2) return
     const p = pick(e.clientX, e.clientY)
     held = { cx: e.clientX, cy: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, p }
-    if (mode === 'power') {
-      // Палець тягне камеру; тап (без руху) — вибір клітинки для кабелю, див. onUp.
+    if (lining()) {
+      // Палець тягне камеру; тап (без руху) — вибір клітинки для кабелю чи стрічки, див. onUp.
       held.kind = 'pan'
       held.anchor = p.ground
       return
@@ -2278,7 +2494,7 @@ export function createWalk(canvas, assets, cb) {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (gesture && pointers.size === 2) {
       const now = twoFinger()
-      if (mode === 'power') {
+      if (lining()) {
         // Два пальці в електриці — рух камерою: земля під серединою між пальцями лишається на місці.
         const a = groundAt(gesture.mx, gesture.my)
         const b = groundAt(now.mx, now.my)
@@ -2336,6 +2552,19 @@ export function createWalk(canvas, assets, cb) {
     if (pointers.size < 2) gesture = null
     if (!held || pointers.size) {
       if (!pointers.size) held = null
+      return
+    }
+    if (mode === 'belt') {
+      // Тап: клітинка під пальцем; у хату чи шахту — клітинка її жолоба; у скриню — сама скриня (туди веде стрічка).
+      if (!held.moved) {
+        const it = held.p.item?.p
+        const g = held.p.ground
+        const port = it?.uid ? portCellOf(it) : null
+        const crate = it?.uid && it.kind === 'belt_crate' ? it.uid : null
+        const cell = port ?? (g ? [Math.floor(g.x / CELL), Math.floor(g.y / CELL)] : null)
+        cb.onWire?.({ x: g?.x, y: g?.y, cell, source: port ? it.uid : null, crate })
+      }
+      held = null
       return
     }
     if (mode === 'power') {
@@ -2726,7 +2955,12 @@ export function createWalk(canvas, assets, cb) {
     // Будівництво: виділена прикраса й привид нового місця.
     gridMesh.visible = editing()
     // Кабелі анімовані (струм біжить, «мурахи» маршруту) — перемальовуємо ~10 разів на секунду, не щокадру.
-    if (mode === 'power' && t - wireAt > 0.1) drawGrid()
+    if (lining() && t - wireAt > 0.1) drawGrid()
+    // Стрічки конвеєра їдуть і в звичайній грі: ~30 разів на секунду, лише коли вони є.
+    if (belts.cells.length && t - beltDrawnAt > 1 / 30) {
+      beltDrawnAt = t
+      drawBelts()
+    } else if (!belts.cells.length) beltMesh.visible = false
     const blink = 0.55 + Math.sin(t * 6) * 0.25
     const sel = mode === 'build' && selected && !ghost && list.find((p) => p.uid === selected)
     if (sel && sel.layer !== 'wall') selFoot.set(footOf(sel.kind, sel.x, sel.y), 0xffdc5a, 0.25 * blink, 0xffe678, blink)
@@ -2838,8 +3072,8 @@ export function createWalk(canvas, assets, cb) {
     /** 'walk' — гуляємо, 'build' — пісочниця: палець рухає камеру, тап — вибір місця. */
     setMode(m) {
       if (m === mode || (m === 'build' && !scene.farm && scene.outdoor)) return
-      // Електрика — лише на рідному острові (не в хатинці, не на Хуртовині, не на городі).
-      if (m === 'power' && (!scene.outdoor || !scene.farm)) return
+      // Електрика й конвеєр — лише на рідному острові (не в хатинці, не на Хуртовині, не на городі).
+      if ((m === 'power' || m === 'belt') && (!scene.outdoor || !scene.farm)) return
       mode = m
       held = null
       input.clear()
@@ -2881,6 +3115,58 @@ export function createWalk(canvas, assets, cb) {
       if (!r) return null
       const back = ([x, y]) => [x + x0, y + y0]
       return { cells: r.cells.map(back), fresh: r.fresh.map(back) }
+    },
+    /**
+     * Маршрут стрічки від клітинки до клітинки чи до скрині ({ crate: uid }): сушею й помостами, в обхід усього,
+     * що стоїть. Повертає { cells: [[cx, cy, напрямок]], fresh, turned } — нові клітинки (за них платиш)
+     * і скільки вже покладених розвернеться. null — не дотягнутись.
+     */
+    routeBelt(from, to) {
+      const B = beltData()
+      const ground = wireGround()
+      const { x0, y0, x1, y1 } = wireGroundCache.box
+      const g = SCENES.island.geo
+      const busy = beltBusy()
+      let goal = to
+      if (to?.crate) {
+        const p = list.find((q) => q.uid === to.crate)
+        if (!p) return null
+        // Заїжджаємо в найближчу до початку клітинку скрині.
+        const dist = (c) => Math.abs(c[0] - from[0]) + Math.abs(c[1] - from[1])
+        goal = footCellsOf(p).reduce((a, c) => (dist(c) < dist(a) ? c : a))
+      }
+      const free = (X, Y) => {
+        if (to?.crate && X === goal[0] && Y === goal[1]) return true
+        const i = g.idx(X, Y)
+        return ground[i] === 1 && (!busy.has(i) || B.dir.has(cellKey(X, Y)))
+      }
+      const r = findRoute([from[0] - x0, from[1] - y0], [goal[0] - x0, goal[1] - y0], {
+        cols: x1 - x0 + 1,
+        rows: y1 - y0 + 1,
+        land: (x, y) => free(x + x0, y + y0),
+        has: (x, y) => B.dir.has(cellKey(x + x0, y + y0)),
+      })
+      if (!r) return null
+      const cells = r.cells.map(([x, y]) => [x + x0, y + y0])
+      const after = to?.crate ? cells.pop() : null
+      if (!cells.length) return null
+      const dirs = withDirs(cells, after)
+      return {
+        cells: dirs,
+        fresh: dirs.filter(([x, y]) => !B.dir.has(cellKey(x, y))),
+        turned: dirs.filter(([x, y, d]) => B.dir.has(cellKey(x, y)) && B.dir.get(cellKey(x, y)) !== d).length,
+      }
+    },
+    /** Ділянка стрічки під клітинкою (прямий відрізок до повороту чи розгалуження). */
+    beltSegment(cell) {
+      const B = beltData()
+      return segmentAt(cell, (x, y) => B.dir.has(cellKey(x, y)))
+    },
+    /** Чи можна почати стрічку з цієї клітинки (суша чи поміст, не під будівлею, або вже стрічка). */
+    beltGround(cell) {
+      const B = beltData()
+      const i = SCENES.island.geo.idx(cell[0], cell[1])
+      return B.dir.has(cellKey(...cell)) || (wireGround()[i] === 1 && !beltBusy().has(i))
     },
     /** Ділянка кабелю під клітинкою (між розгалуженнями) — щоб зняти гілку одним тапом. */
     wireSegment(cell) {

@@ -18,6 +18,7 @@ import { ackReset, collectHome, demolishBuilding, moveBuilding, placeBuilding, u
 import { gatherNode, stealNode } from "./game/nodes.js";
 import { collectRubber } from "./game/rubber.js";
 import { collectMine } from "./game/mine.js";
+import { collectCrate, layBelts, removeBelts } from "./game/belts.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
 import {
   answerQuiz,
@@ -179,6 +180,10 @@ export function buildApiRouter(botToken) {
   api.post("/home/rubber/:id/collect", handler(island((req) => collectRubber(uid(req), req.params.id))));
   // Шахта: забрати камінь, що набрався.
   api.post("/home/mine/:id/collect", handler(island((req) => collectMine(uid(req), req.params.id))));
+  // Конвеєр: прокласти / зняти стрічку, забрати зі скрині.
+  api.post("/home/belts", handler(island((req) => layBelts(uid(req), body(req).cells))));
+  api.delete("/home/belts", handler(island((req) => removeBelts(uid(req), body(req).cells))));
+  api.post("/home/belt-crate/:id/collect", handler(island((req) => collectCrate(uid(req), req.params.id))));
   api.post("/craft/tool", handler((req) => craftTool(uid(req), body(req).tool)));
   api.post("/craft/recipe", handler((req) => craftRecipe(uid(req), body(req).recipe, body(req).count)));
 

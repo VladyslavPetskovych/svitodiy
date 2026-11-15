@@ -3014,6 +3014,8 @@ function buildSprites(farm, room, winter, power) {
     ...fishHutArt({ Img, base: readPng(join(ROOT, 'art/fish-hut/base.png')) }),
     // Шахта 96×96 (scripts/mine-art.py: кузня, руда й вагонетка з еталонного аркуша + штрек і рейки).
     mine: readPng(join(ROOT, 'art/mine/mine.png')),
+    // Скриня конвеєра 24×22 (scripts/belt-art.py: відкрита скриня з еталонного аркуша, з рибою й камінцями).
+    belt_crate: readPng(join(ROOT, 'art/belt/crate.png')),
   }
   for (let l = 1; l <= 3; l++) {
     s[`house_${l}`] = house(l)

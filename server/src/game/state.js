@@ -24,6 +24,7 @@ import { getNodes } from "./nodes.js";
 import { getCables } from "./cables.js";
 import { settleEnergy } from "./energy.js";
 import { settleFishHuts } from "./fishhut.js";
+import { beltsView, getBelts, settleBelts } from "./belts.js";
 import { networksOf, powerOf } from "./power.js";
 import { ripenTrees } from "./trees.js";
 import { creditNets } from "./nets.js";
@@ -137,7 +138,10 @@ export async function getState(userId) {
   // Вітряки заряджають акумулятори своїх мереж за час, що минув (energy.js).
   const now = Date.now();
   // Рибальські хати ловлять рибу за енергію своїх мереж (fishhut.js) — після зарядки, з уже свіжим зарядом.
-  const charged = await settleFishHuts(userId, await settleEnergy(userId, deco, cells, now), cells, now);
+  const fished = await settleFishHuts(userId, await settleEnergy(userId, deco, cells, now), cells, now);
+  // Конвеєри везуть рибу з хат і камінь із шахт у скрині (belts.js) — після улову, з уже свіжою рибою.
+  const charged = await settleBelts(userId, fished, now);
+  const belts = await getBelts(userId);
   // Ресурси — після всього іншого: нові не виростуть у будівлях, декорі й на грядках.
   const [nodes, winterNodes, tools, wear] = await Promise.all([
     getNodes(userId, takenBoxes(home, deco, farm), "home", deco),
@@ -178,6 +182,8 @@ export async function getState(userId) {
     power: powerOf(charged, cells, now),
     // Кабелі під землею (малюються лише в режимі електрики): клітинки і мережі, що з них складаються.
     cables: cablesView(cells, charged, now),
+    // Конвеєр: стрічки, лінії від жолобів до скринь і розклад, за яким їде кожна річ (belts.js).
+    belts: beltsView(belts, charged, now),
     farm,
     dogs,
     interior,

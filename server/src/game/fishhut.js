@@ -128,7 +128,7 @@ export async function settleFishHuts(userId, deco, cells, now = Date.now()) {
 }
 
 /**
- * Взяти з хати до max риб (вже під замком). Так збирає гравець, так братиме й конвеєр.
+ * Взяти з хати до max риб (вже під замком). Так збирає гравець; конвеєр (belts.js) бере по одній — у тому ж порядку.
  * @returns {Promise<Record<string, number>>} що взяли
  */
 export async function takeFish(owner, hutId, max = Infinity) {

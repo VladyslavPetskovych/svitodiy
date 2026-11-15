@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { addResourceToInventory, consumeResources, getRedis } from "../bot.js";
 import { pruneCables } from "./cables.js";
+import { BELT_CRATE } from "./belt-def.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { FISH_HUT, hutRefund } from "./fishhut-def.js";
 import { homeOwner } from "./household.js";
@@ -35,7 +36,20 @@ export const DECOR = [
     name: "Шахта",
     emoji: "⛏️",
     cost: { plank: 6, log: 4, stone: 10 },
-    hint: `Сама добуває камінь — по одному що ${MINE.everyMs / 1000} с, вміщає ${MINE.cap}. Тапни, щоб забрати.`,
+    port: MINE.port,
+    hint: `Сама добуває камінь — по одному що ${MINE.everyMs / 1000} с, вміщає ${MINE.cap}. Тапни, щоб забрати, або підведи від жолоба праворуч конвеєр.`,
+  },
+  // Приймальна скриня: сюди конвеєр (belts.js) звозить рибу з хат і камінь із шахт. Тап — забрати все.
+  {
+    id: BELT_CRATE.kind,
+    cat: "belt",
+    name: "Скриня конвеєра",
+    emoji: "📦",
+    cost: { plank: 4, twig: 2 },
+    foot: BELT_CRATE.foot,
+    crate: true,
+    cap: BELT_CRATE.cap,
+    hint: `Кінець конвеєра: стрічка звозить сюди рибу з хати й камінь із шахти. Вміщає ${BELT_CRATE.cap}, тапни — забрати все.`,
   },
   // Поміст: дощатий майданчик на воді. Ступається й на ньому ставлять усе, як на березі.
   // Кладеться у воду чи на пляж біля води, поруч із сушею або іншим помостом (checkPlatform).
@@ -239,6 +253,12 @@ function checkPlatform(def, x, y, decor, selfId = null) {
   if (!touches) throw conflict("not_connected", `${def.emoji} ${def.name}: став поруч із берегом чи іншим помостом.`);
 }
 
+/** Клітинки [cx, cy] під «ніжками» прикраси з декору (лише для тих, у кого в DECOR є foot). */
+export function footCellsOf(d) {
+  const def = BY_ID.get(d.k);
+  return def?.foot ? footCells(def, d.x, d.y) : [];
+}
+
 /** Клітинки «cx,cy» під помостами з декору — там, як і на суші, можна ходити й класти кабель. */
 export function deckCells(decor) {
   const deck = new Set();
@@ -278,6 +298,11 @@ function checkShoreline(def, x, y, decor, selfId = null) {
 }
 const ITEM_ID = /^[a-z0-9]{6,16}$/;
 
+/** Зняти стрічку конвеєра над водою (belts.js імпортує цей модуль — тож беремо її, лише коли треба). */
+async function pruneBelts(userId) {
+  return (await import("./belts.js")).pruneBelts(userId);
+}
+
 /** @returns {Promise<{ id: string, k: string, x: number, y: number, t?: number, sp?: string, c?: number, nc?: number }[]>} */
 export async function getDecor(userId) {
   const h = await getRedis().hGetAll(await key(userId));
@@ -301,6 +326,9 @@ export async function getDecor(userId) {
           ...(v.nc && { nc: v.nc }),
           ...(v.e != null && { e: v.e }),
           ...(v.k === FISH_HUT.kind && { lv: v.lv ?? 1, f: v.f ?? {}, ...(v.fc && { fc: v.fc }) }),
+          // Конвеєр (belts.js): у джерела — розклад стрічки (cv), у скрині — що в ній (f).
+          ...(v.cv && { cv: v.cv }),
+          ...(v.k === BELT_CRATE.kind && { f: v.f ?? {} }),
         });
     } catch {
       /* зіпсований запис — пропускаємо */
@@ -354,7 +382,7 @@ export async function placeDecor(userId, kind, x, y) {
     throw conflict("not_enough", "Не вистачає матеріалів.");
   }
   const id = randomBytes(6).toString("hex");
-  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }), ...(def.id === MINE.kind && { c: Date.now() }), ...(def.hut && { lv: 1, f: {}, fc: Date.now() }) };
+  const item = { k: def.id, ...pos, ...(def.grows === "tree" ? plantedTree() : def.grows ? { t: Date.now() } : {}), ...(def.id === NET.kind && { nc: Date.now() }), ...(def.id === MINE.kind && { c: Date.now() }), ...(def.hut && { lv: 1, f: {}, fc: Date.now() }), ...(def.crate && { f: {} }) };
   await r.hSet(k, id, JSON.stringify(item));
   return { item: { id, ...item } };
 }
@@ -376,7 +404,10 @@ export async function moveDecor(userId, id, x, y) {
   await r.hSet(hk, id, JSON.stringify(item));
   // Переніс помост — кабель, що лишився над водою, знімаємо й повертаємо дріт.
   const wire = BY_ID.get(old.k)?.platform ? await pruneCables(userId) : 0;
-  return { item: { id, ...item }, ...(wire && { refund: { bare_wire: wire } }) };
+  const belt = BY_ID.get(old.k)?.platform ? await pruneBelts(userId) : {};
+  const refund = { ...(wire && { bare_wire: wire }) };
+  for (const [res, n] of Object.entries(belt)) refund[res] = (refund[res] ?? 0) + n;
+  return { item: { id, ...item }, ...(Object.keys(refund).length && { refund }) };
 }
 
 export async function removeDecor(userId, id) {
@@ -403,11 +434,15 @@ export async function removeDecor(userId, id) {
   }
   // Розібрав рибальську хату — вкладене в покращення й риба, що лежала в ній, теж твої.
   if (old.k === FISH_HUT.kind) for (const [res, n] of Object.entries(hutRefund(old))) refund[res] = (refund[res] ?? 0) + n;
+  // Конвеєр: що лежало в скрині й що їхало стрічкою від цього джерела — теж твоє.
+  if (old.k === BELT_CRATE.kind) for (const [res, n] of Object.entries(old.f ?? {})) if (n > 0) refund[res] = (refund[res] ?? 0) + n;
+  for (const [, res] of old.cv?.fl ?? []) refund[res] = (refund[res] ?? 0) + 1;
   for (const [res, n] of Object.entries(refund)) await addResourceToInventory(userId, res, n);
   // Розібрав помост — кабель на ньому теж знімаємо (дріт повертає pruneCables).
   if (def?.platform) {
     const wire = await pruneCables(userId);
     if (wire) refund.bare_wire = (refund.bare_wire ?? 0) + wire;
+    for (const [res, n] of Object.entries(await pruneBelts(userId))) refund[res] = (refund[res] ?? 0) + n;
   }
   return { refund };
 }

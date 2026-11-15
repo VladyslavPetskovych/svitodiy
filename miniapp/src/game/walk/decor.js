@@ -32,7 +32,10 @@ export const DECO_GEOM = {
   workbench: { sprite: 'workbench', fw: 3, fh: 1, act: 'workbench' },
   seed_stand: { sprite: 'seed_stand', fw: 3, fh: 1, act: 'farmshop' },
   // Шахта (server/src/game/mine.js): сама добуває камінь, тап — забрати. Спрайт — scripts/mine-art.py (з еталонного аркуша).
-  mine: { sprite: 'mine', fw: 8, fh: 3, act: 'mine', light: { dy: -38, r: 12 } },
+  // port — жолоб праворуч біля купи руди: звідси конвеєр (walk/belts.js) везе камінь до скрині.
+  mine: { sprite: 'mine', fw: 8, fh: 3, act: 'mine', light: { dy: -38, r: 12 }, port: { dx: 36, dy: -4 } },
+  // Скриня конвеєра (server/src/game/belts.js): кінець стрічки, сюди доїжджає риба й камінь. Спрайт — scripts/belt-art.py.
+  belt_crate: { sprite: 'belt_crate', fw: 3, fh: 2, act: 'crate' },
   // Дощувач поливає грядки довкола (радіус — catalog.farm.sprinklerR), бризкає водою.
   sprinkler: { sprite: 'sprinkler', fw: 1, fh: 1, spray: true },
   // Вітряк: кадри крил гортаються (anim) — тим швидше, чим сильніший вітер (wind: true, game/wind.js),

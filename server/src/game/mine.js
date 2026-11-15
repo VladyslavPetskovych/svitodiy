@@ -16,6 +16,8 @@ export const MINE = {
   res: "stone",
   everyMs: 30_000,
   cap: 20,
+  // Жолоб праворуч біля купи руди (px від якоря): сюди кладуть стрічку конвеєра (belts.js).
+  port: { dx: 36, dy: -4 },
 };
 
 const ID = /^[a-z0-9]{6,16}$/;
@@ -32,6 +34,15 @@ export async function collectMine(userId, id) {
   const { owner } = await homeOwner(userId);
   // Замок на шахту: подвійний тап чи двоє мешканців разом не заберуть одне двічі.
   if (!(await takeCooldown(`${owner}:${id}`, "mine", 600))) throw new GameError(429, "cooldown", "Секунду — ще вантажиш вагонетку.");
+  // Під замком острова, як і конвеєр (belts.js), що теж бере камінь із шахти: удвох не візьмуть один камінь двічі.
+  // energy.js імпортує decor.js, а той — цей модуль, тож беремо замок, лише коли треба.
+  const { withEnergyLock } = await import("./energy.js");
+  const res = await withEnergyLock(owner, () => takeMine(userId, owner, id), { wait: true });
+  if (!res) throw new GameError(429, "cooldown", "Секунду — ще вантажиш вагонетку.");
+  return res;
+}
+
+async function takeMine(userId, owner, id) {
   const r = getRedis();
   const raw = await r.hGet(decoKey(owner), id);
   let item = null;
@@ -54,5 +65,5 @@ export async function collectMine(userId, id) {
 
 /** Для каталогу. */
 export function mineCatalog() {
-  return { kind: MINE.kind, res: MINE.res, everySec: MINE.everyMs / 1000, cap: MINE.cap };
+  return { kind: MINE.kind, res: MINE.res, everySec: MINE.everyMs / 1000, cap: MINE.cap, port: MINE.port };
 }

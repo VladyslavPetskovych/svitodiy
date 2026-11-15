@@ -27,6 +27,7 @@ import { rubberCatalog } from "./rubber.js";
 import { mineCatalog } from "./mine.js";
 import { netsCatalog } from "./nets.js";
 import { fishHutCatalog } from "./fishhut.js";
+import { beltsCatalog } from "./belts.js";
 
 /**
  * Налаштування, яких у боті немає — лише для Mini App.
@@ -156,6 +157,8 @@ export function buildCatalog() {
     nets: netsCatalog(),
     // Рибальська хата: рівні (комора, як часто ловить, ціна покращення), Вт·год за рибу, місце для конвеєра.
     fishHut: fishHutCatalog(),
+    // Конвеєр: ціна клітинки, як часто й як швидко їде, місткість скрині, жолоби джерел.
+    belts: beltsCatalog(),
     craft: craftCatalog(),
     // Електрика: вітер (miniapp/src/game/wind.js — та сама формула) і рецепти електропечі.
     wind: WIND,

@@ -361,7 +361,25 @@ export function fishCutterArt({ Img, base }) {
   }
 
   /** state: idle — порожньо; up / down — риба на пласі, тесак угорі / внизу. */
-  function cutter(state) {
+  /** Електромотор тесака й транспортера над жолобом: залізний кожух, мідна обмотка, лампочка (зелена — є струм). */
+  function cutterMotor(img, x, y, on) {
+    img.rect(x, y, 10, 7, IRON.mid)
+    img.hline(x, x + 9, y, IRON.hi)
+    img.vline(x, y, y + 6, IRON.hi)
+    img.hline(x, x + 9, y + 6, IRON.lo)
+    img.vline(x + 9, y + 1, y + 6, IRON.lo)
+    for (let i = x + 2; i < x + 8; i += 2) img.vline(i, y + 1, y + 2, IRON.lo)
+    img.rect(x + 2, y + 3, 5, 2, COPPER.lo)
+    for (let i = x + 2; i < x + 7; i++) img.set(i, y + 3 + (i % 2), COPPER.hi)
+    img.rect(x + 7, y + 1, 2, 2, on ? '#7cf07a' : '#5a2416')
+    if (on) img.set(x + 7, y + 1, '#d8ffd0')
+    // Пас униз — до валика жолоба; кабель ліворуч у землю.
+    img.vline(x + 5, y + 7, y + 9, '#3a3a3a')
+    img.vline(x + 1, y + 7, y + 9, '#2b2b2b')
+  }
+
+  /** state: idle / up / down (тесак); on — є струм (лампа мотора). */
+  function cutter(state, on = state !== 'idle') {
     const img = new Img(CUTTER_W, CUTTER_H)
     const cx = CUTTER_W / 2
     img.ellipse(cx, CUTTER_H - 3, 22, 3.5, '#0b2010', 0.25)
@@ -378,12 +396,14 @@ export function fishCutterArt({ Img, base }) {
     pail(img, cx - 9, CUTTER_H - 8)
     // Жолоб: отвір на клітинці port (dx 20 від якоря, нижній ряд).
     chute(img, cx + 15, CUTTER_H - 9)
+    cutterMotor(img, cx + 15, CUTTER_H - 18, on)
     img.outline(K, 0.9)
     return img
   }
 
   return {
-    fish_cutter: cutter('idle'),
+    fish_cutter: cutter('idle', false),
+    fish_cutter_on: cutter('idle', true),
     fish_cutter_on_0: cutter('up'),
     fish_cutter_on_1: cutter('down'),
   }

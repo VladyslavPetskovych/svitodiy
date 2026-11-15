@@ -69,9 +69,10 @@ export function lineAt(line, T, { gapMs, speed }) {
  * Рибообробня (server/src/game/cutter-def.js → cutUntil) на мить T: що на столі й коли ніж закінчив кожну рибу.
  * Риба — та, що вже лежала (d.in), і та, що за розкладом доїде стрічками (lines з sink === d.id).
  * Що саме було всередині, знає лише сервер (кидок кубика) — тож done лише каже, коли варто спитати новий стан.
+ * maxCuts — на скільки риб вистачить струму (0 — нема струму чи стрічки з жолоба: ніж стоїть).
  * @returns {{ onTable: number, done: number[] }}
  */
-export function cutterAt(d, lines, T, cfg, cutMs) {
+export function cutterAt(d, lines, T, cfg, cutMs, maxCuts = Infinity) {
   const arrive = (d.in ?? []).map(([t]) => t)
   for (const line of lines) {
     if (line.sink !== d.id) continue
@@ -84,6 +85,7 @@ export function cutterAt(d, lines, T, cfg, cutMs) {
   const done = []
   let free = d.cb ?? 0
   for (const t of came) {
+    if (done.length >= maxCuts) break
     const end = Math.max(t, free) + cutMs
     if (end > T) break
     done.push(end)

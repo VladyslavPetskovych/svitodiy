@@ -18,7 +18,7 @@ import { ackReset, collectHome, demolishBuilding, moveBuilding, placeBuilding, u
 import { gatherNode, stealNode } from "./game/nodes.js";
 import { collectRubber } from "./game/rubber.js";
 import { collectMine } from "./game/mine.js";
-import { collectCrate, collectCutter, layBelts, removeBelts } from "./game/belts.js";
+import { collectCrate, layBelts, removeBelts } from "./game/belts.js";
 import { claimGather, explore, startGather } from "./game/islands.js";
 import {
   answerQuiz,
@@ -184,7 +184,6 @@ export function buildApiRouter(botToken) {
   api.post("/home/belts", handler(island((req) => layBelts(uid(req), body(req).cells))));
   api.delete("/home/belts", handler(island((req) => removeBelts(uid(req), body(req).cells))));
   api.post("/home/belt-crate/:id/collect", handler(island((req) => collectCrate(uid(req), req.params.id))));
-  api.post("/home/fish-cutter/:id/collect", handler(island((req) => collectCutter(uid(req), req.params.id))));
   api.post("/craft/tool", handler((req) => craftTool(uid(req), body(req).tool)));
   api.post("/craft/recipe", handler((req) => craftRecipe(uid(req), body(req).recipe, body(req).count)));
 

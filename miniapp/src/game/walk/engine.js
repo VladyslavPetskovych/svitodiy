@@ -618,7 +618,7 @@ export function createWalk(canvas, assets, cb) {
   /** Режими, де палець тягне камеру, а тап вибирає клітинку (кабель чи стрічку). */
   const lining = () => mode === 'power' || mode === 'belt'
   /** Прилади, що під'єднуються кабелем: вітряк дає струм, акумулятор запасає, піч витрачає. */
-  const ELECTRIC = new Set(['windmill', 'solar', 'battery', 'furnace', 'e_bench', 'fish_hut'])
+  const ELECTRIC = new Set(['windmill', 'solar', 'battery', 'furnace', 'e_bench', 'fish_hut', 'fish_cutter'])
   const NO_CABLES = { cells: [], networks: [], wired: [] }
   /** Кабелі острова з сервера: клітинки, мережі, під'єднані прикраси (server/src/game/state.js → cables). */
   let cables = NO_CABLES
@@ -1648,7 +1648,7 @@ export function createWalk(canvas, assets, cb) {
         continue
       }
       if (GENERATORS.has(d.kind)) deviceRing(cx, cy, genWatts(d.kind, d.uid, Date.now()) > 0 ? '#ffe066' : '#c9b8a8', 0.95)
-      else if (d.kind === 'furnace' || d.kind === 'e_bench' || d.kind === 'fish_hut') deviceRing(cx, cy, net.stored > 0 ? '#ff9a3c' : '#c9b8a8', 0.95)
+      else if (d.kind === 'furnace' || d.kind === 'e_bench' || d.kind === 'fish_hut' || d.kind === 'fish_cutter') deviceRing(cx, cy, net.stored > 0 ? '#ff9a3c' : '#c9b8a8', 0.95)
       else if (d.kind === 'battery') {
         deviceRing(cx, cy, '#5a6b5e', 0.9)
         if (d.charge > 0) {

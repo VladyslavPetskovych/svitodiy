@@ -15,7 +15,8 @@ import { windEnergy, windWatts } from "./wind.js";
  * або сусідня (по стороні, не по діагоналі) має кабель. Мережа — зв'язна група кабельних клітинок.
  * Генератор дає струм лише своїй мережі: вітряк без дроту не рахується.
  */
-const POWER = new Map(DECOR.filter((d) => d.cat === "power").map((d) => [d.id, d]));
+// Прилади мережі: розділ «Електрика» і ще ті, що стоять в іншому розділі, але живляться струмом (electric — рибообробня).
+const POWER = new Map(DECOR.filter((d) => d.cat === "power" || d.electric).map((d) => [d.id, d]));
 const SIDE_STEPS = [
   [1, 0],
   [-1, 0],

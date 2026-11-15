@@ -40,12 +40,13 @@ export const DECO_GEOM = {
   belt_crate: { sprite: 'belt_crate', fw: 3, fh: 2, act: 'crate', sink: true },
   // Рибообробня (server/src/game/cutter-def.js): менша хата з текстури рибальської (scripts/fishhut-art.mjs).
   // Приймач (стрічка з рибою заїжджає в будь-яку її клітинку) і джерело: нарізане йде з жолоба праворуч (port).
-  // Поки на столі риба (d.g 1) — тесак рубає: кадри fish_cutter_on_0/1.
+  // Електрична (кабель до мережі, як хата): d.g 0 — без струму (лампа мотора темна), 1 — під струмом,
+  // 2 — рубає (риба на столі й є стрічка з жолоба): кадри fish_cutter_on_0/1.
   fish_cutter: {
     sprite: 'fish_cutter',
     icon: 'fish_cutter_on_0',
-    stages: ['fish_cutter', 'fish_cutter_on_0'],
-    anim: (d) => (d.g ? { frames: ['fish_cutter_on_0', 'fish_cutter_on_1'], fps: 2.5 } : null),
+    stages: ['fish_cutter', 'fish_cutter_on', 'fish_cutter_on_0'],
+    anim: (d) => (d.g === 2 ? { frames: ['fish_cutter_on_0', 'fish_cutter_on_1'], fps: 2.5 } : null),
     fw: 4,
     fh: 2,
     act: 'cutter',

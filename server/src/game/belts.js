@@ -3,12 +3,13 @@ import { CABLE_CELL, onLand } from "./cables.js";
 import { BELT, BELT_CRATE } from "./belt-def.js";
 import { FISH_CUTTER, cutUntil, isFish } from "./cutter-def.js";
 import { deckCells, footCellsOf, getDecor } from "./decor.js";
-import { withEnergyLock } from "./energy.js";
+import { drain, settleLocked, withEnergyLock, writeCharge } from "./energy.js";
 import { GameError, badRequest, conflict } from "./errors.js";
 import { FISH_HUT } from "./fishhut-def.js";
 import { onIsland } from "./island-bounds.js";
 import { homeOwner } from "./household.js";
-import { beltsKey, decoKey, takeCooldown } from "./keys.js";
+import { beltsKey, cablesKey, decoKey, takeCooldown } from "./keys.js";
+import { batteryCap, networksOf } from "./power.js";
 import { MINE, mineReady } from "./mine.js";
 
 /**
@@ -285,17 +286,54 @@ export async function beltsLocked(owner, deco, now) {
 
   const isCutter = (id) => rec.get(id)?.k === FISH_CUTTER.kind;
   for (const id of ids) if (!isCutter(id)) run(id);
-  for (const id of ids) if (isCutter(id)) rec.set(id, cutUntil(rec.get(id), now));
+  const charge = await cutLocked(owner, deco, ids.filter(isCutter), rec, lineOf, now);
   for (const id of ids) if (isCutter(id)) run(id);
 
   const changed = new Set(ids.filter((id) => rec.has(id) && JSON.stringify(rec.get(id)) !== orig.get(id)));
   // Прикрасу могли саме розібрати (removeDecor) — не воскрешаємо її запис.
   for (const id of changed) if (await r.hExists(key, id)) await r.hSet(key, id, JSON.stringify(rec.get(id)));
   return deco.map((d) => {
+    if (charge.has(d.id)) return { ...d, e: charge.get(d.id) };
     if (!changed.has(d.id)) return d;
     const v = rec.get(d.id);
     return { ...d, ...Object.fromEntries(BELT_FIELDS.filter((f) => v[f] != null).map((f) => [f, v[f]])) };
   });
+}
+
+/**
+ * Крок 2: рибообробні ріжуть (вже під замком). Кожна — лише коли під'єднана кабелем до мережі з енергією
+ * (FISH_CUTTER.energy Вт·год за рибу з акумуляторів) і з її жолоба йде стрічка до скрині: інакше ніж стоїть.
+ * Пише новий заряд акумуляторів; повертає його (id → Вт·год) — для стану.
+ */
+async function cutLocked(owner, deco, cutters, rec, lineOf, now) {
+  if (!cutters.length) return new Map();
+  const cells = (await getRedis().hKeys(cablesKey(owner))).map((f) => f.split(",").map(Number));
+  // Спершу зарахувати, що генератори дали досі (як перед піччю чи хатою).
+  const fresh = await settleLocked(owner, deco, cells, now);
+  const { networks } = networksOf(cells, fresh, now);
+  const settled = new Map(fresh.filter((d) => batteryCap(d.k) > 0).map((d) => [d.id, Math.min(batteryCap(d.k), d.e ?? 0)]));
+  const charge = new Map(settled);
+  for (const id of cutters) {
+    const line = lineOf.get(id);
+    const dest = line?.sink ? rec.get(line.sink) : null;
+    // Нарізане падає лише на стрічку, що доходить до скрині (не в іншу рибообробню — та бере тільки рибу).
+    const out = !!dest && !!SINKS[dest.k] && dest.k !== FISH_CUTTER.kind;
+    const net = networks.find((n) => n.devices.includes(id));
+    const bats = net ? net.devices.filter((b) => charge.has(b)) : [];
+    const have = out ? bats.reduce((s, b) => s + charge.get(b), 0) : 0;
+    const { item, used } = cutUntil(rec.get(id), now, have);
+    rec.set(id, item);
+    if (used > 0)
+      for (const [b, e] of drain(
+        bats.map((b) => ({ id: b, e: charge.get(b) })),
+        used
+      ))
+        charge.set(b, e);
+  }
+  // Пишемо те, що витратили (зарядку settleLocked уже записав); повертаємо все, що змінилось проти deco.
+  await writeCharge(owner, new Map([...charge].filter(([b, e]) => e !== settled.get(b))));
+  const before = new Map(deco.map((d) => [d.id, d.e]));
+  return new Map([...charge].filter(([b, e]) => e !== before.get(b)));
 }
 
 /** Прокрутити стрічки при читанні стану. Якщо зараз рахує інший запит — як є. */
@@ -434,30 +472,6 @@ export async function collectCrate(userId, id) {
   }, id);
 }
 
-/** Забрати з рибообробні все нарізане (коли з її жолоба не йде стрічка — чи просто швидше). */
-export async function collectCutter(userId, id) {
-  if (typeof id !== "string" || !/^[a-z0-9]{6,16}$/.test(id)) throw badRequest("Невідома рибообробня.");
-  return withBelts(userId, async (owner) => {
-    const r = getRedis();
-    const key = decoKey(owner);
-    const item = parse(await r.hGet(key, id));
-    if (!item || item.k !== FISH_CUTTER.kind) throw new GameError(404, "not_found", "Тут немає рибообробні.");
-    const now = Date.now();
-    /** @type {Record<string, number>} */
-    const got = {};
-    const left = [];
-    for (const o of item.o ?? []) {
-      if (o[0] <= now && typeof o[1] === "string") got[o[1]] = (got[o[1]] ?? 0) + 1;
-      else left.push(o);
-    }
-    if (!Object.keys(got).length)
-      throw conflict("empty", item.in?.length ? "🔪 Ще ріжемо — за мить буде." : "🔪 Порожньо — підведи стрічку з рибою від хати.");
-    await r.hSet(key, id, JSON.stringify({ ...item, o: left }));
-    for (const [res, n] of Object.entries(got)) await addResourceToInventory(userId, res, n);
-    return { got };
-  }, id);
-}
-
 /** Для каталогу. */
 export function beltsCatalog() {
   return {
@@ -472,6 +486,7 @@ export function beltsCatalog() {
     cutter: {
       kind: FISH_CUTTER.kind,
       cutSec: FISH_CUTTER.cutMs / 1000,
+      energy: FISH_CUTTER.energy,
       inCap: FISH_CUTTER.inCap,
       outCap: FISH_CUTTER.outCap,
       port: FISH_CUTTER.port,
